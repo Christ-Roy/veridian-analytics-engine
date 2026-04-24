@@ -4,6 +4,7 @@ import { ClickHouseService } from '../database/clickhouse.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { Subscription } from './entities/subscription.entity';
+import { parseClickHouseDateTime } from '../common/utils/datetime.util';
 
 describe('SubscriptionsService', () => {
   let service: SubscriptionsService;
@@ -99,9 +100,9 @@ describe('SubscriptionsService', () => {
 
       expect(result.next_send_at).toBeDefined();
       // next_send_at should be in the future
-      expect(new Date(result.next_send_at!).getTime()).toBeGreaterThan(
-        Date.now(),
-      );
+      expect(
+        parseClickHouseDateTime(result.next_send_at!).getTime(),
+      ).toBeGreaterThan(Date.now());
     });
 
     it('should calculate next_send_at for weekly frequency', async () => {
@@ -272,9 +273,9 @@ describe('SubscriptionsService', () => {
       const result = await service.resume('sub-123', 'user-123');
 
       expect(result.next_send_at).toBeDefined();
-      expect(new Date(result.next_send_at!).getTime()).toBeGreaterThan(
-        Date.now(),
-      );
+      expect(
+        parseClickHouseDateTime(result.next_send_at!).getTime(),
+      ).toBeGreaterThan(Date.now());
     });
   });
 
