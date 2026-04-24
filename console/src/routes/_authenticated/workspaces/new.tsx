@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react'
 import { createFileRoute, useNavigate, redirect } from '@tanstack/react-router'
-import { Form, Input, Button, message, Avatar } from 'antd'
+import { App, Form, Input, Button, Avatar } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../../lib/api'
@@ -22,6 +22,7 @@ export const Route = createFileRoute('/_authenticated/workspaces/new')({
 })
 
 function NewWorkspaceForm() {
+  const { message } = App.useApp()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [form] = Form.useForm()

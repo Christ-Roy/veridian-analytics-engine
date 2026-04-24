@@ -1,5 +1,5 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { Form, Input, Button, message } from 'antd'
+import { App, Form, Input, Button } from 'antd'
 
 export const Route = createFileRoute('/setup')({
   beforeLoad: async () => {
@@ -30,6 +30,7 @@ interface SetupFormValues {
 }
 
 function SetupPage() {
+  const { message } = App.useApp()
   const [form] = Form.useForm<SetupFormValues>()
 
   const onFinish = async (values: SetupFormValues) => {

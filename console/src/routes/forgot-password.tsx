@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { createFileRoute } from '@tanstack/react-router'
-import { Form, Input, Button, message } from 'antd'
+import { App, Form, Input, Button } from 'antd'
 import { api } from '../lib/api'
 
 export const Route = createFileRoute('/forgot-password')({
@@ -9,6 +9,7 @@ export const Route = createFileRoute('/forgot-password')({
 })
 
 function ForgotPasswordPage() {
+  const { message } = App.useApp()
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Form, Input, Button, message, Table, Tag, Popconfirm, Tooltip, Empty } from 'antd'
+import { App, Form, Input, Button, Table, Tag, Popconfirm, Tooltip, Empty } from 'antd'
 import { DeleteOutlined, EditOutlined, PauseCircleOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -32,6 +32,7 @@ const menuItems: { key: AccountSection; label: string }[] = [
 ]
 
 function AccountPage() {
+  const { message } = App.useApp()
   const { workspaceId } = Route.useParams()
   const { section } = Route.useSearch()
   const navigate = useNavigate()

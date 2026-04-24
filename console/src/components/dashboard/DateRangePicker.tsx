@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect } from 'react'
-import { Dropdown, Button, Divider, Modal, DatePicker, message } from 'antd'
+import { App, Dropdown, Button, Divider, Modal, DatePicker } from 'antd'
 import { DownOutlined, CheckOutlined } from '@ant-design/icons'
 import dayjs, { Dayjs } from 'dayjs'
 import { PRESET_GROUPS, PERIOD_LABELS } from '../../types/dashboard'
@@ -51,6 +51,7 @@ export function DateRangePicker({
   onCustomRangeChange,
   size,
 }: DateRangePickerProps) {
+  const { message } = App.useApp()
   const [open, setOpen] = useState(false)
   const [customModalOpen, setCustomModalOpen] = useState(false)
   const [pendingRange, setPendingRange] = useState<[Dayjs, Dayjs] | null>(null)
@@ -80,7 +81,7 @@ export function DateRangePicker({
       setCustomModalOpen(false)
     }, 500)
     return () => clearTimeout(timer)
-  }, [pendingRange, onCustomRangeChange])
+  }, [pendingRange, onCustomRangeChange, message])
 
   const handleSelect = (preset: DatePreset) => {
     if (preset === 'custom') {
@@ -141,7 +142,7 @@ export function DateRangePicker({
         open={open}
         onOpenChange={setOpen}
         trigger={['click']}
-        dropdownRender={() => dropdownContent}
+        popupRender={() => dropdownContent}
         placement="bottomLeft"
       >
         <Button variant="filled" color="default" size={size} className="flex items-center gap-2">

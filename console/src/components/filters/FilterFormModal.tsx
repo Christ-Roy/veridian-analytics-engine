@@ -1,4 +1,4 @@
-import { Drawer, Form, Input, InputNumber, Select, Switch, Button, Space, message } from 'antd'
+import { App, Drawer, Form, Input, InputNumber, Select, Switch, Button, Space } from 'antd'
 import { ExperimentOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
@@ -40,6 +40,7 @@ export function FilterFormModal({
   open,
   onClose,
 }: FilterFormModalProps) {
+  const { message } = App.useApp()
   const [form] = Form.useForm<FormValues>()
   const queryClient = useQueryClient()
   const isEditing = !!filter
@@ -152,7 +153,7 @@ export function FilterFormModal({
         title={isEditing ? 'Edit Filter' : 'Create Filter'}
         open={open}
         onClose={onClose}
-        width={800}
+        size={800}
         placement="right"
         destroyOnClose
         styles={{ wrapper: { maxWidth: '100%' } }}

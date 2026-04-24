@@ -1,14 +1,19 @@
 import { useState, useMemo } from 'react'
-import { Form, Input, Select, Switch, Button, message, Popconfirm, Tooltip } from 'antd'
+import { App, Form, Input, AutoComplete, Switch, Button, Popconfirm, Tooltip } from 'antd'
 import { EyeOutlined, EyeInvisibleOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import type { Workspace } from '../../types/workspace'
-import { MODEL_PRICING } from './model-options'
 
 interface IntegrationsSettingsProps {
   workspace: Workspace
 }
+
+const MODEL_SUGGESTIONS = [
+  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7 ($5 / $25 per MTok)' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 ($3 / $15 per MTok)' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 ($1 / $5 per MTok)' },
+]
 
 // Mask an API key for display (show prefix and last 4 chars)
 function maskApiKey(key: string): string {
@@ -22,6 +27,7 @@ function maskApiKey(key: string): string {
 }
 
 export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [showApiKey, setShowApiKey] = useState(false)
 
@@ -42,7 +48,7 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
 
   // Compute initial form values
   const initialValues = useMemo(() => ({
-    model: anthropicIntegration?.settings?.model ?? 'claude-haiku-4-5-20251001',
+    model: anthropicIntegration?.settings?.model ?? 'claude-haiku-4-5',
     api_key: '', // Always start empty, user must enter new key to change
   }), [anthropicIntegration?.settings?.model])
 
@@ -68,7 +74,7 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
       updated_at: new Date().toISOString(),
       settings: {
         api_key_encrypted: '',
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5',
         max_tokens: 4096,
         temperature: 0.7,
       },
@@ -99,14 +105,6 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
       settings: { ...workspace.settings, integrations: [...otherIntegrations, updatedIntegration] },
     })
   }
-
-  // Build model options from MODEL_PRICING
-  const modelOptions = Object.entries(MODEL_PRICING)
-    .filter(([, info]) => info.category === 'current')
-    .map(([id, info]) => ({
-      value: id,
-      label: `${info.display} ($${info.input}/$${info.output} per MTok)`,
-    }))
 
   const handleToggle = (checked: boolean) => {
     // Don't allow enabling without an API key
@@ -173,8 +171,18 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
           />
         </Form.Item>
 
-        <Form.Item name="model" label="Model">
-          <Select options={modelOptions} />
+        <Form.Item
+          name="model"
+          label="Model"
+          extra="Pick a suggestion or type any Anthropic model ID"
+        >
+          <AutoComplete
+            options={MODEL_SUGGESTIONS}
+            placeholder="claude-sonnet-4-6"
+            filterOption={(input, option) =>
+              (option?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+          />
         </Form.Item>
 
         <Form.Item className="mb-0">

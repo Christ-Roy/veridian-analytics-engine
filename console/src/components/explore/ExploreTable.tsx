@@ -501,7 +501,7 @@ export function ExploreTable({
           }}
           locale={{
             emptyText: loading ? (
-              <Spin tip="Loading..." />
+              <Spin />
             ) : (
               <Empty description="No data found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )

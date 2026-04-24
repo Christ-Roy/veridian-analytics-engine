@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Modal, Button, Alert, Descriptions, message } from 'antd'
+import { App, Modal, Button, Alert, Descriptions } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { api } from '../../lib/api'
@@ -84,6 +84,7 @@ export function CSVExportModal({
   showComparison,
   customDimensionLabels,
 }: CSVExportModalProps) {
+  const { message } = App.useApp()
   const [isExporting, setIsExporting] = useState(false)
 
   const handleExport = async () => {

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
-import { Form, Input, InputNumber, Button, Select, message, Table, Tag, Modal, Avatar, Spin, Tooltip, Switch } from 'antd'
+import { App, Form, Input, InputNumber, Button, Select, Table, Tag, Modal, Avatar, Spin, Tooltip, Switch } from 'antd'
 import { SearchOutlined, EditOutlined, LoadingOutlined, PlusOutlined, InfoCircleOutlined } from '@ant-design/icons'
 import { api } from '../../../../lib/api'
 import { workspaceQueryOptions } from '../../../../lib/queries'
@@ -70,6 +70,7 @@ const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] 
 ]
 
 function Settings() {
+  const { message } = App.useApp()
   const { workspaceId } = Route.useParams()
   const { section } = Route.useSearch()
   const navigate = useNavigate()

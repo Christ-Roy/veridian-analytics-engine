@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { fetchEventSource } from '@microsoft/fetch-event-source'
 import { api } from '../lib/api'
-import type { ExploreState, ExploreConfigOutput, Message, AssistantStatus, ConversationUsage, TimelineBlock, ThinkingBlock } from '../types/assistant'
+import type { ExploreState, ExploreConfigOutput, Message, AssistantStatus, ConversationUsage, TimelineBlock, ThinkingBlock, ReasoningBlock } from '../types/assistant'
 
 const MAX_HISTORY = 20
 
@@ -62,6 +62,7 @@ export function useAssistant(workspaceId: string) {
     // Timeline state for interleaved rendering
     let timeline: TimelineBlock[] = []
     let currentThinkingBlock: ThinkingBlock | null = null
+    let currentReasoningBlock: ReasoningBlock | null = null
     let blockIdCounter = 0
 
     // Store callback in ref to avoid stale closure
@@ -96,6 +97,9 @@ export function useAssistant(workspaceId: string) {
 
             switch (event.event) {
               case 'thinking':
+                // A text delta closes any open reasoning block so the next
+                // reasoning burst starts fresh.
+                currentReasoningBlock = null
                 // Append to current thinking block or create new one
                 if (currentThinkingBlock) {
                   currentThinkingBlock.text += data.text
@@ -114,9 +118,31 @@ export function useAssistant(workspaceId: string) {
                 ))
                 break
 
-              case 'tool_call':
-                // End current thinking block when a tool is called
+              case 'reasoning':
+                // Reasoning closes any open text block so text after a tool
+                // call starts a new ThinkingBlock (same pattern as thinking).
                 currentThinkingBlock = null
+                if (currentReasoningBlock) {
+                  currentReasoningBlock.text += data.text
+                } else {
+                  currentReasoningBlock = {
+                    type: 'reasoning',
+                    id: `reasoning-${Date.now()}-${blockIdCounter++}`,
+                    text: data.text,
+                  }
+                  timeline.push(currentReasoningBlock)
+                }
+                setMessages(prev => prev.map(m =>
+                  m.id === assistantMsgId
+                    ? { ...m, timeline: [...timeline], status: 'streaming' }
+                    : m
+                ))
+                break
+
+              case 'tool_call':
+                // End current thinking/reasoning block when a tool is called
+                currentThinkingBlock = null
+                currentReasoningBlock = null
                 timeline.push({
                   type: 'tool_call',
                   id: data.id,

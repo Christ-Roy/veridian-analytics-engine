@@ -23,6 +23,7 @@ export interface AssistantJob {
 
   // Stream state for reconnection
   accumulated_text: string;
+  accumulated_reasoning: string;
   tool_calls: Array<{
     name: string;
     input: unknown;
@@ -62,6 +63,7 @@ export function createAssistantJob(
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     accumulated_text: '',
+    accumulated_reasoning: '',
     tool_calls: [],
   };
 }

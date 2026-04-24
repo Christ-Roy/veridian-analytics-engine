@@ -2,6 +2,7 @@ import {
   formatSSE,
   createSSEEvent,
   thinkingEvent,
+  reasoningEvent,
   toolCallEvent,
   toolResultEvent,
   configEvent,
@@ -57,6 +58,23 @@ describe('sse-formatter', () => {
 
       expect(event.type).toBe('thinking');
       expect(event.data).toEqual({ text: 'Processing your request...' });
+    });
+  });
+
+  describe('reasoningEvent', () => {
+    it('creates reasoning event with text', () => {
+      const event = reasoningEvent('Considering which tool to call');
+
+      expect(event.type).toBe('reasoning');
+      expect(event.data).toEqual({ text: 'Considering which tool to call' });
+    });
+
+    it('formats to SSE with a reasoning event line', () => {
+      const event = reasoningEvent('abc');
+
+      expect(formatSSE(event)).toBe(
+        'event: reasoning\ndata: {"text":"abc"}\n\n',
+      );
     });
   });
 

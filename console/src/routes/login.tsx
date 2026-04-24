@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate, redirect, Link } from '@tanstack/react-router'
-import { Form, Input, Button, message } from 'antd'
+import { App, Form, Input, Button } from 'antd'
 import { useAuth } from '../lib/useAuth'
 import { useEffect, useRef } from 'react'
 
@@ -24,6 +24,7 @@ export const Route = createFileRoute('/login')({
 })
 
 function LoginPage() {
+  const { message } = App.useApp()
   const { login } = useAuth()
   const navigate = useNavigate()
   const [form] = Form.useForm()

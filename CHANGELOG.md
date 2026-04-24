@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [6.1.0] - 2026-04-24
+
+- Upgrade AI assistant models to Claude Opus 4.7, Sonnet 4.6, and Haiku 4.5
+- Stream interleaved reasoning (adaptive thinking) from Opus/Sonnet in the assistant UI
+- Env kill-switch `ASSISTANT_THINKING_DISABLED=1` to disable interleaved thinking
+
 ## [6.0.0] - 2026-01-25
 
 - Add `user_id` dimension to SDK and database tables (auto-upgrade)

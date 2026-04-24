@@ -12,7 +12,7 @@ export function PreviewDrawer({ open, onClose, html, loading }: PreviewDrawerPro
     <Drawer
       title="Email Preview"
       placement="right"
-      width={700}
+      size={700}
       open={open}
       onClose={onClose}
     >

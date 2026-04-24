@@ -58,4 +58,4 @@ export const DEFAULT_ANTHROPIC_LIMITS: IntegrationLimits = {
 /**
  * Default Anthropic model.
  */
-export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-6';

@@ -17,6 +17,7 @@ jest.mock('../common/crypto', () => ({
 // Create mock stream that emits events
 const createMockStream = (options: {
   textChunks?: string[];
+  thinkingChunks?: string[];
   stopReason?: 'end_turn' | 'tool_use';
   toolUseBlocks?: Array<{ id: string; name: string; input: unknown }>;
   usage?: { input_tokens: number; output_tokens: number };
@@ -28,6 +29,12 @@ const createMockStream = (options: {
       return stream;
     },
     finalMessage: jest.fn().mockImplementation(async () => {
+      // Emit thinking events before text events (matches API ordering)
+      if (options.thinkingChunks) {
+        for (const chunk of options.thinkingChunks) {
+          emitter.emit('thinking', chunk);
+        }
+      }
       // Emit text events
       if (options.textChunks) {
         for (const chunk of options.textChunks) {
@@ -688,6 +695,201 @@ describe('AssistantService', () => {
       const job = service.getJob(job_id);
       expect(job?.status).toBe('error');
       expect(job?.error).toContain('Fatal error');
+    });
+  });
+
+  describe('interleaved thinking', () => {
+    let mockRes: {
+      write: jest.Mock;
+      end: jest.Mock;
+    };
+
+    const mockWorkspaceOpus: Workspace = {
+      ...mockWorkspace,
+      id: 'ws-opus',
+      settings: {
+        ...mockWorkspace.settings,
+        integrations: [
+          {
+            ...mockIntegration,
+            settings: {
+              ...mockIntegration.settings,
+              model: 'claude-opus-4-7',
+            },
+          },
+        ],
+      },
+    };
+
+    beforeEach(() => {
+      mockRes = {
+        write: jest.fn(),
+        end: jest.fn(),
+      };
+      mockStream.mockReset();
+      (crypto.decryptApiKey as jest.Mock).mockReturnValue('decrypted-api-key');
+      delete process.env.ASSISTANT_THINKING_DISABLED;
+    });
+
+    afterEach(() => {
+      delete process.env.ASSISTANT_THINKING_DISABLED;
+    });
+
+    it('passes thinking config for supported models with summarized display', async () => {
+      workspacesService.get.mockResolvedValue(mockWorkspaceOpus);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          textChunks: ['ok'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-opus',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      expect(mockStream).toHaveBeenCalledWith(
+        expect.objectContaining({
+          thinking: { type: 'adaptive', display: 'summarized' },
+        }),
+      );
+    });
+
+    it('omits thinking config for unsupported models', async () => {
+      // mockWorkspace uses 'claude-sonnet-4-20250514' — not in the allowlist.
+      workspacesService.get.mockResolvedValue(mockWorkspace);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          textChunks: ['ok'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-1',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      const call = mockStream.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(call).toBeDefined();
+      expect(call).not.toHaveProperty('thinking');
+    });
+
+    it('omits thinking config for Haiku 4.5 (API rejects adaptive thinking)', async () => {
+      const mockWorkspaceHaiku: Workspace = {
+        ...mockWorkspace,
+        id: 'ws-haiku',
+        settings: {
+          ...mockWorkspace.settings,
+          integrations: [
+            {
+              ...mockIntegration,
+              settings: {
+                ...mockIntegration.settings,
+                model: 'claude-haiku-4-5',
+              },
+            },
+          ],
+        },
+      };
+
+      workspacesService.get.mockResolvedValue(mockWorkspaceHaiku);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          textChunks: ['ok'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-haiku',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      const call = mockStream.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(call).toBeDefined();
+      expect(call).not.toHaveProperty('thinking');
+    });
+
+    it('respects ASSISTANT_THINKING_DISABLED env kill-switch', async () => {
+      process.env.ASSISTANT_THINKING_DISABLED = '1';
+      workspacesService.get.mockResolvedValue(mockWorkspaceOpus);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          textChunks: ['ok'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-opus',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      const call = mockStream.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(call).toBeDefined();
+      expect(call).not.toHaveProperty('thinking');
+    });
+
+    it('emits reasoning SSE events when thinking deltas arrive', async () => {
+      workspacesService.get.mockResolvedValue(mockWorkspaceOpus);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          thinkingChunks: ['Thinking about', ' the problem'],
+          textChunks: ['Answer'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-opus',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('event: reasoning'),
+      );
+      expect(mockRes.write).toHaveBeenCalledWith(
+        expect.stringContaining('Thinking about'),
+      );
+    });
+
+    it('buffers reasoning into accumulated_reasoning on the job', async () => {
+      workspacesService.get.mockResolvedValue(mockWorkspaceOpus);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockReturnValue(
+        createMockStream({
+          thinkingChunks: ['abc', 'def'],
+          textChunks: ['ok'],
+          stopReason: 'end_turn',
+        }),
+      );
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-opus',
+        prompt: 'Test',
+      });
+
+      await service.streamJob(job_id, mockRes as any);
+
+      const job = service.getJob(job_id);
+      expect(job?.accumulated_reasoning).toBe('abcdef');
     });
   });
 

@@ -30,6 +30,7 @@ import { checkRateLimits, updateUsage } from './lib/rate-limiter';
 import {
   formatSSE,
   thinkingEvent,
+  reasoningEvent,
   toolCallEvent,
   toolResultEvent,
   configEvent,
@@ -41,6 +42,7 @@ import {
 import {
   calculateCost,
   supportsStructuredOutputs,
+  supportsThinking,
 } from './constants/model-pricing';
 
 /**
@@ -57,6 +59,16 @@ const jobStore = new Map<string, AssistantJob>();
  * Cleanup interval (1 minute).
  */
 const CLEANUP_INTERVAL_MS = 60 * 1000;
+
+/**
+ * Detect API errors that hint the model rejected our thinking config, so we
+ * can surface a clearer hint about ASSISTANT_THINKING_DISABLED to operators.
+ */
+function isThinkingConfigError(err: unknown): boolean {
+  const message =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  return /thinking/i.test(message);
+}
 
 @Injectable()
 export class AssistantService implements OnModuleInit, OnModuleDestroy {
@@ -161,8 +173,12 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    // If job already running, just stream accumulated text and wait
+    // If job already running, replay what we've buffered so far. Interleaving
+    // with tool calls is lost here — acceptable for a mid-stream reconnect.
     if (job.status === 'running') {
+      if (job.accumulated_reasoning) {
+        res.write(formatSSE(reasoningEvent(job.accumulated_reasoning)));
+      }
       if (job.accumulated_text) {
         res.write(formatSSE(thinkingEvent(job.accumulated_text)));
       }
@@ -261,6 +277,9 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
       }
 
       // Create stream
+      const thinkingConfig = this.buildThinkingConfig(
+        integration.settings.model,
+      );
       let stream;
       try {
         stream = client.messages.stream({
@@ -271,6 +290,7 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
           tools: useStructuredOutputs
             ? STRICT_ASSISTANT_TOOLS
             : ASSISTANT_TOOLS,
+          ...(thinkingConfig && { thinking: thinkingConfig }),
         });
       } catch (streamError) {
         console.error('Failed to create Anthropic stream:', streamError);
@@ -284,12 +304,26 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
         res.write(formatSSE(thinkingEvent(text)));
       });
 
+      // Listen for interleaved thinking deltas. The SDK's opaque signature
+      // fields ride on message.content and are echoed back via messages.push
+      // below, so we don't need to handle them here.
+      stream.on('thinking', (delta) => {
+        job.accumulated_reasoning += delta;
+        jobStore.set(job.id, job);
+        res.write(formatSSE(reasoningEvent(delta)));
+      });
+
       // Wait for completion
       let message;
       try {
         message = await stream.finalMessage();
       } catch (finalError) {
         console.error('Anthropic stream error:', finalError);
+        if (thinkingConfig && isThinkingConfigError(finalError)) {
+          console.warn(
+            '[Assistant] Model rejected thinking config. Set ASSISTANT_THINKING_DISABLED=1 to disable interleaved thinking globally.',
+          );
+        }
         throw finalError;
       }
       totalInputTokens += message.usage.input_tokens;
@@ -376,13 +410,16 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    // Generate title if requested
-    if (job.generate_title && job.accumulated_text) {
+    // Generate title if requested. Fall back to reasoning when the model
+    // emitted only thinking + a terminal tool call (common for the explore
+    // agent with adaptive thinking enabled).
+    const titleContext = job.accumulated_text || job.accumulated_reasoning;
+    if (job.generate_title && titleContext) {
       try {
         const title = await this.generateTitle(
           apiKey,
           job.prompt,
-          job.accumulated_text,
+          titleContext,
         );
         if (title) {
           res.write(formatSSE(titleEvent(title)));
@@ -425,7 +462,7 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
     const client = new Anthropic({ apiKey });
 
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-haiku-4-5',
       max_tokens: 30,
       messages: [
         {
@@ -447,6 +484,20 @@ Title:`,
     }
 
     return null;
+  }
+
+  /**
+   * Build thinking config for the stream call. Forces display: 'summarized'
+   * across all supported models so reasoning text actually streams (the API
+   * default varies by model — particularly omitted on Opus 4.7).
+   * Env kill-switch: ASSISTANT_THINKING_DISABLED=1.
+   */
+  private buildThinkingConfig(
+    model: string,
+  ): Anthropic.ThinkingConfigParam | undefined {
+    if (process.env.ASSISTANT_THINKING_DISABLED === '1') return undefined;
+    if (!supportsThinking(model)) return undefined;
+    return { type: 'adaptive', display: 'summarized' };
   }
 
   /**

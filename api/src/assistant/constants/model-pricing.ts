@@ -3,9 +3,9 @@
  * See: https://docs.anthropic.com/en/docs/build-with-claude/structured-outputs
  */
 export const STRUCTURED_OUTPUT_MODELS = [
-  'claude-sonnet-4-5-20250929',
-  'claude-opus-4-5-20251101',
-  'claude-haiku-4-5-20251001',
+  'claude-sonnet-4-6',
+  'claude-opus-4-7',
+  'claude-haiku-4-5',
 ];
 
 /**
@@ -13,6 +13,23 @@ export const STRUCTURED_OUTPUT_MODELS = [
  */
 export function supportsStructuredOutputs(model: string): boolean {
   return STRUCTURED_OUTPUT_MODELS.includes(model);
+}
+
+/**
+ * Models that support Anthropic adaptive thinking (interleaved reasoning
+ * between tool calls). Haiku 4.5 does NOT — the API returns 400
+ * "adaptive thinking is not supported on this model".
+ */
+export const ADAPTIVE_THINKING_MODELS = [
+  'claude-opus-4-7',
+  'claude-sonnet-4-6',
+];
+
+/**
+ * Check if a model supports Anthropic adaptive thinking.
+ */
+export function supportsThinking(model: string): boolean {
+  return ADAPTIVE_THINKING_MODELS.includes(model);
 }
 
 /**
@@ -29,22 +46,22 @@ export const MODEL_PRICING: Record<
   }
 > = {
   // Current models (recommended)
-  'claude-sonnet-4-5-20250929': {
+  'claude-sonnet-4-6': {
     input: 3,
     output: 15,
-    display: 'Claude Sonnet 4.5',
+    display: 'Claude Sonnet 4.6',
     category: 'current',
   },
-  'claude-haiku-4-5-20251001': {
+  'claude-haiku-4-5': {
     input: 1,
     output: 5,
     display: 'Claude Haiku 4.5',
     category: 'current',
   },
-  'claude-opus-4-5-20251101': {
+  'claude-opus-4-7': {
     input: 5,
     output: 25,
-    display: 'Claude Opus 4.5',
+    display: 'Claude Opus 4.7',
     category: 'current',
   },
 };

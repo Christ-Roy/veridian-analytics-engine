@@ -127,15 +127,23 @@ function ToolCallBlockRenderer({ block }: { block: ToolCallBlock }) {
 function AssistantTimeline({ timeline }: { timeline: TimelineBlock[] }) {
   return (
     <div className="space-y-2">
-      {timeline.map((block) =>
-        block.type === 'thinking' ? (
-          <Typography key={block.id} className="text-sm text-gray-600">
-            <XMarkdown content={block.text} />
-          </Typography>
-        ) : (
-          <ToolCallBlockRenderer key={block.id} block={block} />
-        )
-      )}
+      {timeline.map((block) => {
+        if (block.type === 'thinking') {
+          return (
+            <Typography key={block.id} className="text-sm text-gray-600">
+              <XMarkdown content={block.text} />
+            </Typography>
+          )
+        }
+        if (block.type === 'reasoning') {
+          return (
+            <Typography key={block.id} className="text-xs text-gray-500 italic">
+              <XMarkdown content={block.text} />
+            </Typography>
+          )
+        }
+        return <ToolCallBlockRenderer key={block.id} block={block} />
+      })}
     </div>
   )
 }
@@ -431,6 +439,7 @@ export function AssistantPanel() {
               <Bubble
                 key={msg.id}
                 placement={msg.role === 'user' ? 'end' : 'start'}
+                styles={msg.role === 'assistant' ? { content: { opacity: 0.8 } } : undefined}
                 content={
                   <div aria-label={`${msg.role} message`}>
                     {msg.role === 'user' ? (
@@ -467,7 +476,7 @@ export function AssistantPanel() {
                     )}
                   </div>
                 }
-                loading={msg.status === 'pending' || msg.status === 'streaming'}
+                loading={msg.status === 'pending'}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -518,9 +527,8 @@ export function AssistantPanel() {
         open={isOpen}
         onClose={() => setIsOpen(false)}
         placement="bottom"
-        height="80vh"
         zIndex={1100}
-        styles={{ body: { padding: 0 } }}
+        styles={{ wrapper: { height: '80vh' }, body: { padding: 0 } }}
         destroyOnClose={false}
       >
         {content}
@@ -537,13 +545,14 @@ export function AssistantPanel() {
         bottom: 90,
         zIndex: 50,
         width: 576,
+        maxHeight: 'calc(100vh - 114px)',
         // Hide with visibility to keep component mounted and avoid ResizeObserver cleanup issues
         visibility: isOpen ? 'visible' : 'hidden',
         opacity: isOpen ? 1 : 0,
         pointerEvents: isOpen ? 'auto' : 'none',
         transition: 'opacity 0.2s, visibility 0.2s',
       }}
-      styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', height: 720 } }}
+      styles={{ body: { padding: 0, display: 'flex', flexDirection: 'column', height: 'min(720px, calc(100vh - 170px))' } }}
       title={title}
       extra={extra}
     >

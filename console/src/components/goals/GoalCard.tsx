@@ -301,10 +301,12 @@ export function GoalCard({
                 <Statistic
                   value={Math.abs(changePercent)}
                   precision={0}
-                  valueStyle={{
-                    fontSize: '11px',
-                    color: isPositive ? '#10b981' : '#f97316',
-                    fontWeight: 500,
+                  styles={{
+                    content: {
+                      fontSize: '11px',
+                      color: isPositive ? '#10b981' : '#f97316',
+                      fontWeight: 500,
+                    },
                   }}
                   prefix={
                     changePercent >= 0 ? (

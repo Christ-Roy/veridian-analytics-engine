@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Table, Button, Modal, Form, Input, DatePicker, TimePicker, Select, message, Popconfirm, Empty } from 'antd'
+import { App, Table, Button, Modal, Form, Input, DatePicker, TimePicker, Select, Popconfirm, Empty } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { nanoid } from 'nanoid'
@@ -49,6 +49,7 @@ const COMMON_TIMEZONES = [
 ]
 
 export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
+  const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [editingAnnotation, setEditingAnnotation] = useState<Annotation | null>(null)

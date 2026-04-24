@@ -1,6 +1,6 @@
 import type { Filter, MetricFilter, DatePreset } from './analytics'
 
-export type SSEEventType = 'thinking' | 'tool_call' | 'tool_result' | 'config' | 'title' | 'usage' | 'error' | 'done'
+export type SSEEventType = 'thinking' | 'reasoning' | 'tool_call' | 'tool_result' | 'config' | 'title' | 'usage' | 'error' | 'done'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -10,6 +10,11 @@ export interface SSEEvent {
 
 export interface ThinkingEvent {
   type: 'thinking'
+  data: { text: string }
+}
+
+export interface ReasoningEvent {
+  type: 'reasoning'
   data: { text: string }
 }
 
@@ -26,10 +31,16 @@ export interface ToolResultEvent {
 /**
  * Timeline block types for interleaved chain-of-thought rendering.
  */
-export type TimelineBlock = ThinkingBlock | ToolCallBlock
+export type TimelineBlock = ThinkingBlock | ToolCallBlock | ReasoningBlock
 
 export interface ThinkingBlock {
   type: 'thinking'
+  id: string
+  text: string
+}
+
+export interface ReasoningBlock {
+  type: 'reasoning'
   id: string
   text: string
 }

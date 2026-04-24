@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Modal, Button, Tag, Empty, Checkbox, message, Row, Col } from 'antd'
+import { App, Modal, Button, Tag, Empty, Checkbox, Row, Col } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { analyticsDimensionsQueryOptions } from '../../lib/queries'
@@ -28,6 +28,7 @@ export function BreakdownModal({
   title = 'Breakdown by',
   submitText = 'View Breakdown',
 }: BreakdownModalProps) {
+  const { message } = App.useApp()
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>(initialDimensions)
   const { data: dimensionsData } = useQuery(analyticsDimensionsQueryOptions)
 

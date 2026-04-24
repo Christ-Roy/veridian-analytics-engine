@@ -234,10 +234,9 @@ export function GoalDashboardDrawer({
         </div>
       }
       placement="right"
-      width="100%"
       open={open}
       onClose={onClose}
-      styles={{ body: { background: 'var(--background)' } }}
+      styles={{ wrapper: { width: '100%' }, body: { background: 'var(--background)' } }}
     >
       <div className={isFetching ? 'opacity-75 transition-opacity' : ''}>
         {/* KPI Summary */}
@@ -276,10 +275,12 @@ export function GoalDashboardDrawer({
                           <Statistic
                             value={Math.abs(changePercent)}
                             precision={1}
-                            valueStyle={{
-                              fontSize: '12px',
-                              color: isPositive ? '#10b981' : '#f97316',
-                              fontWeight: 500,
+                            styles={{
+                              content: {
+                                fontSize: '12px',
+                                color: isPositive ? '#10b981' : '#f97316',
+                                fontWeight: 500,
+                              },
                             }}
                             prefix={changePercent >= 0 ? <ChevronUp size={12} style={{ marginRight: '2px' }} /> : <ChevronDown size={12} style={{ marginRight: '2px' }} />}
                             suffix="%"

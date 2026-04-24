@@ -362,7 +362,7 @@ export function DimensionTableWidget({
         }
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
-        width={600}
+        size={600}
         styles={{ body: { padding: 0, paddingTop: 16 } }}
       >
         {/* Dimension Tabs in drawer (only show if multiple tabs) */}

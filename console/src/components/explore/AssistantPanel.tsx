@@ -186,7 +186,7 @@ export function AssistantPanel({
                     )}
                   </div>
                 }
-                loading={msg.status === 'pending' || msg.status === 'streaming'}
+                loading={msg.status === 'pending'}
               />
             ))}
             <div ref={messagesEndRef} />
@@ -249,9 +249,8 @@ export function AssistantPanel({
         open
         onClose={onClose}
         placement="bottom"
-        height="80vh"
         zIndex={1100}
-        styles={{ body: { padding: 0 } }}
+        styles={{ wrapper: { height: '80vh' }, body: { padding: 0 } }}
       >
         {content}
       </Drawer>

@@ -168,7 +168,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const events = (await result.json()) as { user_id: string | null }[];
+      const events = await result.json();
 
       expect(events).toHaveLength(4);
       // First 2 events: no user_id (anonymous)
@@ -214,11 +214,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [session] = (await result.json()) as {
-        id: string;
-        user_id: string;
-        pageview_count: number;
-      }[];
+      const [session] = await result.json();
 
       expect(session.id).toBe(sessionId);
       expect(session.user_id).toBe(userId);
@@ -351,7 +347,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as { user_id: string | null }[];
+      const [event] = await result.json();
 
       expect(event.user_id).toBeNull();
     });
@@ -386,7 +382,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as Record<string, string>[];
+      const [event] = await result.json();
 
       for (let i = 1; i <= 10; i++) {
         expect(event[`stm_${i}`]).toBe(`dim_value_${i}`);
@@ -421,7 +417,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as Record<string, string>[];
+      const [event] = await result.json();
 
       expect(event.stm_1).toBe('campaign_a');
       expect(event.stm_2).toBe(''); // Not set
@@ -461,10 +457,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [session] = (await result.json()) as {
-        stm_1: string;
-        stm_2: string;
-      }[];
+      const [session] = await result.json();
 
       expect(session.stm_1).toBe('test_campaign');
       expect(session.stm_2).toBe('test_variant');
@@ -828,7 +821,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as { user_id: string }[];
+      const [event] = await result.json();
 
       expect(event.user_id).toBe(longUserId);
       expect(event.user_id.length).toBe(256);
@@ -858,7 +851,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as { user_id: string }[];
+      const [event] = await result.json();
 
       expect(event.user_id).toBe(specialUserId);
     });
@@ -889,7 +882,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [event] = (await result.json()) as { stm_1: string; stm_2: string }[];
+      const [event] = await result.json();
 
       expect(event.stm_1).toBe('');
       expect(event.stm_2).toBe('has_value');
@@ -952,11 +945,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const events = (await result.json()) as {
-        user_id: string;
-        duration: number;
-        max_scroll: number;
-      }[];
+      const events = await result.json();
 
       // Should have 1 deduplicated event with latest values
       expect(events).toHaveLength(1);
@@ -1221,13 +1210,7 @@ describe('User ID Tracking & Export E2E', () => {
         query_params: { session_id: sessionId },
         format: 'JSONEachRow',
       });
-      const [session] = (await sessionResult.json()) as {
-        user_id: string;
-        pageview_count: number;
-        goal_count: number;
-        goal_value: number;
-        stm_1: string;
-      }[];
+      const [session] = await sessionResult.json();
 
       // Note: session MV uses any() so will pick up whatever user_id value it sees first
       // The session should have 3 pageviews, 1 goal, and the dimensions

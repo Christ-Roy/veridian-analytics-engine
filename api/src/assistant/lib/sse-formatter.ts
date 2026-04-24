@@ -3,6 +3,7 @@
  */
 export type SSEEventType =
   | 'thinking'
+  | 'reasoning'
   | 'tool_call'
   | 'tool_result'
   | 'config'
@@ -52,9 +53,21 @@ export function createSSEEvent(type: SSEEventType, data: unknown): SSEEvent {
 
 /**
  * Create a thinking event.
+ *
+ * NOTE: Despite the name, this event carries the model's text output (text
+ * deltas), not Anthropic thinking/reasoning blocks. Reasoning content flows
+ * through `reasoningEvent` instead. A future cleanup should rename this to
+ * `text` with a localStorage migration.
  */
 export function thinkingEvent(text: string): SSEEvent {
   return createSSEEvent('thinking', { text });
+}
+
+/**
+ * Create a reasoning event carrying Anthropic interleaved thinking deltas.
+ */
+export function reasoningEvent(text: string): SSEEvent {
+  return createSSEEvent('reasoning', { text });
 }
 
 /**

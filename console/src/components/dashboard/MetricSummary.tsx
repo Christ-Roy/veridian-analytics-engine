@@ -64,10 +64,12 @@ export function MetricSummary({
                     <Statistic
                       value={Math.abs(changePercent)}
                       precision={1}
-                      valueStyle={{
-                        fontSize: '12px',
-                        color: isPositive ? '#10b981' : '#f97316',
-                        fontWeight: 500,
+                      styles={{
+                        content: {
+                          fontSize: '12px',
+                          color: isPositive ? '#10b981' : '#f97316',
+                          fontWeight: 500,
+                        },
                       }}
                       prefix={changePercent >= 0 ? <ChevronUp size={12} style={{ marginRight: '2px' }} /> : <ChevronDown size={12} style={{ marginRight: '2px' }} />}
                       suffix="%"

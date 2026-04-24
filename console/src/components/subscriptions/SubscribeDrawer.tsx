@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Drawer, Form, Input, Radio, Select, Checkbox, Button, message, Alert, Tag, Row, Col } from 'antd'
+import { App, Drawer, Form, Input, Radio, Select, Checkbox, Button, Alert, Tag, Row, Col } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import type { Filter } from '../../types/analytics'
@@ -56,6 +56,7 @@ export function SubscribeDrawer({
   timezone,
   subscription,
 }: SubscribeDrawerProps) {
+  const { message } = App.useApp()
   const [form] = Form.useForm()
   const [error, setError] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -206,7 +207,7 @@ export function SubscribeDrawer({
     <Drawer
       title={isEditing ? 'Edit Subscription' : 'Subscribe to Report'}
       placement="right"
-      width={480}
+      size={480}
       open={open}
       onClose={handleClose}
       styles={{ body: { paddingBottom: 80 } }}

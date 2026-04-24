@@ -76,11 +76,10 @@ export function BreakdownDrawer({
         </div>
       }
       placement="right"
-      width="100%"
       open={open}
       onClose={onClose}
       closeIcon={true}
-      styles={{ body: { background: 'var(--background)' } }}
+      styles={{ wrapper: { width: '100%' }, body: { background: 'var(--background)' } }}
     >
       {/* Filter Summary */}
       <div className="mb-4 p-3 bg-gray-50 rounded-lg">

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, message } from 'antd'
+import { App, Button } from 'antd'
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
@@ -10,6 +10,7 @@ interface CodeSnippetProps {
 }
 
 export function CodeSnippet({ code, language = 'html' }: CodeSnippetProps) {
+  const { message } = App.useApp()
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {

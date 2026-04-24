@@ -88,7 +88,7 @@ export function ExploreSummary({
     timescoreReference
   )
 
-  const valueStyle = { fontSize: 20 }
+  const statisticStyles = { content: { fontSize: 20 } }
 
   const showBestTimeScore = bestTimeScore !== undefined && bestTimeScore > 0
 
@@ -98,7 +98,7 @@ export function ExploreSummary({
       key="sessions"
       title="Sessions"
       value={formatNumber(totals.sessions)}
-      valueStyle={valueStyle}
+      styles={statisticStyles}
       suffix={
         <ChangeIndicator
           value={totals.sessions_change}
@@ -110,7 +110,7 @@ export function ExploreSummary({
       key="timescore"
       title="Median TimeScore"
       value={formatDuration(totals.median_duration)}
-      valueStyle={valueStyle}
+      styles={statisticStyles}
       prefix={
         <span
           style={{
@@ -163,7 +163,7 @@ export function ExploreSummary({
           <Statistic
             title="Best TimeScore"
             value={formatDuration(bestTimeScore)}
-            valueStyle={valueStyle}
+            styles={statisticStyles}
             prefix={
               <span
                 style={{
@@ -188,7 +188,7 @@ export function ExploreSummary({
       key="bounce"
       title="Bounce Rate"
       value={totals.bounce_rate.toFixed(1)}
-      valueStyle={valueStyle}
+      styles={statisticStyles}
       suffix={
         <>
           %
@@ -204,7 +204,7 @@ export function ExploreSummary({
       key="scroll"
       title={<span className={annotations && annotations.length > 0 ? '' : 'md:pr-[70px]'}>Median Scroll Depth</span>}
       value={totals.median_scroll.toFixed(1)}
-      valueStyle={valueStyle}
+      styles={statisticStyles}
       suffix={
         <>
           %
@@ -256,7 +256,7 @@ export function ExploreSummary({
           <Statistic
             title={<span className="md:pr-[70px]">Annotations</span>}
             value={annotations.length}
-            valueStyle={valueStyle}
+            styles={statisticStyles}
           />
         </div>
       </Popover>
@@ -275,7 +275,7 @@ export function ExploreSummary({
           <div key={index} className="contents">
             {item}
             {index < kpiItems.length - 1 && (
-              <Divider type="vertical" style={{ height: 40 }} />
+              <Divider orientation="vertical" style={{ height: 40 }} />
             )}
           </div>
         ))}
