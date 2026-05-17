@@ -1,0 +1,14 @@
+# Veridian bridge — VEX ignores
+#
+# CVE-2026-33671 — picomatch ReDoS
+# Path : /usr/local/lib/node_modules/npm/node_modules/picomatch/package.json
+# Source : bundle npm dans l'image node:22-alpine officielle Docker Hub
+# Justification :
+#   - picomatch n'est PAS une dépendance de notre bridge (vérifié npm ls)
+#   - Le binaire est utilisé uniquement par `npm` lui-même au moment de
+#     l'install (matching de patterns de fichiers dans package.json)
+#   - Au runtime de l'image bridge, npm n'est jamais exécuté (CMD npx tsx)
+#   - Vulnerability code path non exposé à l'input réseau
+# Alignement : même VEX utilisé dans veridian-analytics/.trivyignore
+# À retirer : quand node:22-alpine release une image avec npm bumpé picomatch ≥ 4.0.4
+CVE-2026-33671

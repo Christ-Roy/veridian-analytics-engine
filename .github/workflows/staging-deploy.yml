@@ -178,6 +178,7 @@ jobs:
           ignore-unfixed: true
           exit-code: '1'
           format: 'table'
+          trivyignores: 'veridian-bridge/.trivyignore'
 
   # ─── Étage 3 : Deploy staging via SSH dev-pub ──────────────────────
   deploy-staging:
