@@ -218,12 +218,12 @@ jobs:
 
       - name: Sync compose to dev-pub
         run: |
-          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 \
+          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             'mkdir -p /opt/staging/analytics-engine/compose'
           scp -i ~/.ssh/deploy_key compose/base.yml compose/staging.yml \
-            brunon5@37.187.199.185:/opt/staging/analytics-engine/compose/
+            staging-deploy@37.187.199.185:/opt/staging/analytics-engine/compose/
           scp -i ~/.ssh/deploy_key clickhouse-users.xml \
-            brunon5@37.187.199.185:/opt/staging/analytics-engine/
+            staging-deploy@37.187.199.185:/opt/staging/analytics-engine/
 
       - name: Write .env on dev-pub
         env:
@@ -234,7 +234,7 @@ jobs:
           STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
         run: |
-          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 \
+          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             "cat > /opt/staging/analytics-engine/.env <<ENV
           ENGINE_IMAGE_TAG=${ENGINE_TAG}
           BRIDGE_IMAGE_TAG=${BRIDGE_TAG}
@@ -248,7 +248,7 @@ jobs:
 
       - name: Deploy stack
         run: |
-          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 bash -s <<'DEPLOY'
+          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'DEPLOY'
             set -e
             cd /opt/staging/analytics-engine
             docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
