@@ -4,8 +4,8 @@ WORKDIR /app
 
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001 -G app
 
-COPY package.json tsconfig.json ./
-RUN npm install --omit=optional && npm cache clean --force
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci --omit=dev --omit=optional && npm cache clean --force
 
 COPY src ./src
 
