@@ -246,20 +246,20 @@ jobs:
         run: |
           echo "Waiting for staminads engine to be healthy..."
           for i in $(seq 1 30); do
-            if curl -sf https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null; then
+            if curl -skf https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null; then
               echo "✓ engine up after ${i}0s"
               break
             fi
             sleep 10
           done
-          curl -sf https://analytics-engine.staging.veridian.site/api/setup.status || (echo "engine KO" && exit 1)
+          curl -skf https://analytics-engine.staging.veridian.site/api/setup.status || (echo "engine KO" && exit 1)
           echo "Waiting for bridge..."
           for i in $(seq 1 12); do
-            if curl -sf https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
+            if curl -skf https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
               echo "✓ bridge up after ${i}0s"
               break
             fi
             sleep 10
           done
-          curl -sf https://analytics-engine-bridge.staging.veridian.site/health || (echo "bridge KO" && exit 1)
+          curl -skf https://analytics-engine-bridge.staging.veridian.site/health || (echo "bridge KO" && exit 1)
           echo "Staging deploy : ✓ smoke OK"
