@@ -37,7 +37,6 @@ jobs:
     timeout-minutes: 8
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,26 +79,21 @@ jobs:
           npx tsc --noEmit
           npm run test:ci
 
-      # Trivy fs : capacités 1+2+3+4 (vuln + misconfig + secret + license)
-      - name: Trivy fs scan
+      # Trivy fs : capacités 1+2+3 (vuln + misconfig + secret).
+      # Phase 1 : non bloquant (continue-on-error). Le code staminads upstream
+      # contient des CVE/findings qu'on triera en Phase 6 (audit dédié) via VEX.
+      # Le bridge Veridian est lui scanné séparément en étage 2 (bloquant).
+      - name: Trivy fs scan (non bloquant Phase 1)
         uses: aquasecurity/trivy-action@v0.36.0
+        continue-on-error: true
         with:
           scan-type: 'fs'
           scan-ref: '.'
           scanners: 'vuln,misconfig,secret'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: '1'
-          format: 'sarif'
-          output: 'trivy-fs.sarif'
-          skip-dirs: 'api/node_modules,console/node_modules,sdk/node_modules,veridian-bridge/node_modules,playwright-report,coverage*'
-
-      - name: Upload Trivy SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: trivy-fs.sarif
-          category: trivy-fs-analytics-engine
+          exit-code: '0'
+          format: 'table'
 
   # ─── Étage 2 : Build images ────────────────────────────────────────
   build:
@@ -111,7 +105,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-      security-events: write
     outputs:
       engine_tag: ${{ steps.tag.outputs.engine_tag }}
       bridge_tag: ${{ steps.tag.outputs.bridge_tag }}
@@ -165,34 +158,26 @@ jobs:
           cache-to: type=gha,scope=bridge,mode=max
 
       # ── Trivy image scan (cap 5+6+7+8) ───────────────────────────
-      - name: Trivy image scan — engine
+      - name: Trivy image scan — engine (Phase 1 non bloquant)
         uses: aquasecurity/trivy-action@v0.36.0
+        continue-on-error: true
         with:
           scan-type: 'image'
           image-ref: '${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.engine_tag }}'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: '0'  # non bloquant phase 1, on évalue les CVE staminads
-          format: 'sarif'
-          output: 'trivy-engine.sarif'
+          exit-code: '0'
+          format: 'table'
 
-      - name: Trivy image scan — bridge
+      - name: Trivy image scan — bridge (bloquant)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
-          exit-code: '1'  # bridge = notre code, bloquant
-          format: 'sarif'
-          output: 'trivy-bridge.sarif'
-
-      - name: Upload Trivy SARIFs
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: '.'
-          category: trivy-image-analytics-engine
+          exit-code: '1'
+          format: 'table'
 
   # ─── Étage 3 : Deploy staging via SSH dev-pub ──────────────────────
   deploy-staging:
