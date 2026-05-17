@@ -1,0 +1,87 @@
+# ============================================================================
+# compose/base.yml — Base commune Analytics Engine (prod + staging)
+# ============================================================================
+#
+# Convention alignée sur veridian-hub/notifuse-veridian. Jamais lu seul.
+# Toujours combiné avec un override :
+#   - staging : docker compose -f compose/base.yml -f compose/staging.yml up -d
+#   - prod    : docker compose -f compose/base.yml -f compose/prod.yml up -d
+#
+# 3 services :
+#   - clickhouse : DB OLAP, partition par jour, TTL 7j (configurable)
+#   - engine     : NestJS staminads + console embarquée
+#   - bridge     : couche Veridian (auth + provisioning Hub)
+#
+# ============================================================================
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      CLICKHOUSE_DB: staminads_system
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD requis}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ../clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    labels:
+      - veridian.staging.app=analytics-engine
+
+  engine:
+    image: ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      TZ: UTC
+      PORT: "3000"
+      JWT_EXPIRES_IN: 7d
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requis (32+ chars, openssl rand -hex 32)}
+      CLICKHOUSE_HOST: http://clickhouse:8123
+      CLICKHOUSE_SYSTEM_DATABASE: staminads_system
+      CLICKHOUSE_DATABASE: staminads
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      IS_DEMO: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/setup.status || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  bridge:
+    image: ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_IMAGE_TAG:-latest}
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      engine:
+        condition: service_healthy
+    environment:
+      TZ: UTC
+      PORT: "3002"
+      STAMINADS_URL: http://engine:3000
+      STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
+      STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
+      VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis (32+ chars)}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3002/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  clickhouse-data:

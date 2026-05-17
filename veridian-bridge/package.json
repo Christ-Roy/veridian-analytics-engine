@@ -1,0 +1,27 @@
+{
+  "name": "veridian-poc-bridge-stub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "POC bridge Veridian → staminads (simule le futur layer veridian-analytics)",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts",
+    "test:ci": "node --import tsx --test --test-reporter=tap tests/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

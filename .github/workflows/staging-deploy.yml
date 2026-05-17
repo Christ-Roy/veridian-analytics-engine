@@ -1,0 +1,279 @@
+# Veridian Analytics Engine — CI/CD staging
+# Aligné CI-ARCHITECTURE.md du polyrepo Veridian.
+#
+# 3 étages :
+#   1. quick-checks        ubuntu-latest    ~90s    lint + test bridge + Trivy fs
+#   2. build               ubuntu-latest    ~5min   build engine (staminads) + bridge → GHCR + Trivy image
+#   3. deploy-staging      ubuntu-latest    ~2min   SSH dev-pub + compose pull + up -d + smoke
+
+name: Staging CI/CD
+
+on:
+  push:
+    branches: [staging, veridian/main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'releases/**'
+      - 'TODO.md'
+  pull_request:
+    branches: [staging, veridian/main]
+  workflow_dispatch:
+
+concurrency:
+  group: analytics-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  ENGINE_IMAGE: christ-roy/veridian-analytics-engine
+  BRIDGE_IMAGE: christ-roy/veridian-analytics-bridge
+
+jobs:
+  # ─── Étage 1 : Quick checks ────────────────────────────────────────
+  quick-checks:
+    name: Étage 1 — Quick checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            api/package-lock.json
+            veridian-bridge/package-lock.json
+
+      - name: Install tooling
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck yamllint
+
+      - name: Lint YAML
+        run: |
+          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable}}" \
+            compose/*.yml \
+            .github/workflows/*.yml
+
+      - name: Compose config check (staging)
+        env:
+          CLICKHOUSE_PASSWORD: ci-clickhouse-pass
+          ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
+          STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
+          VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
+        run: |
+          docker compose -f compose/base.yml -f compose/staging.yml config -q
+          echo "compose: ✓"
+
+      - name: Bridge — install + typecheck + tests
+        working-directory: veridian-bridge
+        run: |
+          npm install --no-audit --no-fund
+          npx tsc --noEmit
+          npm run test:ci
+
+      # Trivy fs : capacités 1+2+3+4 (vuln + misconfig + secret + license)
+      - name: Trivy fs scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'vuln,misconfig,secret'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'
+          format: 'sarif'
+          output: 'trivy-fs.sarif'
+          skip-dirs: 'api/node_modules,console/node_modules,sdk/node_modules,veridian-bridge/node_modules,playwright-report,coverage*'
+
+      - name: Upload Trivy SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs-analytics-engine
+
+  # ─── Étage 2 : Build images ────────────────────────────────────────
+  build:
+    name: Étage 2 — Build images
+    needs: quick-checks
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      engine_tag: ${{ steps.tag.outputs.engine_tag }}
+      bridge_tag: ${{ steps.tag.outputs.bridge_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: |
+          SHA=${GITHUB_SHA:0:7}
+          BRANCH=${GITHUB_REF##*/}
+          if [[ "$BRANCH" == "staging" ]]; then
+            PREFIX="staging"
+          else
+            PREFIX="veridian"
+          fi
+          echo "engine_tag=${PREFIX}-${SHA}" >> $GITHUB_OUTPUT
+          echo "bridge_tag=${PREFIX}-${SHA}" >> $GITHUB_OUTPUT
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Build engine (staminads upstream + patches Veridian) ─────
+      - name: Build + push engine image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.engine_tag }}
+            ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ github.ref_name == 'staging' && 'staging-latest' || 'veridian-latest' }}
+          cache-from: type=gha,scope=engine
+          cache-to: type=gha,scope=engine,mode=max
+
+      # ── Build bridge Veridian ────────────────────────────────────
+      - name: Build + push bridge image
+        uses: docker/build-push-action@v5
+        with:
+          context: veridian-bridge
+          file: veridian-bridge/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}
+            ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ github.ref_name == 'staging' && 'staging-latest' || 'veridian-latest' }}
+          cache-from: type=gha,scope=bridge
+          cache-to: type=gha,scope=bridge,mode=max
+
+      # ── Trivy image scan (cap 5+6+7+8) ───────────────────────────
+      - name: Trivy image scan — engine
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.engine_tag }}'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '0'  # non bloquant phase 1, on évalue les CVE staminads
+          format: 'sarif'
+          output: 'trivy-engine.sarif'
+
+      - name: Trivy image scan — bridge
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: 'image'
+          image-ref: '${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: '1'  # bridge = notre code, bloquant
+          format: 'sarif'
+          output: 'trivy-bridge.sarif'
+
+      - name: Upload Trivy SARIFs
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: '.'
+          category: trivy-image-analytics-engine
+
+  # ─── Étage 3 : Deploy staging via SSH dev-pub ──────────────────────
+  deploy-staging:
+    name: Étage 3 — Deploy staging
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: staging
+      url: https://analytics-engine.staging.veridian.site
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync compose to dev-pub
+        run: |
+          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 \
+            'mkdir -p /opt/staging/analytics-engine/compose'
+          scp -i ~/.ssh/deploy_key compose/base.yml compose/staging.yml \
+            brunon5@37.187.199.185:/opt/staging/analytics-engine/compose/
+          scp -i ~/.ssh/deploy_key clickhouse-users.xml \
+            brunon5@37.187.199.185:/opt/staging/analytics-engine/
+
+      - name: Write .env on dev-pub
+        env:
+          ENGINE_TAG: ${{ needs.build.outputs.engine_tag }}
+          BRIDGE_TAG: ${{ needs.build.outputs.bridge_tag }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD_STAGING }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_STAGING }}
+          STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
+          VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
+        run: |
+          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 \
+            "cat > /opt/staging/analytics-engine/.env <<ENV
+          ENGINE_IMAGE_TAG=${ENGINE_TAG}
+          BRIDGE_IMAGE_TAG=${BRIDGE_TAG}
+          CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
+          ENCRYPTION_KEY=${ENCRYPTION_KEY}
+          STAMINADS_ADMIN_EMAIL=admin@veridian.site
+          STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
+          VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
+          ENV
+          chmod 600 /opt/staging/analytics-engine/.env"
+
+      - name: Deploy stack
+        run: |
+          ssh -i ~/.ssh/deploy_key brunon5@37.187.199.185 bash -s <<'DEPLOY'
+            set -e
+            cd /opt/staging/analytics-engine
+            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
+            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
+            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml ps
+          DEPLOY
+
+      - name: Smoke test (wait + curl)
+        run: |
+          echo "Waiting for staminads engine to be healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null; then
+              echo "✓ engine up after ${i}0s"
+              break
+            fi
+            sleep 10
+          done
+          curl -sf https://analytics-engine.staging.veridian.site/api/setup.status || (echo "engine KO" && exit 1)
+          echo "Waiting for bridge..."
+          for i in $(seq 1 12); do
+            if curl -sf https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
+              echo "✓ bridge up after ${i}0s"
+              break
+            fi
+            sleep 10
+          done
+          curl -sf https://analytics-engine-bridge.staging.veridian.site/health || (echo "bridge KO" && exit 1)
+          echo "Staging deploy : ✓ smoke OK"

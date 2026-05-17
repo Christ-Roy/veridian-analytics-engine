@@ -1,0 +1,70 @@
+# ============================================================================
+# compose/staging.yml — Override staging
+# ============================================================================
+#
+# URL : analytics-engine.staging.veridian.site (console staminads, port 3000)
+# URL : analytics-engine-bridge.staging.veridian.site (bridge Veridian, port 3002)
+#
+# Trigger : push sur branche `staging` du repo Christ-Roy/veridian-analytics-engine
+# Réseau external : staging-edge (Traefik standalone sur dev-pub)
+#
+# Combiné avec base.yml :
+#   docker compose -f compose/base.yml -f compose/staging.yml up -d
+#
+# Variables d'env attendues (injectées par CI via /opt/staging/analytics-engine/.env) :
+#   ENGINE_IMAGE_TAG          = staging-<sha7>
+#   BRIDGE_IMAGE_TAG          = staging-<sha7>
+#   CLICKHOUSE_PASSWORD       = mot de passe ClickHouse staging
+#   ENCRYPTION_KEY            = 32+ chars (openssl rand -hex 32)
+#   STAMINADS_ADMIN_PASSWORD  = mot de passe admin console staminads
+#   VERIDIAN_ADMIN_API_KEY    = clé API utilisée par Hub pour appeler le bridge
+# ============================================================================
+
+services:
+  clickhouse:
+    container_name: analytics-engine-staging-clickhouse
+    networks:
+      - engine-internal
+
+  engine:
+    container_name: analytics-engine-staging
+    networks:
+      - staging-edge
+      - engine-internal
+    environment:
+      APP_URL: https://analytics-engine.staging.veridian.site
+      CORS_ALLOWED_ORIGINS: https://analytics-engine.staging.veridian.site,https://analytics-engine-bridge.staging.veridian.site,https://hub.staging.veridian.site
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=staging-edge
+      - traefik.http.routers.analytics-engine.rule=Host(`analytics-engine.staging.veridian.site`)
+      - traefik.http.routers.analytics-engine.entrypoints=websecure
+      - traefik.http.routers.analytics-engine.tls=true
+      - traefik.http.routers.analytics-engine.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-engine.loadbalancer.server.port=3000
+      - veridian.staging.app=analytics-engine
+
+  bridge:
+    container_name: analytics-engine-staging-bridge
+    networks:
+      - staging-edge
+      - engine-internal
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=staging-edge
+      - traefik.http.routers.analytics-bridge.rule=Host(`analytics-engine-bridge.staging.veridian.site`)
+      - traefik.http.routers.analytics-bridge.entrypoints=websecure
+      - traefik.http.routers.analytics-bridge.tls=true
+      - traefik.http.routers.analytics-bridge.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-bridge.loadbalancer.server.port=3002
+      - veridian.staging.app=analytics-engine
+
+networks:
+  staging-edge:
+    external: true
+  engine-internal:
+    driver: bridge
+
+volumes:
+  clickhouse-data:
+    name: analytics-engine-staging-clickhouse-data
