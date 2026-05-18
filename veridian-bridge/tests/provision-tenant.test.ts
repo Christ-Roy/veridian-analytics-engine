@@ -199,10 +199,11 @@ test("provision: apiKey name contient le tenantSlug pour traçabilité", async (
   await provision(VALID_BODY);
   const keyCall = fake.getCalls().find((c) => c.path === "/api/apiKeys.create");
   assert.ok(keyCall);
-  const sent = keyCall.body as { name: string; role: string; workspaceId: string };
+  const sent = keyCall.body as { name: string; role: string; workspace_id: string };
   assert.match(sent.name, /veridian-tenant-veridian-test/);
   assert.equal(sent.role, "admin");
-  assert.equal(sent.workspaceId, "ws_fake_abc");
+  // staminads attend snake_case
+  assert.equal(sent.workspace_id, "ws_fake_abc");
 });
 
 test("provision: payload contient un id staminads valide [a-z][a-z0-9_]*", async () => {

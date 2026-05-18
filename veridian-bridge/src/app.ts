@@ -188,7 +188,8 @@ export function createApp(cfg: BridgeConfig): Express {
           Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
-          workspaceId: ws.id,
+          // staminads attend snake_case (vérifié sur l'API en staging, DTO `workspace_id`)
+          workspace_id: ws.id,
           name: `veridian-tenant-${parsed.data.tenantSlug}`,
           role: "admin",
         }),
@@ -309,7 +310,8 @@ export function createApp(cfg: BridgeConfig): Express {
           Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
-          workspaceId: wsId,
+          // staminads DTO mixte : workspace_id snake_case, dateRange camelCase
+          workspace_id: wsId,
           metrics: ["pageviews", "sessions"],
           dimensions: ["utm_source"],
           dateRange: { type: "last_24_hours" },

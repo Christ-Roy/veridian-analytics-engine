@@ -83,18 +83,19 @@ test("analytics: status staminads forwardé tel quel (500 → 500)", async () =>
   assert.equal(body.error, "clickhouse_down");
 });
 
-test("analytics: payload query envoyé contient workspaceId + metrics + dimensions", async () => {
+test("analytics: payload query envoyé contient workspace_id + metrics + dimensions", async () => {
   fake.setBehavior({ setupCompleted: true });
   await getAnalytics("ws_xyz");
   const queryCall = fake.getCalls().find((c) => c.path === "/api/analytics.query");
   assert.ok(queryCall);
   const sent = queryCall.body as {
-    workspaceId: string;
+    workspace_id: string;
     metrics: string[];
     dimensions: string[];
     dateRange: { type: string };
   };
-  assert.equal(sent.workspaceId, "ws_xyz");
+  // staminads DTO : workspace_id snake_case (cf openapi AnalyticsQueryDto)
+  assert.equal(sent.workspace_id, "ws_xyz");
   assert.deepEqual(sent.metrics, ["pageviews", "sessions"]);
   assert.deepEqual(sent.dimensions, ["utm_source"]);
   assert.equal(sent.dateRange.type, "last_24_hours");
