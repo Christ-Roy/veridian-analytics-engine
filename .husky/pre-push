@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+# Veridian Analytics Engine — Husky pre-push
+# Constitution CI §3 : aucun --no-verify, jamais.
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# 1. Test-mapping : fichier critique modifié sans test = refus
+if [ -x "$REPO_ROOT/scripts/ci/check-test-mapping.sh" ]; then
+  BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD)}"
+  if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+    BASE_REF="origin/staging"
+  fi
+  export BASE_REF
+  echo "─── Pre-push : test-mapping vs $BASE_REF ───"
+  "$REPO_ROOT/scripts/ci/check-test-mapping.sh"
+else
+  echo "⚠ scripts/ci/check-test-mapping.sh absent, mapping check skip"
+fi
+
+# 2. Bridge typecheck + tests (rapide, ~3s + ~3s)
+if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
+  echo "─── Pre-push : bridge typecheck + tests ───"
+  cd "$REPO_ROOT/veridian-bridge"
+  if [ ! -d node_modules ]; then
+    echo "  installing bridge deps (first run)..."
+    npm install --no-audit --no-fund --silent
+  fi
+  npx tsc --noEmit
+  npm run test:ci
+  cd "$REPO_ROOT"
+fi
+
+echo "─── Pre-push : ALL GREEN ───"

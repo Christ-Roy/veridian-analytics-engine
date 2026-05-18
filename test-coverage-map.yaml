@@ -1,0 +1,234 @@
+# test-coverage-map.yaml — Veridian Analytics Engine (fork staminads v6.1.0)
+#
+# Convention CI Veridian (cf CI-ARCHITECTURE.md §1) :
+#   1. Mapping canonique : <source>.ts ↔ <source>.spec.ts (Jest) ou
+#      <source>.test.ts (Vitest/node:test) colocalisé OU
+#      api/test/<base>.e2e-spec.ts (e2e Jest)
+#   2. Si pas de mapping canonique → cherche ici
+#   3. Le hook scripts/ci/check-test-mapping.sh exige qu'au moins un
+#      covered_by soit modifié dans la même PR
+#
+# Audit upstream :
+# Quasiment tous les controllers/services NestJS staminads sont couverts
+# par leurs e2e dans api/test/*.e2e-spec.ts. On les déclare explicitement
+# ici pour que la modif d'un controller upstream sans toucher son e2e
+# soit refusée par le pre-push.
+
+# ─── BRIDGE VERIDIAN (notre code) ───────────────────────────────────────
+
+- sources:
+    - veridian-bridge/src/app.ts
+  covered_by:
+    - veridian-bridge/tests/config.test.ts
+    - veridian-bridge/tests/health.test.ts
+    - veridian-bridge/tests/auth.test.ts
+    - veridian-bridge/tests/provision-tenant.test.ts
+    - veridian-bridge/tests/track-test.test.ts
+    - veridian-bridge/tests/analytics.test.ts
+  reason: |
+    app.ts contient toute la logique Express du bridge (factory createApp,
+    middlewares, handlers). Chaque endpoint a son fichier de tests dédié
+    + tests config pour validateConfig. 56 tests intégration (node:test +
+    faux serveur staminads HTTP local) qui valident :
+    - validation Zod des bodies
+    - middleware auth (Bearer token)
+    - provisioning (slug sanitization, snake_case staminads, cache token)
+    - track-test (UTM, headers, invariants pageview)
+    - analytics proxy (status forward, payload query)
+
+- sources:
+    - veridian-bridge/src/index.ts
+  covered_by:
+    - veridian-bridge/tests/config.test.ts
+  reason: |
+    index.ts = entrypoint qui lit process.env et appelle createApp.
+    Toute la logique est dans app.ts (testée). config.test valide que
+    validateConfig() rejette bien les configs invalides — ce qui est
+    exactement ce que index.ts fait au boot.
+
+- sources:
+    - veridian-bridge/tests/helpers/fake-staminads.ts
+  covered_by:
+    - veridian-bridge/tests/provision-tenant.test.ts
+    - veridian-bridge/tests/track-test.test.ts
+    - veridian-bridge/tests/analytics.test.ts
+  reason: |
+    Helper de tests utilisé par les fichiers d'intégration. Si on casse le
+    helper, les tests qui s'en servent cassent. Toute modif du helper exige
+    modif d'au moins un test consommateur.
+
+- sources:
+    - veridian-bridge/Dockerfile
+    - veridian-bridge/package.json
+  covered_by:
+    - .github/workflows/staging-deploy.yml
+    - veridian-bridge/.trivyignore
+  reason: |
+    Le Dockerfile + package.json bridge sont validés par Trivy image scan
+    en CI étage 2 (bloquant). Le build + boot via healthcheck du compose
+    POC valide qu'il run correctement. .trivyignore documente les CVE VEX.
+
+# ─── STAMINADS UPSTREAM API (couverture via e2e) ────────────────────────
+
+- sources:
+    - api/src/auth/auth.controller.ts
+    - api/src/auth/auth.service.ts
+    - api/src/auth/strategies/jwt.strategy.ts
+  covered_by:
+    - api/test/auth.e2e-spec.ts
+  reason: |
+    Controllers/services auth couverts par auth.e2e-spec.ts upstream
+    (login, forgotPassword, resetPassword, sessions, revoke).
+
+- sources:
+    - api/src/api-keys/api-keys.controller.ts
+    - api/src/api-keys/api-keys.service.ts
+  covered_by:
+    - api/test/api-keys.e2e-spec.ts
+    - api/test/api-key-auth.e2e-spec.ts
+  reason: |
+    API keys (création + auth via Bearer key). 2 fichiers e2e séparés
+    pour les 2 facettes (gestion + utilisation).
+
+- sources:
+    - api/src/workspaces/workspaces.controller.ts
+    - api/src/workspaces/workspaces.service.ts
+  covered_by:
+    - api/test/workspaces.e2e-spec.ts
+  reason: |
+    CRUD workspaces + permissions OWNER/ADMIN/EDITOR/VIEWER.
+
+- sources:
+    - api/src/members/members.controller.ts
+    - api/src/members/members.service.ts
+  covered_by:
+    - api/test/members.e2e-spec.ts
+  reason: Memberships workspace_members.
+
+- sources:
+    - api/src/invitations/invitations.controller.ts
+    - api/src/invitations/invitations.service.ts
+  covered_by:
+    - api/test/invitations.e2e-spec.ts
+  reason: Invitations user vers workspace.
+
+- sources:
+    - api/src/events/events.controller.ts
+    - api/src/events/session-payload.handler.ts
+  covered_by:
+    - api/test/session-payload.e2e-spec.ts
+    - api/test/page-tracking.e2e-spec.ts
+  reason: |
+    Endpoint /api/track + handler de session payload. Couverture par
+    session-payload (validation DTO + ingest) et page-tracking (pageview
+    + goal events + dedup).
+
+- sources:
+    - api/src/analytics/analytics.controller.ts
+    - api/src/analytics/analytics.service.ts
+  covered_by:
+    - api/test/analytics.e2e-spec.ts
+  reason: |
+    Endpoint /api/analytics.query, metrics, dimensions, filters.
+
+- sources:
+    - api/src/filters/filters.controller.ts
+    - api/src/filters/filters.service.ts
+    - api/src/filters/backfill/*.ts
+  covered_by:
+    - api/test/backfill.e2e-spec.ts
+  reason: Filters + backfill.
+
+- sources:
+    - api/src/subscriptions/subscriptions.controller.ts
+    - api/src/subscriptions/scheduler/*.ts
+    - api/src/subscriptions/report/*.ts
+  covered_by:
+    - api/test/subscriptions.e2e-spec.ts
+    - api/test/report-generation.e2e-spec.ts
+  reason: |
+    Scheduled email reports : CRUD subscriptions + génération report
+    (scheduler + report generation).
+
+- sources:
+    - api/src/setup/setup.controller.ts
+    - api/src/setup/setup.service.ts
+  covered_by:
+    - api/test/setup-middleware.e2e-spec.ts
+  reason: Bootstrap initial du super-admin (POST /api/setup.initialize).
+
+- sources:
+    - api/src/migrations/migrations.service.ts
+    - api/src/migrations/migrations.registry.ts
+    - api/src/migrations/v6-user-id-migration.ts
+  covered_by:
+    - api/test/migrations.e2e-spec.ts
+  reason: |
+    Migration system ClickHouse (V4/V5/V6). CRITIQUE : toute nouvelle
+    migration (ex: V7VisitorIdMigration Phase 2) DOIT ajouter un test ici
+    sinon le pre-push refuse.
+
+- sources:
+    - api/src/database/schemas.ts
+  covered_by:
+    - api/test/migrations.e2e-spec.ts
+    - api/test/session-payload.e2e-spec.ts
+    - api/test/analytics.e2e-spec.ts
+  reason: |
+    Schémas ClickHouse (events, sessions, workspaces, users, etc.).
+    Modifier ce fichier exige de toucher les e2e qui dépendent du schéma.
+
+- sources:
+    - api/src/export/export.controller.ts
+    - api/src/export/dto/*.ts
+  covered_by:
+    - api/test/user-id-export.e2e-spec.ts
+  reason: Export user events (RGPD-like).
+
+- sources:
+    - api/src/demo/demo.controller.ts
+    - api/src/demo/fixtures/*.ts
+  covered_by:
+    - api/test/demo-mode.e2e-spec.ts
+  reason: Mode demo (génération de fake data).
+
+# ─── INFRA / COMPOSE / CI ──────────────────────────────────────────────
+
+- sources:
+    - compose/base.yml
+    - compose/staging.yml
+  covered_by:
+    - .github/workflows/staging-deploy.yml
+  reason: |
+    Compose validé par `docker compose config -q` en CI étage 1 +
+    smoke test post-deploy en étage 3 (curl /api/setup.status + /health).
+    Toute modif déclenche un redeploy + smoke.
+
+- sources:
+    - Dockerfile
+  covered_by:
+    - .github/workflows/staging-deploy.yml
+  reason: |
+    Dockerfile staminads upstream. Build validé par étage 2 GHCR + Trivy
+    image scan. Engine container démarre healthy après pull → preuve que
+    l'image est fonctionnelle.
+
+- sources:
+    - .github/workflows/staging-deploy.yml
+  covered_by:
+    - .github/workflows/staging-deploy.yml
+  reason: |
+    Le workflow se teste lui-même : tout commit qui le modifie déclenche
+    son propre run, qui doit passer vert pour être mergé. Self-validating.
+
+# ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
+#
+# - Quand on ajoute un patch Veridian (cf PATCHES.md), il DOIT venir avec :
+#   * Un test colocalisé OU une déclaration dans ce fichier
+#   * Une entrée dans PATCHES.md
+#
+# - Quand on cherry-pick un fix upstream, vérifier que les e2e couvrant
+#   le fichier modifié sont eux aussi à jour côté upstream.
+#
+# - tests-pending.txt n'existe pas (encore) : créer dès qu'on identifie un
+#   fichier critique sans test (dette transitoire à résorber).

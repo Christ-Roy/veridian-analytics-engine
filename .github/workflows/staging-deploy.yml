@@ -95,10 +95,106 @@ jobs:
           exit-code: '0'
           format: 'table'
 
+  # ─── Étage 1.b : Tests upstream API (Jest + ClickHouse) ────────────
+  # Reproduction exacte de .github/workflows/test.yml upstream staminads,
+  # adapté à notre branche staging. Bloquant : si tests upstream cassés,
+  # on ne build pas une image qui contiendrait du code régressé.
+  upstream-api-tests:
+    name: Étage 1.b — Tests Jest API (upstream + futurs patches Veridian)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    defaults:
+      run:
+        working-directory: ./api
+    env:
+      CLICKHOUSE_HOST: http://localhost:8123
+      CLICKHOUSE_DATABASE: staminads_test
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ""
+      ADMIN_EMAIL: super-admin@test.com
+      ADMIN_PASSWORD: testpass
+      ENCRYPTION_KEY: test-encryption-key-32-chars-ok!
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: api/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: Tests unitaires Jest (avec coverage)
+        run: npm run test:cov
+      - name: Attente ClickHouse healthy
+        run: |
+          for i in {1..30}; do
+            if curl -sf http://localhost:8123/ping; then
+              echo "ClickHouse ready"
+              break
+            fi
+            echo "Waiting for ClickHouse..."
+            sleep 2
+          done
+          curl -sf http://localhost:8123/ping || (echo "ClickHouse KO" && exit 1)
+      - name: Tests e2e Jest contre ClickHouse réel
+        run: npm run test:e2e:cov
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage
+          path: api/coverage*/
+          retention-days: 14
+
+  # ─── Étage 1.c : Tests SDK (Vitest unit) ───────────────────────────
+  # Le SDK tracker JS a 2 suites : vitest (unit, sans dépendance externe)
+  # et playwright e2e (qui exige API NestJS + ClickHouse + static server
+  # tous up). Vitest = bloquant ici. Playwright e2e = job séparé optionnel
+  # car nécessite un environnement complet (ajouté plus tard).
+  upstream-sdk-tests:
+    name: Étage 1.c — Tests SDK (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: ./sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+      - name: npm ci
+        run: npm ci
+      - name: Tests unitaires SDK (vitest)
+        run: npm test
+      - name: Build SDK
+        run: npm run build
+
   # ─── Étage 2 : Build images ────────────────────────────────────────
   build:
     name: Étage 2 — Build images
-    needs: quick-checks
+    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25
