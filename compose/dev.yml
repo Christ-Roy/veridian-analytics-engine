@@ -13,12 +13,18 @@
 #
 # NE PAS combiner avec base.yml — c'est un compose autonome (pas d'image GHCR).
 #
+# ⚠️ PROJECT NAME ISOLÉ : on force `name: analytics-engine-dev` pour ne PAS
+# partager le project name avec le compose staging (sinon `up --remove-orphans`
+# supprime les containers staging — incident 2026-05-18).
+#
 # Variables d'env attendues (cf .env.dev) :
 #   CLICKHOUSE_PASSWORD       = mot de passe ClickHouse dev (peu importe, isolé)
 #   ENCRYPTION_KEY            = 32+ chars
 #   STAMINADS_ADMIN_PASSWORD  = mot de passe admin console staminads
 #   VERIDIAN_ADMIN_API_KEY    = clé API bridge (réutilisable depuis staging)
 # ============================================================================
+
+name: analytics-engine-dev
 
 services:
   clickhouse:

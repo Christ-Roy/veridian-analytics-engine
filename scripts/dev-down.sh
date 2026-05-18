@@ -4,5 +4,5 @@
 set -euo pipefail
 REPO_DIR="${REPO_DIR:-/opt/dev/analytics-engine}"
 cd "${REPO_DIR}"
-docker compose --env-file .env.dev -f compose/dev.yml down --remove-orphans
+docker compose --env-file .env.dev -p analytics-engine-dev -f compose/dev.yml down
 echo "✓ Stack dev arrêtée (volumes préservés)"

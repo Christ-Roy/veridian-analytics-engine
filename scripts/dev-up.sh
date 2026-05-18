@@ -82,8 +82,12 @@ else
 fi
 
 # ─── 3. Build + démarrage du compose ──────────────────────────────────────
+# NB : on PASSE -p analytics-engine-dev explicitement en plus du `name:` dans
+# le yml (ceinture + bretelles) pour garantir l'isolation vs staging.
+# ⚠️ Surtout pas `--remove-orphans` global : on cible le project dev seul.
 echo "[3/4] Build + démarrage stack dev (peut prendre 2-5 min au 1er run)..."
-docker compose --env-file "${ENV_FILE}" -f compose/dev.yml up -d --build --remove-orphans
+docker compose --env-file "${ENV_FILE}" -p analytics-engine-dev \
+    -f compose/dev.yml up -d --build
 
 # ─── 4. Smoke + URLs ──────────────────────────────────────────────────────
 echo "[4/4] Attente services healthy..."
