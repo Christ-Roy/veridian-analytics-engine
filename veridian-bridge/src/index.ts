@@ -9,6 +9,7 @@ import { createApp, validateConfig, type BridgeConfig } from "./app.js";
 
 const cfg: BridgeConfig = {
   staminadsUrl: process.env.STAMINADS_URL ?? "http://staminads:3000",
+  publicStaminadsUrl: process.env.PUBLIC_STAMINADS_URL,
   adminEmail: process.env.STAMINADS_ADMIN_EMAIL ?? "admin@veridian.local",
   adminPassword: process.env.STAMINADS_ADMIN_PASSWORD ?? "poc-admin-pass-2026",
   veridianAdminApiKey: process.env.VERIDIAN_ADMIN_API_KEY ?? "",

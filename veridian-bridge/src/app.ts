@@ -16,6 +16,12 @@ import { z } from "zod";
 
 export interface BridgeConfig {
   staminadsUrl: string;
+  /**
+   * URL publique de staminads à coller dans le snippet tracker côté sites clients.
+   * Optionnel : si absent, fallback sur staminadsUrl (utile en dev local).
+   * Ex en staging : https://analytics-engine.staging.veridian.site
+   */
+  publicStaminadsUrl?: string;
   adminEmail: string;
   adminPassword: string;
   veridianAdminApiKey: string;
@@ -211,7 +217,8 @@ export function createApp(cfg: BridgeConfig): Express {
         staminadsApiKey: apiKey.key,
         trackingSnippet: {
           workspaceId: ws.id,
-          endpoint: cfg.staminadsUrl,
+          // URL publique du tracker (à coller dans le <script> côté site client)
+          endpoint: cfg.publicStaminadsUrl ?? cfg.staminadsUrl,
         },
       });
     } catch (err) {

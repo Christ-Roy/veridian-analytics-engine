@@ -224,6 +224,41 @@ test("provision: id force préfixe 'v_' si tenantSlug commence par chiffre", asy
   assert.match(sent.id, /^[a-z]/, "id doit commencer par une lettre");
 });
 
+test("provision: endpoint snippet = publicStaminadsUrl si fourni", async () => {
+  await closeBridge();
+  await fake.stop();
+  fake = new FakeStaminads();
+  await fake.start();
+  fake.setBehavior({ setupCompleted: true });
+  const app = createApp({
+    staminadsUrl: fake.url,
+    publicStaminadsUrl: "https://analytics-engine.staging.veridian.site",
+    adminEmail: "admin@veridian.local",
+    adminPassword: "test-pass-2026",
+    veridianAdminApiKey: ADMIN_KEY,
+  });
+  const started = await startAppOnEphemeralPort(app);
+  bridgeUrl = started.url;
+  closeBridge = started.close;
+
+  const res = await provision(VALID_BODY);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { trackingSnippet: { endpoint: string } };
+  assert.equal(
+    body.trackingSnippet.endpoint,
+    "https://analytics-engine.staging.veridian.site",
+    "Le snippet doit pointer sur l'URL publique pas l'URL réseau interne"
+  );
+});
+
+test("provision: endpoint fallback sur staminadsUrl si publicStaminadsUrl absent", async () => {
+  fake.setBehavior({ setupCompleted: true });
+  const res = await provision(VALID_BODY);
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { trackingSnippet: { endpoint: string } };
+  assert.equal(body.trackingSnippet.endpoint, fake.url);
+});
+
 test("provision: id tronqué à 50 chars max (limite staminads)", async () => {
   fake.setBehavior({ setupCompleted: true });
   // Slug à 60 chars (< limite Zod 64). Après slug, > 50 chars donc doit être tronqué.

@@ -49,6 +49,8 @@ services:
     networks:
       - staging-edge
       - engine-internal
+    environment:
+      PUBLIC_STAMINADS_URL: https://analytics-engine.staging.veridian.site
     labels:
       - traefik.enable=true
       - traefik.docker.network=staging-edge
