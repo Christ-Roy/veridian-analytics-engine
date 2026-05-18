@@ -204,3 +204,34 @@ test("provision: apiKey name contient le tenantSlug pour traçabilité", async (
   assert.equal(sent.role, "admin");
   assert.equal(sent.workspaceId, "ws_fake_abc");
 });
+
+test("provision: payload contient un id staminads valide [a-z][a-z0-9_]*", async () => {
+  fake.setBehavior({ setupCompleted: true });
+  await provision({ ...VALID_BODY, tenantSlug: "phase1-test" });
+  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
+  assert.ok(wsCall);
+  const sent = wsCall.body as { id: string };
+  assert.match(sent.id, /^[a-z][a-z0-9_]*$/, "id doit matcher la regex staminads");
+  assert.equal(sent.id, "phase1_test", "tirets convertis en underscores");
+});
+
+test("provision: id force préfixe 'v_' si tenantSlug commence par chiffre", async () => {
+  fake.setBehavior({ setupCompleted: true });
+  await provision({ ...VALID_BODY, tenantSlug: "123client" });
+  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
+  const sent = wsCall!.body as { id: string };
+  assert.match(sent.id, /^[a-z]/, "id doit commencer par une lettre");
+});
+
+test("provision: id tronqué à 50 chars max (limite staminads)", async () => {
+  fake.setBehavior({ setupCompleted: true });
+  // Slug à 60 chars (< limite Zod 64). Après slug, > 50 chars donc doit être tronqué.
+  const longSlug = "veridian-client-acme-corp-international-" + "x".repeat(20);
+  assert.ok(longSlug.length > 50 && longSlug.length <= 64, "longSlug doit être > 50 et ≤ 64 chars");
+  const res = await provision({ ...VALID_BODY, tenantSlug: longSlug });
+  assert.equal(res.status, 200, "provision doit réussir");
+  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
+  assert.ok(wsCall, "workspaces.create doit être appelé");
+  const sent = wsCall.body as { id: string };
+  assert.ok(sent.id.length <= 50, `id length ${sent.id.length} > 50`);
+});

@@ -149,6 +149,15 @@ export function createApp(cfg: BridgeConfig): Express {
     try {
       const adminToken = await getAdminToken();
 
+      // staminads id : [a-z][a-z0-9_]*, 2-50 chars (cf workspaces.create DTO).
+      // On transforme le tenantSlug Veridian (qui autorise les tirets) en id
+      // staminads valide. Tirets → underscores, lowercase forcé.
+      const staminadsWorkspaceId = parsed.data.tenantSlug
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "_")
+        .replace(/^[^a-z]/, "v_$&")
+        .slice(0, 50);
+
       const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
         method: "POST",
         headers: {
@@ -156,6 +165,7 @@ export function createApp(cfg: BridgeConfig): Express {
           Authorization: `Bearer ${adminToken}`,
         },
         body: JSON.stringify({
+          id: staminadsWorkspaceId,
           name: parsed.data.tenantName,
           website: parsed.data.website,
           timezone: parsed.data.timezone,
