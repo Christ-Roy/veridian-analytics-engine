@@ -186,10 +186,12 @@ jobs:
           cache-dependency-path: sdk/package-lock.json
       - name: npm ci
         run: npm ci
-      - name: Tests unitaires SDK (vitest)
-        run: npm test
+      # Build d'abord : certains tests vérifient que dist/ existe et que
+      # la version SDK_VERSION a bien été injectée dans le bundle.
       - name: Build SDK
         run: npm run build
+      - name: Tests unitaires SDK (vitest)
+        run: npm test
 
   # ─── Étage 2 : Build images ────────────────────────────────────────
   build:
