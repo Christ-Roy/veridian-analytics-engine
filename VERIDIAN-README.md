@@ -40,6 +40,51 @@ docker compose -f compose.yaml up -d
 # Init admin : POST /api/setup.initialize
 ```
 
+## Env DEV hot-reload sur dev-pub (Tailscale, pas Traefik)
+
+But : itérer vite sans payer 5 min de build CI à chaque modif. Le code est
+bind-monté depuis dev-pub, NestJS + tsx tournent en watch.
+
+```bash
+# 1. Bosse en local sur la branche `dev`, push.
+git checkout dev
+# ... modifs ...
+git push origin dev
+
+# 2. Sur dev-pub, déclenche le sync + reload :
+ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-up.sh'
+
+# 3. Premier setup seulement — expose en HTTPS Tailscale :
+ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-expose.sh'
+```
+
+URLs Tailscale (depuis n'importe quelle machine connectée au tailnet) :
+
+| Service | URL |
+|---|---|
+| Engine + console (NestJS) | `https://dev-server-1.tail324436.ts.net/` |
+| Engine API setup status | `https://dev-server-1.tail324436.ts.net/api/setup.status` |
+| Bridge Veridian | `https://dev-server-1.tail324436.ts.net/bridge/health` |
+
+Une fois la stack up, modifier un `.ts` côté `api/src/` ou `veridian-bridge/src/`
+recompile et redémarre tout seul (~1-2s NestJS, ~500ms bridge).
+
+**Logs live** :
+```bash
+ssh dev-pub 'docker logs -f analytics-engine-dev'
+ssh dev-pub 'docker logs -f analytics-engine-dev-bridge'
+```
+
+**Stop / nuke** :
+```bash
+ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-down.sh'   # stop, garde volumes
+ssh dev-pub 'sudo tailscale serve reset'                            # ferme l'expo HTTPS
+```
+
+CI sur push `dev` : quick checks uniquement (bridge typecheck + tests, SDK
+vitest, compose lint). **Pas de build d'image GHCR, pas de deploy** — c'est
+exprès, on dev sur dev-pub directement.
+
 ## Deploy staging
 
 Auto-deploy sur push `staging` : GHCR build → SSH dev-pub → `docker compose pull && up -d`.

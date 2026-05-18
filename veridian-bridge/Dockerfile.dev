@@ -1,0 +1,19 @@
+# Dockerfile.dev — Bridge Veridian en watch mode (tsx watch)
+#
+# Le bridge tourne déjà en `tsx watch` via `npm run dev`. Pas de compilation,
+# pas de build, juste les deps en cache et le source bind-monté.
+
+FROM node:22-alpine
+
+RUN apk add --no-cache wget
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.json ./
+RUN npm ci --no-audit --no-fund
+
+# src/ et tests/ bind-montés en runtime par compose/dev.yml
+
+EXPOSE 3002
+
+CMD ["npm", "run", "dev"]

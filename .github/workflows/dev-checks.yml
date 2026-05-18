@@ -1,0 +1,92 @@
+# Veridian Analytics Engine — CI dev (quick checks only)
+#
+# Branche `dev` = bac à sable hot-reload sur dev-pub via Tailscale.
+# Pas de deploy CI, pas de build d'image GHCR : le dev tourne en bind-mount
+# sur dev-pub (cf scripts/dev-up.sh).
+#
+# Ce workflow garantit juste qu'on ne casse pas l'app au sens "ça compile + tests
+# passent". Il ne BLOQUE rien — c'est volontaire pour ship-fast en POC démo
+# (cf master prompt sprint Convince-Robert).
+
+name: Dev checks (no deploy)
+
+on:
+  push:
+    branches: [dev]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'releases/**'
+      - 'TODO.md'
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: analytics-engine-dev-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge-checks:
+    name: Bridge — typecheck + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: veridian-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: veridian-bridge/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npm run test:ci
+
+  sdk-checks:
+    name: SDK — build + vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: sdk/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build
+      - run: npm test
+
+  # NB : les tests Jest API sont déjà couverts par .github/workflows/test.yml
+  # (upstream staminads, push:[main, dev]). On ne les duplique pas ici.
+
+  compose-lint:
+    name: Compose dev — syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: yamllint compose/dev.yml
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq yamllint
+          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable}}" \
+            compose/dev.yml .github/workflows/dev-checks.yml
+      - name: docker compose config
+        env:
+          CLICKHOUSE_PASSWORD: ci-clickhouse-pass
+          ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
+          STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
+          VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
+        run: docker compose -f compose/dev.yml config -q

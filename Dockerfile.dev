@@ -1,0 +1,35 @@
+# Dockerfile.dev — Engine NestJS en watch mode (hot reload)
+#
+# Pas de build prod, pas de stage frontend. On installe les deps de api/ et console/
+# et on lance NestJS en watch. Le code source est bind-monté depuis l'hôte
+# (cf compose/dev.yml) donc une modif `.ts` redémarre le serveur en ~1s.
+#
+# La console (frontend) est build une fois au boot via `console-build` (étape one-shot)
+# et copiée dans api/dist/public pour servir via NestJS. Pour HMR frontend séparé,
+# voir le service `console-vite` du compose dev.
+
+FROM node:22-alpine
+
+RUN apk add --no-cache wget bash
+
+WORKDIR /app
+
+# Installer deps API
+COPY api/package.json api/package-lock.json ./api/
+RUN cd api && npm ci --no-audit --no-fund
+
+# Installer deps SDK (utilisé par console au build, et par certains tests)
+COPY sdk/package.json sdk/package-lock.json ./sdk/
+RUN cd sdk && npm ci --no-audit --no-fund
+
+# Installer deps console (build initial du frontend)
+COPY console/package.json console/package-lock.json ./console/
+RUN cd console && npm ci --no-audit --no-fund
+
+# Le reste du code est bind-monté en runtime par compose/dev.yml
+# (volumes: ./api:/app/api, ./console:/app/console, ./sdk:/app/sdk)
+
+EXPOSE 3000
+
+# Entrypoint scripté : build SDK + console une fois, puis NestJS en watch
+CMD ["bash", "-c", "cd /app/sdk && npm run build && cd /app/console && npm run build && mkdir -p /app/api/dist/public && cp -r /app/console/dist/* /app/api/dist/public/ && cd /app/api && npm run start:dev"]
