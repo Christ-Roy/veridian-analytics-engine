@@ -70,9 +70,6 @@ ENCRYPTION_KEY=${ENCRYPTION_KEY}
 STAMINADS_ADMIN_EMAIL=${STAMINADS_ADMIN_EMAIL}
 STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
 VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
-APP_URL=https://dev-server-1.tail324436.ts.net
-CORS_ALLOWED_ORIGINS=https://dev-server-1.tail324436.ts.net,http://localhost:3000,http://localhost:5173
-PUBLIC_STAMINADS_URL=https://dev-server-1.tail324436.ts.net
 EOF
     chmod 600 "${ENV_FILE}"
     echo "    → .env.dev généré : ${ENV_FILE}"
@@ -106,13 +103,12 @@ echo ""
 echo "═══════════════════════════════════════════════════════════════"
 echo " ✓ Stack dev démarrée"
 echo "═══════════════════════════════════════════════════════════════"
-echo " Engine (NestJS)  : http://127.0.0.1:3000/api/setup.status"
-echo " Bridge Veridian  : http://127.0.0.1:3002/health"
-echo " ClickHouse       : http://127.0.0.1:8123/ping"
-echo ""
-echo " Pour exposer via Tailscale HTTPS (depuis ta machine locale) :"
-echo "   ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-expose.sh'"
+echo " URLs (depuis n'importe quelle machine du tailnet) :"
+echo "   Engine + console   : https://analytics-engine-dev.staging.veridian.site/"
+echo "   Engine setup       : https://analytics-engine-dev.staging.veridian.site/api/setup.status"
+echo "   Bridge health      : https://analytics-engine-bridge-dev.staging.veridian.site/health"
 echo ""
 echo " Pour suivre les logs en live :"
 echo "   ssh dev-pub 'docker logs -f analytics-engine-dev'"
+echo "   ssh dev-pub 'docker logs -f analytics-engine-dev-bridge'"
 echo "═══════════════════════════════════════════════════════════════"

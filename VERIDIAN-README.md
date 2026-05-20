@@ -40,7 +40,7 @@ docker compose -f compose.yaml up -d
 # Init admin : POST /api/setup.initialize
 ```
 
-## Env DEV hot-reload sur dev-pub (Tailscale, pas Traefik)
+## Env DEV hot-reload sur dev-pub (Traefik staging-edge, tailnet only)
 
 But : itérer vite sans payer 5 min de build CI à chaque modif. Le code est
 bind-monté depuis dev-pub, NestJS + tsx tournent en watch.
@@ -53,18 +53,16 @@ git push origin dev
 
 # 2. Sur dev-pub, déclenche le sync + reload :
 ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-up.sh'
-
-# 3. Premier setup seulement — expose en HTTPS Tailscale :
-ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-expose.sh'
 ```
 
-URLs Tailscale (depuis n'importe quelle machine connectée au tailnet) :
+URLs (joignables depuis n'importe quelle machine sur le tailnet — wildcard
+`*.staging.veridian.site` → IP dev-pub privée, pas d'exposition Internet) :
 
 | Service | URL |
 |---|---|
-| Engine + console (NestJS) | `https://dev-server-1.tail324436.ts.net/` |
-| Engine API setup status | `https://dev-server-1.tail324436.ts.net/api/setup.status` |
-| Bridge Veridian | `https://dev-server-1.tail324436.ts.net/bridge/health` |
+| Engine + console (NestJS) | `https://analytics-engine-dev.staging.veridian.site/` |
+| Engine API setup status | `https://analytics-engine-dev.staging.veridian.site/api/setup.status` |
+| Bridge Veridian health | `https://analytics-engine-bridge-dev.staging.veridian.site/health` |
 
 Une fois la stack up, modifier un `.ts` côté `api/src/` ou `veridian-bridge/src/`
 recompile et redémarre tout seul (~1-2s NestJS, ~500ms bridge).
@@ -75,10 +73,9 @@ ssh dev-pub 'docker logs -f analytics-engine-dev'
 ssh dev-pub 'docker logs -f analytics-engine-dev-bridge'
 ```
 
-**Stop / nuke** :
+**Stop** :
 ```bash
-ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-down.sh'   # stop, garde volumes
-ssh dev-pub 'sudo tailscale serve reset'                            # ferme l'expo HTTPS
+ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-down.sh'   # garde volumes
 ```
 
 CI sur push `dev` : quick checks uniquement (bridge typecheck + tests, SDK

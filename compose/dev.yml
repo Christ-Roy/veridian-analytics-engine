@@ -1,5 +1,5 @@
 # ============================================================================
-# compose/dev.yml — Environnement DEV hot-reload sur dev-pub (Tailscale only)
+# compose/dev.yml — Environnement DEV hot-reload sur dev-pub (Traefik staging-edge)
 # ============================================================================
 #
 # But : itérer vite. Modif locale → push branche `dev` → ssh dev-pub → la
@@ -8,14 +8,17 @@
 # Pas d'image GHCR : build local sur dev-pub depuis Dockerfile.dev. Code source
 # bind-monté depuis /opt/dev/analytics-engine (clone du repo branche `dev`).
 #
-# Exposition : pas de Traefik. Ports liés à 127.0.0.1 + tailscale serve qui les
-# proxy en HTTPS sur le hostname Tailscale du dev-server (dev-server-1.tail324436.ts.net).
+# Exposition : Traefik staging-edge (réseau privé Tailscale uniquement).
+# Le wildcard *.staging.veridian.site → dev-pub (joignable uniquement via tailnet).
+# Pas d'exposition Internet publique.
 #
-# NE PAS combiner avec base.yml — c'est un compose autonome (pas d'image GHCR).
+# URLs (depuis n'importe quelle machine sur le tailnet) :
+#   - https://analytics-engine-dev.staging.veridian.site/          → engine
+#   - https://analytics-engine-bridge-dev.staging.veridian.site/   → bridge
 #
 # ⚠️ PROJECT NAME ISOLÉ : on force `name: analytics-engine-dev` pour ne PAS
-# partager le project name avec le compose staging (sinon `up --remove-orphans`
-# supprime les containers staging — incident 2026-05-18).
+# partager le project name avec le compose staging (incident 2026-05-18 :
+# `--remove-orphans` supprime les containers staging).
 #
 # Variables d'env attendues (cf .env.dev) :
 #   CLICKHOUSE_PASSWORD       = mot de passe ClickHouse dev (peu importe, isolé)
@@ -40,8 +43,6 @@ services:
     volumes:
       - clickhouse-dev-data:/var/lib/clickhouse
       - ../clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro
-    ports:
-      - "127.0.0.1:8123:8123"
     networks:
       - engine-internal
     healthcheck:
@@ -66,8 +67,8 @@ services:
       NODE_ENV: development
       JWT_EXPIRES_IN: 7d
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requis}
-      APP_URL: ${APP_URL:-https://dev-server-1.tail324436.ts.net}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-https://dev-server-1.tail324436.ts.net}
+      APP_URL: https://analytics-engine-dev.staging.veridian.site
+      CORS_ALLOWED_ORIGINS: https://analytics-engine-dev.staging.veridian.site,https://analytics-engine-bridge-dev.staging.veridian.site
       CLICKHOUSE_HOST: http://clickhouse:8123
       CLICKHOUSE_SYSTEM_DATABASE: staminads_system
       CLICKHOUSE_DATABASE: staminads
@@ -89,10 +90,18 @@ services:
       - engine-api-node-modules:/app/api/node_modules
       - engine-console-node-modules:/app/console/node_modules
       - engine-sdk-node-modules:/app/sdk/node_modules
-    ports:
-      - "127.0.0.1:3000:3000"
     networks:
+      - staging-edge
       - engine-internal
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=staging-edge
+      - traefik.http.routers.analytics-engine-dev.rule=Host(`analytics-engine-dev.staging.veridian.site`)
+      - traefik.http.routers.analytics-engine-dev.entrypoints=websecure
+      - traefik.http.routers.analytics-engine-dev.tls=true
+      - traefik.http.routers.analytics-engine-dev.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-engine-dev.loadbalancer.server.port=3000
+      - veridian.staging.app=analytics-engine-dev
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/setup.status || exit 1"]
       interval: 15s
@@ -117,17 +126,25 @@ services:
       STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
       STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis}
-      PUBLIC_STAMINADS_URL: ${PUBLIC_STAMINADS_URL:-https://dev-server-1.tail324436.ts.net}
+      PUBLIC_STAMINADS_URL: https://analytics-engine-dev.staging.veridian.site
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ../veridian-bridge/src:/app/src
       - ../veridian-bridge/tests:/app/tests
       - ../veridian-bridge/tsconfig.json:/app/tsconfig.json:ro
       - bridge-node-modules:/app/node_modules
-    ports:
-      - "127.0.0.1:3002:3002"
     networks:
+      - staging-edge
       - engine-internal
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=staging-edge
+      - traefik.http.routers.analytics-engine-bridge-dev.rule=Host(`analytics-engine-bridge-dev.staging.veridian.site`)
+      - traefik.http.routers.analytics-engine-bridge-dev.entrypoints=websecure
+      - traefik.http.routers.analytics-engine-bridge-dev.tls=true
+      - traefik.http.routers.analytics-engine-bridge-dev.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-engine-bridge-dev.loadbalancer.server.port=3002
+      - veridian.staging.app=analytics-engine-dev
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1"]
       interval: 15s
@@ -143,5 +160,7 @@ volumes:
   bridge-node-modules:
 
 networks:
+  staging-edge:
+    external: true
   engine-internal:
     driver: bridge
