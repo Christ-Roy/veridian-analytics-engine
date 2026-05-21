@@ -26,6 +26,7 @@
     - veridian-bridge/tests/track-test.test.ts
     - veridian-bridge/tests/analytics.test.ts
     - veridian-bridge/tests/tenant-status.test.ts
+    - veridian-bridge/tests/shadow-marketing.test.ts
   reason: |
     app.ts contient toute la logique Express du bridge (factory createApp,
     middlewares, handlers). Chaque endpoint a son fichier de tests dédié
@@ -37,6 +38,7 @@
     - track-test (UTM, headers, invariants pageview)
     - analytics proxy (status forward, payload query)
     - tenant-status (services actifs/inactifs, V1 pageviews depuis staminads)
+    - shadow-marketing (endpoint public GET /api/admin/shadow-marketing)
 
 - sources:
     - veridian-bridge/src/tenant-status.ts
@@ -48,6 +50,18 @@
     injecté dans createApp() (workspace vide, 1500 PV, auth, 403). Les TODOs
     forms/calls/gsc/ads/pagespeed seront couverts par les tests des tickets
     correspondants (B1, A4) qui ajouteront leur propre fetcher.
+
+- sources:
+    - veridian-bridge/src/shadow-marketing.ts
+  covered_by:
+    - veridian-bridge/tests/shadow-marketing.test.ts
+  reason: |
+    Config statique des textes vendeurs (shadow marketing) pour les 6
+    services KNOWN_SERVICES. Tests valident :
+    - les 6 entrées présentes (mapping exact avec KNOWN_SERVICES)
+    - tous les champs requis non vides + icon dans ShadowIconKey
+    - emailBodyTemplate contient le placeholder {{domain}}
+    - endpoint GET /api/admin/shadow-marketing public (200 sans Bearer)
 
 - sources:
     - veridian-bridge/src/index.ts

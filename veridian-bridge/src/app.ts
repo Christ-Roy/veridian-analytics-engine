@@ -18,6 +18,7 @@ import {
   makeStaminadsPageviewsFetcher,
   type PageviewsFetcher,
 } from "./tenant-status.js";
+import { SHADOW_MARKETING } from "./shadow-marketing.js";
 
 export interface BridgeConfig {
   staminadsUrl: string;
@@ -397,6 +398,24 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
       }
     },
   );
+
+  /**
+   * GET /api/admin/shadow-marketing
+   *
+   * Renvoie la config statique de shadow marketing (textes vendeurs +
+   * CTA + email pré-rempli) pour les 6 services de `KNOWN_SERVICES`.
+   *
+   * **PUBLIC** : pas d'auth. C'est du data statique marketing destiné au
+   * front qui rend les blocks "service non actif comme pub passive" en
+   * croisant avec `inactiveServices` du tenant-status.
+   *
+   * Le `emailBodyTemplate` contient un placeholder `{{domain}}` que le
+   * front remplace par le domaine du site client au moment de construire
+   * le mailto.
+   */
+  app.get("/api/admin/shadow-marketing", (_req, res) => {
+    res.json(SHADOW_MARKETING);
+  });
 
   return app;
 }
