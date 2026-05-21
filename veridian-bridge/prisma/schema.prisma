@@ -1,0 +1,119 @@
+// Veridian Bridge — schéma Postgres (DB `veridian_bridge`)
+//
+// Premier schéma BDD du bridge. Modèles :
+//   - Tenant      : un par site client (ref staminads workspace + Hub)
+//   - GscProperty : propriété Search Console attachée à un tenant
+//   - GscDaily    : rows daily GSC (clicks/impressions/position) groupées
+//                   par (date, query, page, country, device, searchType)
+//
+// Coordination cross-tickets :
+//   - A4 (ce ticket)  : crée Tenant + GscProperty + GscDaily
+//   - B3              : étend Tenant pour intégration Hub (déjà inclus ici en colonnes optionnelles
+//                       pour que B3 n'ait qu'à câbler les endpoints — pas à toucher le schéma)
+//
+// Chiffrement : `GscProperty.oauthAccount` stocke les tokens OAuth Google
+// au format AES-256-GCM (cf src/gsc/oauth.ts). JAMAIS de clear text en DB.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("BRIDGE_DATABASE_URL")
+}
+
+// ─── Tenant ───────────────────────────────────────────────────────────────
+//
+// Un Tenant = 1 client Veridian Analytics.
+// - workspaceId : id staminads (workspace dans ClickHouse)
+// - hubTenantId : id côté Hub (B3 câblera la sync)
+// - plan / planSource / status / apiKey / suspendedAt / softDeletedAt :
+//   champs étendus pour B3, déclarés ici dès A4 pour éviter une migration
+//   ultérieure quand B3 prendra le ticket.
+
+model Tenant {
+  id              String    @id @default(cuid())
+  workspaceId     String    @unique
+  slug            String    @unique
+  name            String
+
+  // Hub integration (B3 consomme ces colonnes)
+  hubTenantId     String?   @unique
+  plan            String    @default("free")
+  planSource      String?   // "hub" | "manual" | "trial"
+  status          String    @default("active") // "active" | "suspended" | "soft_deleted"
+  apiKey          String?   @unique
+  suspendedAt     DateTime?
+  softDeletedAt   DateTime?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  gscProperties   GscProperty[]
+
+  @@index([status])
+  @@index([hubTenantId])
+}
+
+// ─── GscProperty ──────────────────────────────────────────────────────────
+//
+// Propriété Search Console rattachée à un Tenant. `siteUrl` est l'identifiant
+// GSC tel qu'attendu par l'API (ex : "sc-domain:exemple.fr" ou
+// "https://www.exemple.fr/").
+//
+// `oauthAccount` (Json) contient les tokens chiffrés via AES-256-GCM :
+//   {
+//     iv: "<hex>",
+//     tag: "<hex>",
+//     ciphertext: "<hex>",   // JSON chiffré { access_token, refresh_token, expires_at, scope }
+//     v: 1
+//   }
+
+model GscProperty {
+  id              String    @id @default(cuid())
+  tenantId        String
+  siteUrl         String
+  type            String    // "SITE" | "DOMAIN"
+  ownershipState  String    @default("pending") // "verified" | "pending" | "failed"
+  lastSyncAt      DateTime?
+  oauthAccount    Json?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  dailyRows       GscDaily[]
+
+  @@unique([tenantId, siteUrl])
+  @@index([ownershipState])
+}
+
+// ─── GscDaily ─────────────────────────────────────────────────────────────
+//
+// Une row par combinaison (date, query, page, country, device, searchType)
+// pour chaque GscProperty. `query`/`page`/`country`/`device` peuvent être
+// vides ("") quand l'aggregation se fait sur l'autre dimension.
+
+model GscDaily {
+  id              String    @id @default(cuid())
+  gscPropertyId   String
+  date            DateTime  @db.Date
+  query           String    @default("")
+  page            String    @default("")
+  country         String    @default("")
+  device          String    @default("")
+  searchType      String    @default("web")
+  impressions     Int       @default(0)
+  clicks          Int       @default(0)
+  position        Float     @default(0)
+  ctr             Float     @default(0)
+
+  createdAt       DateTime  @default(now())
+
+  gscProperty     GscProperty @relation(fields: [gscPropertyId], references: [id], onDelete: Cascade)
+
+  @@unique([gscPropertyId, date, query, page, country, device, searchType])
+  @@index([gscPropertyId, date])
+}
