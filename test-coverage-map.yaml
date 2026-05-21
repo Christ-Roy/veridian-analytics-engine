@@ -25,6 +25,10 @@
     - veridian-bridge/tests/provision-tenant.test.ts
     - veridian-bridge/tests/track-test.test.ts
     - veridian-bridge/tests/analytics.test.ts
+    - veridian-bridge/tests/hub/hmac-valid.test.ts
+    - veridian-bridge/tests/hub/provision-cas-a.test.ts
+    - veridian-bridge/tests/hub/attach-owner.test.ts
+    - veridian-bridge/tests/hub/health.test.ts
   reason: |
     app.ts contient toute la logique Express du bridge (factory createApp,
     middlewares, handlers). Chaque endpoint a son fichier de tests dédié
@@ -56,6 +60,88 @@
     Helper de tests utilisé par les fichiers d'intégration. Si on casse le
     helper, les tests qui s'en servent cassent. Toute modif du helper exige
     modif d'au moins un test consommateur.
+
+# ─── BRIDGE HUB CONTRACT (B3 — CONTRAT-HUB §5.1, §5.3, §5.5, §6.1) ─────
+
+- sources:
+    - veridian-bridge/src/hub-hmac.ts
+  covered_by:
+    - veridian-bridge/tests/hub/hmac-valid.test.ts
+    - veridian-bridge/tests/hub/hmac-invalid-signature.test.ts
+    - veridian-bridge/tests/hub/hmac-replay-attack.test.ts
+    - veridian-bridge/tests/hub/hmac-body-modified.test.ts
+  reason: |
+    Lib HMAC Hub (Pattern A §6.1) : verifyHubHmac + hubHmacMiddleware +
+    assertSkipHmacAllowed. 4 fichiers de tests couvrent : signature valide,
+    signature invalide, anti-replay timestamp ±5min, body modifié après
+    signature. Constant-time compare via crypto.timingSafeEqual.
+
+- sources:
+    - veridian-bridge/src/paywall.ts
+  covered_by:
+    - veridian-bridge/tests/hub/paywall-required.test.ts
+  reason: |
+    Lib paywall V1 (stub) : requireActivePlan() lève PaywallError(402) si
+    tenant.status ∈ {suspended, trial_expired, soft_deleted}. V2 (S3) :
+    obfuscation field-level. Tests : 6 scénarios couvrant tous les status +
+    helper isPlanActive + tenant introuvable.
+
+- sources:
+    - veridian-bridge/src/hub/store.ts
+  covered_by:
+    - veridian-bridge/tests/hub/provision-cas-a.test.ts
+    - veridian-bridge/tests/hub/provision-cas-b.test.ts
+    - veridian-bridge/tests/hub/provision-cas-c.test.ts
+    - veridian-bridge/tests/hub/attach-owner.test.ts
+    - veridian-bridge/tests/hub/paywall-required.test.ts
+  reason: |
+    Interface TenantStore + impl InMemoryTenantStore. À substituer par
+    PrismaTenantStore quand A4 sera mergée (Tenant model déjà câblé en A4
+    avec les colonnes B3 préemptées : hubTenantId, plan, planSource, status,
+    apiKey, suspendedAt, softDeletedAt). Tests provision + attach-owner +
+    paywall exercent toutes les méthodes du store.
+
+- sources:
+    - veridian-bridge/src/hub/provision.ts
+  covered_by:
+    - veridian-bridge/tests/hub/provision-cas-a.test.ts
+    - veridian-bridge/tests/hub/provision-cas-b.test.ts
+    - veridian-bridge/tests/hub/provision-cas-c.test.ts
+  reason: |
+    Endpoint POST /api/tenants/provision (CONTRAT-HUB §5.1). 3 cas
+    idempotents A/B/C : nouveau tenant, ré-attach (refresh apiKey),
+    conflit owner_email (409). Coordonne avec hook staminads pour créer
+    workspace + apiKey.
+
+- sources:
+    - veridian-bridge/src/hub/attach-owner.ts
+  covered_by:
+    - veridian-bridge/tests/hub/attach-owner.test.ts
+    - veridian-bridge/tests/hub/attach-owner-idempotent.test.ts
+  reason: |
+    Endpoint POST /api/tenants/attach-owner (CONTRAT-HUB §5.3). Lie un
+    user au tenant en mode OWNER. Idempotent : same (tenant, email, user_id)
+    → already_attached:true. 404 si tenant inexistant.
+
+- sources:
+    - veridian-bridge/src/hub/health.ts
+  covered_by:
+    - veridian-bridge/tests/hub/health.test.ts
+  reason: |
+    Endpoint GET /api/tenants/:id/health (CONTRAT-HUB §5.5). Renvoie
+    status + magic_link_capable + api_key_valid + stats (last_event_at,
+    sites_count, pageviews_30d). loadStats injectable côté factory pour
+    brancher staminads /analytics.query plus tard.
+
+- sources:
+    - veridian-bridge/tests/hub/helpers.ts
+  covered_by:
+    - veridian-bridge/tests/hub/hmac-valid.test.ts
+    - veridian-bridge/tests/hub/provision-cas-a.test.ts
+  reason: |
+    Helper commun aux tests Hub : createHubBridge() (factory bridge avec
+    store mémoire + hook staminads fake) + signedFetch() (POST/GET signé
+    HMAC pour tests). Modif du helper → casse les tests qui s'en servent.
 
 - sources:
     - veridian-bridge/Dockerfile

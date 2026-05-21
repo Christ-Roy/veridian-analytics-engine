@@ -13,6 +13,15 @@ import express, {
   type NextFunction,
 } from "express";
 import { z } from "zod";
+import { hubHmacMiddleware } from "./hub-hmac.js";
+import {
+  InMemoryTenantStore,
+  type TenantRecord,
+  type TenantStore,
+} from "./hub/store.js";
+import { provisionHandler } from "./hub/provision.js";
+import { attachOwnerHandler } from "./hub/attach-owner.js";
+import { healthHandler, type HealthStats } from "./hub/health.js";
 
 export interface BridgeConfig {
   staminadsUrl: string;
@@ -25,6 +34,32 @@ export interface BridgeConfig {
   adminEmail: string;
   adminPassword: string;
   veridianAdminApiKey: string;
+  /**
+   * Hub integration (B3). Si absent, les routes `/api/tenants/*` sont
+   * montées avec un store en mémoire et un secret par défaut "dev-secret"
+   * (utile pour les tests anciens qui ne touchent pas Hub).
+   */
+  hub?: {
+    /** Secret HMAC partagé Hub ↔ bridge (32+ chars). */
+    hmacSecret: string;
+    /** Bypass HMAC en dev (SKIP_HMAC=true), refusé en prod/staging. */
+    skipHmac?: boolean;
+    /** Store custom (Prisma plus tard). Default : InMemoryTenantStore. */
+    store?: TenantStore;
+    /** URL publique dashboard renvoyée par /provision. */
+    publicDashboardUrl?: string;
+    /** Hook stats pour /health (optionnel). */
+    loadStats?(tenant: TenantRecord): Promise<HealthStats>;
+    /**
+     * Hook staminads pour /provision. Si absent, on appelle l'API staminads
+     * via `cfg.staminadsUrl` (path par défaut). Les tests injectent un fake.
+     */
+    createStaminadsWorkspace?(input: {
+      hubTenantId: string;
+      workspaceName: string;
+      ownerEmail: string;
+    }): Promise<{ workspaceId: string; apiKey: string }>;
+  };
 }
 
 export interface AdminToken {
@@ -69,7 +104,12 @@ export function createApp(cfg: BridgeConfig): Express {
   validateConfig(cfg);
 
   const app = express();
-  app.use(express.json({ limit: "256kb" }));
+  // express.json() global SAUF sur /api/tenants/* qui utilisent un middleware
+  // HMAC qui lit le raw body lui-même (signature sur les octets bruts).
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/api/tenants/")) return next();
+    return express.json({ limit: "256kb" })(req, res, next);
+  });
 
   let cachedAdminToken: AdminToken | null = null;
 
@@ -330,6 +370,95 @@ export function createApp(cfg: BridgeConfig): Express {
       res.status(500).json({ error: "internal", message: (err as Error).message });
     }
   });
+
+  // ─── Hub HMAC routes (B3) ──────────────────────────────────────────────
+  //
+  // Ces routes vivent SOUS leur propre middleware HMAC qui parse lui-même
+  // le raw body (nécessaire pour la vérif de signature). On les monte en
+  // dehors du `express.json()` global.
+
+  const hubStore: TenantStore = cfg.hub?.store ?? new InMemoryTenantStore();
+  const hubSecret = cfg.hub?.hmacSecret ?? "dev-secret-do-not-use";
+  const hubSkip = cfg.hub?.skipHmac ?? false;
+
+  const hubHmac = hubHmacMiddleware({
+    secret: hubSecret,
+    skipHmac: hubSkip,
+  });
+
+  // Default staminads hook : appelle l'API workspaces.create / apiKeys.create
+  // via le pipeline admin token déjà existant.
+  const defaultStaminadsHook = async (input: {
+    hubTenantId: string;
+    workspaceName: string;
+    ownerEmail: string;
+  }) => {
+    const adminToken = await getAdminToken();
+    const wsId = input.hubTenantId
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "_")
+      .replace(/^[^a-z]/, "v_$&")
+      .slice(0, 50);
+    const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        id: wsId,
+        name: input.workspaceName,
+        website: `https://${wsId}.veridian.site`,
+        timezone: "UTC",
+        currency: "EUR",
+      }),
+    });
+    if (!wsRes.ok) {
+      throw new Error(`workspace_create_failed:${wsRes.status}`);
+    }
+    const ws = (await wsRes.json()) as { id: string };
+
+    const keyRes = await fetch(`${cfg.staminadsUrl}/api/apiKeys.create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${adminToken}`,
+      },
+      body: JSON.stringify({
+        workspace_id: ws.id,
+        name: `veridian-hub-${input.hubTenantId}`,
+        role: "admin",
+      }),
+    });
+    if (!keyRes.ok) {
+      throw new Error(`apikey_create_failed:${keyRes.status}`);
+    }
+    const apiKey = (await keyRes.json()) as { key: string };
+    return { workspaceId: ws.id, apiKey: apiKey.key };
+  };
+
+  app.post(
+    "/api/tenants/provision",
+    hubHmac,
+    provisionHandler({
+      store: hubStore,
+      createStaminadsWorkspace:
+        cfg.hub?.createStaminadsWorkspace ?? defaultStaminadsHook,
+      publicDashboardUrl: cfg.hub?.publicDashboardUrl,
+    })
+  );
+
+  app.post(
+    "/api/tenants/attach-owner",
+    hubHmac,
+    attachOwnerHandler({ store: hubStore })
+  );
+
+  app.get(
+    "/api/tenants/:id/health",
+    hubHmac,
+    healthHandler({ store: hubStore, loadStats: cfg.hub?.loadStats })
+  );
 
   return app;
 }
