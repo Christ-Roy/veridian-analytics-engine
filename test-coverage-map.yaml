@@ -422,11 +422,37 @@
     - veridian-bridge/tests/gsc-oauth-flow.test.ts
     - veridian-bridge/tests/gsc-sync.test.ts
     - veridian-bridge/tests/gsc-query-parsing.test.ts
+    - veridian-bridge/tests/push/subscribe.test.ts
+    - veridian-bridge/tests/push/send-notification.test.ts
   reason: |
-    Schema Prisma (Tenant, GscProperty, GscDaily). Toutes les contraintes
-    (unique, default, types) sont reflétées dans le FakePrismaClient
-    in-memory utilisé par les tests. `prisma migrate deploy` au boot du
-    container valide le schéma vs DB réelle en environnements live.
+    Schema Prisma (Tenant, GscProperty, GscDaily, PushSubscription,
+    PushNotification). Toutes les contraintes (unique, default, types)
+    sont reflétées dans le FakePrismaClient in-memory utilisé par les
+    tests. `prisma migrate deploy` au boot du container valide le schéma
+    vs DB réelle en environnements live.
+
+# ─── Push Notifications (B2) ───────────────────────────────────────────
+
+- sources:
+    - veridian-bridge/src/push/index.ts
+    - veridian-bridge/src/push/routes.ts
+  covered_by:
+    - veridian-bridge/tests/push/subscribe.test.ts
+    - veridian-bridge/tests/push/unsubscribe.test.ts
+    - veridian-bridge/tests/push/send-notification.test.ts
+    - veridian-bridge/tests/push/vapid-key.test.ts
+    - veridian-bridge/tests/push/expired-subscription-cleanup.test.ts
+  reason: |
+    Port des push notifications PWA depuis veridian-analytics legacy.
+    - index.ts : subscribePushClient (idempotent par endpoint),
+      unsubscribePushClient (active=false), sendNotificationToTenant
+      (boucle subs actives + audit PushNotification + cleanup auto 410 Gone),
+      getVapidPublicKey, configureWebPush, readVapidConfigFromEnv.
+      Sender injectable (setPushSenderForTests) pour mocker web-push.
+    - routes.ts : 6 endpoints HTTP (3 publics : subscribe/unsubscribe/
+      vapid-key avec CORS *, 3 admin Bearer : send/subscribers/history).
+    Tests : 31 cas couvrant happy path, idempotence, cleanup auto 410/404,
+    payload invalide, auth admin, CORS, tenant inconnu, mix success/failure.
 
 # ─── Forms + Leads (B1) ───────────────────────────────────────────────
 

@@ -51,8 +51,10 @@ model Tenant {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  gscProperties   GscProperty[]
-  sites           Site[]
+  gscProperties     GscProperty[]
+  sites             Site[]
+  pushSubscriptions PushSubscription[]
+  pushNotifications PushNotification[]
 
   @@index([status])
   @@index([hubTenantId])
@@ -238,4 +240,58 @@ model LeadSession {
   lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
+}
+
+// ─── PushSubscription ─────────────────────────────────────────────────────
+//
+// Un abonnement Web Push enregistré côté browser (PWA / site client).
+// `endpoint` est l'URL du push provider (FCM/APNs/Mozilla) et sert
+// d'identifiant unique global.
+//
+// `keys` = JSON `{ p256dh, auth }` issu de `subscription.getKey()` côté
+// browser, base64-url-encoded.
+//
+// `active=false` quand le push provider retourne 410 Gone (browser
+// désinstallé, permission révoquée). On garde la row pour audit mais on
+// arrête d'envoyer dessus.
+
+model PushSubscription {
+  id          String    @id @default(cuid())
+  tenantId    String
+  siteId      String?   // optionnel — push lié à un site spécifique
+  endpoint    String    @unique
+  keys        Json      // { p256dh: string, auth: string }
+  userAgent   String?
+  visitorId   String?   // cookie vrd_vid si présent
+  createdAt   DateTime  @default(now())
+  lastSeenAt  DateTime  @default(now())
+  active      Boolean   @default(true)
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+}
+
+// ─── PushNotification ─────────────────────────────────────────────────────
+//
+// Audit log des notifs push envoyées par un tenant. `targetCount` est le
+// nombre de subscriptions actives au moment de l'envoi, `successCount` /
+// `failureCount` ce que le push provider a accepté/rejeté.
+
+model PushNotification {
+  id           String    @id @default(cuid())
+  tenantId     String
+  title        String
+  body         String
+  url          String?
+  icon         String?
+  targetCount  Int       @default(0)
+  successCount Int       @default(0)
+  failureCount Int       @default(0)
+  sentAt       DateTime  @default(now())
+  sentBy       String?   // user id qui a déclenché l'envoi (optionnel)
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, sentAt])
 }

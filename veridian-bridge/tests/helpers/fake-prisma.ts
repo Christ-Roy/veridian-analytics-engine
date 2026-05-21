@@ -54,12 +54,41 @@ export interface FakeGscDaily {
   createdAt: Date;
 }
 
+export interface FakePushSubscription {
+  id: string;
+  tenantId: string;
+  siteId: string | null;
+  endpoint: string;
+  keys: { p256dh: string; auth: string };
+  userAgent: string | null;
+  visitorId: string | null;
+  createdAt: Date;
+  lastSeenAt: Date;
+  active: boolean;
+}
+
+export interface FakePushNotification {
+  id: string;
+  tenantId: string;
+  title: string;
+  body: string;
+  url: string | null;
+  icon: string | null;
+  targetCount: number;
+  successCount: number;
+  failureCount: number;
+  sentAt: Date;
+  sentBy: string | null;
+}
+
 type QueryRawHandler = (sql: string, params: unknown[]) => unknown[];
 
 export class FakePrismaClient {
   tenants: FakeTenant[] = [];
   gscProperties: FakeGscProperty[] = [];
   gscDailies: FakeGscDaily[] = [];
+  pushSubs: FakePushSubscription[] = [];
+  pushNotifs: FakePushNotification[] = [];
 
   private rawHandler: QueryRawHandler | null = null;
 
@@ -304,6 +333,159 @@ export class FakePrismaClient {
         );
       }
       return [...this.gscDailies];
+    },
+  };
+
+  pushSubscription = {
+    findUnique: async (args: {
+      where: { id?: string; endpoint?: string };
+    }): Promise<FakePushSubscription | null> => {
+      const s = this.pushSubs.find((x) => {
+        if (args.where.id) return x.id === args.where.id;
+        if (args.where.endpoint) return x.endpoint === args.where.endpoint;
+        return false;
+      });
+      return s ?? null;
+    },
+    findMany: async (args?: {
+      where?: { tenantId?: string; active?: boolean };
+      orderBy?: { lastSeenAt?: "asc" | "desc" };
+      take?: number;
+    }): Promise<FakePushSubscription[]> => {
+      let res = [...this.pushSubs];
+      if (args?.where?.tenantId !== undefined) {
+        res = res.filter((s) => s.tenantId === args.where!.tenantId);
+      }
+      if (args?.where?.active !== undefined) {
+        res = res.filter((s) => s.active === args.where!.active);
+      }
+      if (args?.orderBy?.lastSeenAt) {
+        const dir = args.orderBy.lastSeenAt;
+        res = [...res].sort((a, b) => {
+          const av = a.lastSeenAt.getTime();
+          const bv = b.lastSeenAt.getTime();
+          return dir === "desc" ? bv - av : av - bv;
+        });
+      }
+      if (args?.take) res = res.slice(0, args.take);
+      return res;
+    },
+    create: async (args: {
+      data: {
+        tenantId: string;
+        endpoint: string;
+        keys: { p256dh: string; auth: string };
+        siteId?: string;
+        userAgent?: string;
+        visitorId?: string;
+      };
+    }): Promise<FakePushSubscription> => {
+      // Émule la contrainte UNIQUE sur endpoint
+      if (this.pushSubs.some((s) => s.endpoint === args.data.endpoint)) {
+        throw new Error("Unique constraint failed on the fields: (`endpoint`)");
+      }
+      const now = new Date();
+      const sub: FakePushSubscription = {
+        id: `psub_${randomUUID().slice(0, 8)}`,
+        tenantId: args.data.tenantId,
+        endpoint: args.data.endpoint,
+        keys: args.data.keys,
+        siteId: args.data.siteId ?? null,
+        userAgent: args.data.userAgent ?? null,
+        visitorId: args.data.visitorId ?? null,
+        createdAt: now,
+        lastSeenAt: now,
+        active: true,
+      };
+      this.pushSubs.push(sub);
+      return sub;
+    },
+    update: async (args: {
+      where: { id?: string; endpoint?: string };
+      data: Partial<FakePushSubscription>;
+    }): Promise<FakePushSubscription> => {
+      const s = this.pushSubs.find((x) => {
+        if (args.where.id) return x.id === args.where.id;
+        if (args.where.endpoint) return x.endpoint === args.where.endpoint;
+        return false;
+      });
+      if (!s) throw new Error("pushSubscription not found");
+      Object.assign(s, args.data);
+      return s;
+    },
+    updateMany: async (args: {
+      where: { id?: { in: string[] }; tenantId?: string };
+      data: Partial<FakePushSubscription>;
+    }): Promise<{ count: number }> => {
+      let count = 0;
+      for (const s of this.pushSubs) {
+        if (args.where.id?.in && !args.where.id.in.includes(s.id)) continue;
+        if (args.where.tenantId && s.tenantId !== args.where.tenantId) continue;
+        Object.assign(s, args.data);
+        count++;
+      }
+      return { count };
+    },
+  };
+
+  pushNotification = {
+    create: async (args: {
+      data: {
+        tenantId: string;
+        title: string;
+        body: string;
+        url?: string;
+        icon?: string;
+        sentBy?: string;
+        targetCount?: number;
+        successCount?: number;
+        failureCount?: number;
+      };
+    }): Promise<FakePushNotification> => {
+      const n: FakePushNotification = {
+        id: `pnotif_${randomUUID().slice(0, 8)}`,
+        tenantId: args.data.tenantId,
+        title: args.data.title,
+        body: args.data.body,
+        url: args.data.url ?? null,
+        icon: args.data.icon ?? null,
+        targetCount: args.data.targetCount ?? 0,
+        successCount: args.data.successCount ?? 0,
+        failureCount: args.data.failureCount ?? 0,
+        sentAt: new Date(),
+        sentBy: args.data.sentBy ?? null,
+      };
+      this.pushNotifs.push(n);
+      return n;
+    },
+    update: async (args: {
+      where: { id: string };
+      data: Partial<FakePushNotification>;
+    }): Promise<FakePushNotification> => {
+      const n = this.pushNotifs.find((x) => x.id === args.where.id);
+      if (!n) throw new Error("pushNotification not found");
+      Object.assign(n, args.data);
+      return n;
+    },
+    findMany: async (args?: {
+      where?: { tenantId?: string };
+      orderBy?: { sentAt?: "asc" | "desc" };
+      take?: number;
+    }): Promise<FakePushNotification[]> => {
+      let res = [...this.pushNotifs];
+      if (args?.where?.tenantId !== undefined) {
+        res = res.filter((n) => n.tenantId === args.where!.tenantId);
+      }
+      if (args?.orderBy?.sentAt) {
+        const dir = args.orderBy.sentAt;
+        res = [...res].sort((a, b) => {
+          const av = a.sentAt.getTime();
+          const bv = b.sentAt.getTime();
+          return dir === "desc" ? bv - av : av - bv;
+        });
+      }
+      if (args?.take) res = res.slice(0, args.take);
+      return res;
     },
   };
 

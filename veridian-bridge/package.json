@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts",
-    "test:ci": "node --import tsx --test --test-reporter=tap tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts",
+    "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
+    "test:ci": "node --import tsx --test --test-reporter=tap tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
@@ -19,11 +19,13 @@
     "@prisma/client": "^6.3.0",
     "express": "^4.21.2",
     "tsx": "^4.19.2",
+    "web-push": "^3.6.7",
     "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
+    "@types/web-push": "^3.6.4",
     "prisma": "^6.3.0",
     "typescript": "^5.7.3"
   },

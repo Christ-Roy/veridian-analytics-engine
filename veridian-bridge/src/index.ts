@@ -12,6 +12,12 @@ import { assertSkipHmacAllowed } from "./hub-hmac.js";
 import { registerGscRoutes } from "./gsc/routes.js";
 import { readOauthConfigFromEnv, OauthConfigError } from "./gsc/index.js";
 import { registerFormsRoutes } from "./forms/index.js";
+import { registerPushRoutes } from "./push/routes.js";
+import {
+  configureWebPush,
+  readVapidConfigFromEnv,
+  PushConfigError,
+} from "./push/index.js";
 import { getPrisma } from "./db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 
@@ -146,6 +152,47 @@ try {
   console.warn(
     `[bridge] Forms init failed (continuing without): ${(err as Error).message}`,
   );
+}
+
+// ─── Push notifications (B2) — optional ──────────────────────────────────
+try {
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new PushConfigError(
+      "BRIDGE_DATABASE_URL missing — Push feature disabled",
+    );
+  }
+  const vapid = readVapidConfigFromEnv();
+  configureWebPush(vapid);
+  const prisma = getPrisma();
+
+  function requireAdminForPush(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  registerPushRoutes(app, { prisma, requireAdmin: requireAdminForPush });
+  console.log("[bridge] Push routes registered");
+} catch (err) {
+  if (err instanceof PushConfigError) {
+    console.warn(`[bridge] Push disabled: ${err.message}`);
+  } else {
+    console.warn(
+      `[bridge] Push init failed (continuing without): ${(err as Error).message}`,
+    );
+  }
 }
 
 app.listen(PORT, () => {
