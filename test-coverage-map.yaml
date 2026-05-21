@@ -383,6 +383,50 @@
     via tests d'intégration backend. Pour C1 on ne valide que la
     présence des assets statiques côté console — pas de test runtime
     du SW (jsdom ne supporte pas l'API ServiceWorker).
+# ─── GSC integration (A4) ─────────────────────────────────────────────
+
+- sources:
+    - veridian-bridge/src/gsc/index.ts
+    - veridian-bridge/src/gsc/oauth.ts
+    - veridian-bridge/src/gsc/sync.ts
+    - veridian-bridge/src/gsc/query.ts
+    - veridian-bridge/src/gsc/routes.ts
+  covered_by:
+    - veridian-bridge/tests/gsc-query-parsing.test.ts
+    - veridian-bridge/tests/gsc-oauth-flow.test.ts
+    - veridian-bridge/tests/gsc-sync.test.ts
+    - veridian-bridge/tests/integration/gsc-end-to-end.test.ts
+  reason: |
+    Port de l'intégration GSC depuis veridian-analytics legacy.
+    - oauth.ts : chiffrement AES-256-GCM, state HMAC, exchange/refresh tokens
+    - sync.ts : pull GSC API → upsert GscDaily, backoff 429/5xx
+    - query.ts : DSL dashboard (groupBy, filtres, totals, dashboardSummary)
+    - routes.ts : 5 endpoints HTTP (oauth-begin, oauth-callback, sync,
+      sync-all, /tenant/:workspaceId/gsc)
+    Tests : 4 fichiers — unitaires (oauth/sync/query) + 1 e2e Express full
+    flow avec FakePrismaClient + mock Google.
+
+- sources:
+    - veridian-bridge/src/db/prisma.ts
+  covered_by:
+    - veridian-bridge/tests/gsc-oauth-flow.test.ts
+  reason: |
+    Singleton Prisma. Couvert indirectement par tous les tests GSC qui
+    construisent un FakePrismaClient (signature compatible avec
+    PrismaClient via cast). La fonction réelle est un wrapper triviale
+    autour de new PrismaClient() — typecheck + boot l'exercice.
+
+- sources:
+    - veridian-bridge/prisma/schema.prisma
+  covered_by:
+    - veridian-bridge/tests/gsc-oauth-flow.test.ts
+    - veridian-bridge/tests/gsc-sync.test.ts
+    - veridian-bridge/tests/gsc-query-parsing.test.ts
+  reason: |
+    Schema Prisma (Tenant, GscProperty, GscDaily). Toutes les contraintes
+    (unique, default, types) sont reflétées dans le FakePrismaClient
+    in-memory utilisé par les tests. `prisma migrate deploy` au boot du
+    container valide le schéma vs DB réelle en environnements live.
 
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #

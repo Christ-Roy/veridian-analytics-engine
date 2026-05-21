@@ -175,7 +175,9 @@ export function registerGscRoutes(app: Express, deps: GscRoutesDeps): void {
     "/api/admin/tenant/:workspaceId/gsc",
     deps.requireAdmin,
     async (req: Request, res: Response) => {
-      const workspaceId = req.params.workspaceId;
+      const workspaceIdRaw = req.params.workspaceId;
+      const workspaceId =
+        typeof workspaceIdRaw === "string" ? workspaceIdRaw : "";
       if (!workspaceId) {
         res.status(400).json({ error: "missing_workspace_id" });
         return;

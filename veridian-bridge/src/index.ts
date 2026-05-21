@@ -2,15 +2,21 @@
  * Veridian POC Bridge Stub — entrypoint
  *
  * Lit la config depuis process.env, valide, et démarre le serveur Express.
- * Toute la logique est dans `app.ts` pour rester testable.
+ * Toute la logique de base est dans `app.ts`. Les features optionnelles
+ * (Hub HMAC §B3, GSC integration §A4) sont branchées ici via leur propre
+ * registerXxxRoutes() quand les ENV correspondantes sont présentes.
  */
 
 import { createApp, validateConfig, type BridgeConfig } from "./app.js";
 import { assertSkipHmacAllowed } from "./hub-hmac.js";
+import { registerGscRoutes } from "./gsc/routes.js";
+import { readOauthConfigFromEnv, OauthConfigError } from "./gsc/index.js";
+import { getPrisma } from "./db/prisma.js";
+import type { Request, Response, NextFunction } from "express";
 
+// ─── Hub HMAC (B3) ──────────────────────────────────────────────────
 const skipHmac = process.env.SKIP_HMAC === "true";
 
-// Garde-fou §6.6 : SKIP_HMAC=true interdit en prod/staging.
 try {
   assertSkipHmacAllowed(skipHmac, process.env.NODE_ENV);
 } catch (err) {
@@ -25,7 +31,6 @@ if (!skipHmac && hubHmacSecret.length < 32) {
   );
 }
 
-// Log empreinte secret (§6.5 garde-fou) — 8 premiers chars OK à logger.
 console.log(
   `[bridge] HUB_HMAC_SECRET fingerprint=${hubHmacSecret.slice(0, 8)}... env=${process.env.NODE_ENV ?? "production"} skip=${skipHmac}`
 );
@@ -53,6 +58,54 @@ try {
 
 const PORT = Number(process.env.PORT ?? 3002);
 const app = createApp(cfg);
+
+// ─── GSC feature (A4) — optional ─────────────────────────────────────
+try {
+  const oauthConfig = readOauthConfigFromEnv();
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new OauthConfigError(
+      "BRIDGE_DATABASE_URL missing — GSC feature disabled",
+    );
+  }
+  const prisma = getPrisma();
+
+  function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  const cronAllowedIps = (process.env.GSC_CRON_ALLOWED_IPS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  registerGscRoutes(app, {
+    prisma,
+    oauthConfig,
+    requireAdmin,
+    adminApiKey: cfg.veridianAdminApiKey,
+    dashboardRedirectUrl: process.env.GSC_DASHBOARD_REDIRECT_URL,
+    cronAllowedIps: cronAllowedIps.length > 0 ? cronAllowedIps : undefined,
+  });
+  console.log("[bridge] GSC routes registered");
+} catch (err) {
+  if (err instanceof OauthConfigError) {
+    console.warn(`[bridge] GSC disabled: ${err.message}`);
+  } else {
+    console.warn(
+      `[bridge] GSC init failed (continuing without): ${(err as Error).message}`,
+    );
+  }
+}
 
 app.listen(PORT, () => {
   console.log(`[bridge] listening on :${PORT} → staminads ${cfg.staminadsUrl}`);

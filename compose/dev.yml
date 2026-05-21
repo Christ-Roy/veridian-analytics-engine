@@ -118,6 +118,8 @@ services:
     depends_on:
       engine:
         condition: service_healthy
+      postgres-bridge:
+        condition: service_healthy
     environment:
       TZ: UTC
       PORT: "3002"
@@ -127,6 +129,19 @@ services:
       STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis}
       PUBLIC_STAMINADS_URL: https://analytics-engine-dev.staging.veridian.site
+      # GSC integration (A4)
+      BRIDGE_DATABASE_URL: postgresql://${BRIDGE_DB_USER:-bridge}:${BRIDGE_DB_PASSWORD:-bridge_pwd}@postgres-bridge:5432/${BRIDGE_DB_NAME:-veridian_bridge}
+      BRIDGE_DB_HOST: postgres-bridge
+      BRIDGE_DB_PORT: "5432"
+      BRIDGE_DB_USER: ${BRIDGE_DB_USER:-bridge}
+      BRIDGE_DB_PASSWORD: ${BRIDGE_DB_PASSWORD:-bridge_pwd}
+      BRIDGE_DB_NAME: ${BRIDGE_DB_NAME:-veridian_bridge}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-https://analytics-engine-bridge-dev.staging.veridian.site/api/admin/gsc/oauth-callback}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      GSC_DASHBOARD_REDIRECT_URL: ${GSC_DASHBOARD_REDIRECT_URL:-}
+      GSC_CRON_ALLOWED_IPS: ${GSC_CRON_ALLOWED_IPS:-}
       CHOKIDAR_USEPOLLING: "true"
     volumes:
       - ../veridian-bridge/src:/app/src
@@ -152,8 +167,29 @@ services:
       retries: 10
       start_period: 30s
 
+  postgres-bridge:
+    image: postgres:16-alpine
+    container_name: analytics-engine-dev-postgres-bridge
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      POSTGRES_DB: ${BRIDGE_DB_NAME:-veridian_bridge}
+      POSTGRES_USER: ${BRIDGE_DB_USER:?BRIDGE_DB_USER requis}
+      POSTGRES_PASSWORD: ${BRIDGE_DB_PASSWORD:?BRIDGE_DB_PASSWORD requis}
+    volumes:
+      - postgres-bridge-dev-data:/var/lib/postgresql/data
+    networks:
+      - engine-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BRIDGE_DB_USER:-bridge} -d ${BRIDGE_DB_NAME:-veridian_bridge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
 volumes:
   clickhouse-dev-data:
+  postgres-bridge-dev-data:
   engine-api-node-modules:
   engine-console-node-modules:
   engine-sdk-node-modules:

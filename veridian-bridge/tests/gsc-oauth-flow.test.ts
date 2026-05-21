@@ -203,7 +203,7 @@ test("persistTokensForTenant stores encrypted blob in GscProperty placeholder", 
   const props = await prisma.gscProperty.findMany({ where: { tenantId: "tenant_1" } });
   assert.equal(props.length, 1);
   const blob = (props[0] as { oauthAccount: unknown }).oauthAccount as {
-    v: number;
+    v: 1;
     iv: string;
     tag: string;
     ciphertext: string;

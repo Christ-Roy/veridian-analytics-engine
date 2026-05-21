@@ -62,12 +62,32 @@ services:
       retries: 10
       start_period: 60s
 
+  postgres-bridge:
+    image: postgres:16-alpine
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      POSTGRES_DB: ${BRIDGE_DB_NAME:-veridian_bridge}
+      POSTGRES_USER: ${BRIDGE_DB_USER:?BRIDGE_DB_USER requis}
+      POSTGRES_PASSWORD: ${BRIDGE_DB_PASSWORD:?BRIDGE_DB_PASSWORD requis}
+    volumes:
+      - postgres-bridge-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${BRIDGE_DB_USER:-bridge} -d ${BRIDGE_DB_NAME:-veridian_bridge}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   bridge:
     image: ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_IMAGE_TAG:-latest}
     pull_policy: always
     restart: unless-stopped
     depends_on:
       engine:
+        condition: service_healthy
+      postgres-bridge:
         condition: service_healthy
     environment:
       TZ: UTC
@@ -76,6 +96,19 @@ services:
       STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
       STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis (32+ chars)}
+      # GSC integration (A4)
+      BRIDGE_DATABASE_URL: postgresql://${BRIDGE_DB_USER:-bridge}:${BRIDGE_DB_PASSWORD:-bridge_pwd}@postgres-bridge:5432/${BRIDGE_DB_NAME:-veridian_bridge}
+      BRIDGE_DB_HOST: postgres-bridge
+      BRIDGE_DB_PORT: "5432"
+      BRIDGE_DB_USER: ${BRIDGE_DB_USER:-bridge}
+      BRIDGE_DB_PASSWORD: ${BRIDGE_DB_PASSWORD:-bridge_pwd}
+      BRIDGE_DB_NAME: ${BRIDGE_DB_NAME:-veridian_bridge}
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:-}
+      GSC_DASHBOARD_REDIRECT_URL: ${GSC_DASHBOARD_REDIRECT_URL:-}
+      GSC_CRON_ALLOWED_IPS: ${GSC_CRON_ALLOWED_IPS:-}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3002/health || exit 1"]
       interval: 15s
@@ -85,3 +118,4 @@ services:
 
 volumes:
   clickhouse-data:
+  postgres-bridge-data:
