@@ -258,6 +258,46 @@
     Le workflow se teste lui-même : tout commit qui le modifie déclenche
     son propre run, qui doit passer vert pour être mergé. Self-validating.
 
+# ─── CONSOLE VERIDIAN (composants portés ticket C1) ────────────────────
+
+- sources:
+    - console/src/veridian/service-score-block.tsx
+    - console/src/veridian/shadow-marketing-block.tsx
+    - console/src/veridian/locked-service-page.tsx
+    - console/src/veridian/sparkline.tsx
+    - console/src/veridian/impersonation-banner.tsx
+    - console/src/veridian/pwa-register.tsx
+    - console/src/veridian/types.ts
+    - console/src/veridian/utils.ts
+    - console/src/veridian/ui/card.tsx
+    - console/src/veridian/ui/button.tsx
+    - console/src/veridian/ui/badge.tsx
+  covered_by:
+    - console/src/veridian/__tests__/service-score-block.test.tsx
+    - console/src/veridian/__tests__/shadow-marketing-block.test.tsx
+    - console/src/veridian/__tests__/locked-service-page.test.tsx
+    - console/src/veridian/__tests__/sparkline.test.tsx
+    - console/src/veridian/__tests__/impersonation-banner.test.tsx
+  reason: |
+    Port des composants Veridian (depuis veridian-analytics/components/)
+    vers la console staminads (ticket C1 — giga-sprint 2026-05-22).
+    Composants purement présentationnels (props in, JSX out). Tests
+    Vitest + React Testing Library — 16 cas couvrant rendu, formats
+    Intl fr-FR, build mailto:, edge cases (data vide, impersonating=
+    false, fallback siteDomain).
+
+- sources:
+    - console/public/sw.js
+    - console/public/pwa-install.js
+  covered_by:
+    - console/src/veridian/__tests__/service-score-block.test.tsx
+  reason: |
+    Service Worker stub V1 (push + cache stale-while-revalidate). La
+    pile push complète sera testée par le ticket B2 (push-pwa-port)
+    via tests d'intégration backend. Pour C1 on ne valide que la
+    présence des assets statiques côté console — pas de test runtime
+    du SW (jsdom ne supporte pas l'API ServiceWorker).
+
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #
 # - Quand on ajoute un patch Veridian (cf PATCHES.md), il DOIT venir avec :
