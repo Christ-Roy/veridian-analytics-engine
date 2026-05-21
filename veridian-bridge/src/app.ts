@@ -19,6 +19,7 @@ import {
   type PageviewsFetcher,
 } from "./tenant-status.js";
 import { SHADOW_MARKETING } from "./shadow-marketing.js";
+import { buildCountsFromStaminadsRows, computeScore } from "./score.js";
 
 export interface BridgeConfig {
   staminadsUrl: string;
@@ -320,6 +321,92 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
       res.status(500).json({ error: "internal", message: (err as Error).message });
     }
   });
+
+  /**
+   * GET /api/admin/tenant/:workspaceId/score
+   *
+   * Renvoie le Score Veridian global pour un workspace staminads donné.
+   * Le workspaceId est l'`id` côté staminads (cf provision-tenant qui le
+   * retourne dans `staminadsWorkspaceId`).
+   *
+   * Algo & pondération : voir `src/score.ts`. Pour V1 :
+   *   - pageviews + forms lus depuis staminads.analytics.query (30j)
+   *   - calls / gsc / ads / pagespeed = 0 (TODO marqué côté score.ts)
+   *
+   * Erreurs :
+   *   - 401/403 : auth (cf requireVeridianAdmin)
+   *   - 400     : workspaceId vide
+   *   - 404     : workspace introuvable côté staminads
+   *   - 502     : staminads down ou réponse inattendue
+   */
+  app.get(
+    "/api/admin/tenant/:workspaceId/score",
+    requireVeridianAdmin,
+    async (req, res) => {
+      const workspaceId = req.params.workspaceId;
+      if (!workspaceId || workspaceId.length === 0) {
+        res.status(400).json({ error: "missing_workspace_id" });
+        return;
+      }
+
+      try {
+        const adminToken = await getAdminToken();
+        const queryRes = await fetch(
+          `${cfg.staminadsUrl}/api/analytics.query`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${adminToken}`,
+            },
+            body: JSON.stringify({
+              workspace_id: workspaceId,
+              // Métriques utilisées par V1 du score :
+              //   - pageviews : ingestion tracker
+              //   - goals     : proxy "form_submission" en attendant table bridge B1
+              metrics: ["pageviews", "goals"],
+              dimensions: [],
+              dateRange: { type: "last_30_days" },
+            }),
+          },
+        );
+
+        // staminads renvoie 404 ou 400 si le workspace n'existe pas ou n'est
+        // pas accessible — on traduit en 404 propre côté bridge.
+        if (queryRes.status === 404 || queryRes.status === 400) {
+          res.status(404).json({ error: "workspace_not_found", workspaceId });
+          return;
+        }
+        if (!queryRes.ok) {
+          const text = await queryRes.text();
+          res.status(502).json({
+            error: "analytics_query_failed",
+            status: queryRes.status,
+            body: text,
+          });
+          return;
+        }
+
+        const queryBody = (await queryRes.json()) as {
+          rows?: Array<Record<string, unknown>>;
+        };
+        const rows = Array.isArray(queryBody.rows) ? queryBody.rows : [];
+        const counts = buildCountsFromStaminadsRows(rows);
+        const result = computeScore(counts);
+
+        res.json({
+          workspaceId,
+          score: result.score,
+          label: result.label,
+          services: result.services,
+        });
+      } catch (err) {
+        res
+          .status(500)
+          .json({ error: "internal", message: (err as Error).message });
+      }
+    },
+  );
 
   app.get("/api/admin/analytics", requireVeridianAdmin, async (req, res) => {
     const wsId = req.query.wsId;

@@ -17,6 +17,14 @@
 # ─── BRIDGE VERIDIAN (notre code) ───────────────────────────────────────
 
 - sources:
+    - veridian-bridge/src/score.ts
+  covered_by:
+    - veridian-bridge/tests/score.test.ts
+  reason: |
+    Computation pure du score Veridian global + endpoint admin. Tests valident
+    pondération + labels + auth.
+
+- sources:
     - veridian-bridge/src/app.ts
   covered_by:
     - veridian-bridge/tests/config.test.ts
@@ -27,6 +35,7 @@
     - veridian-bridge/tests/analytics.test.ts
     - veridian-bridge/tests/tenant-status.test.ts
     - veridian-bridge/tests/shadow-marketing.test.ts
+    - veridian-bridge/tests/score.test.ts
   reason: |
     app.ts contient toute la logique Express du bridge (factory createApp,
     middlewares, handlers). Chaque endpoint a son fichier de tests dédié
@@ -79,6 +88,7 @@
     - veridian-bridge/tests/provision-tenant.test.ts
     - veridian-bridge/tests/track-test.test.ts
     - veridian-bridge/tests/analytics.test.ts
+    - veridian-bridge/tests/score.test.ts
   reason: |
     Helper de tests utilisé par les fichiers d'intégration. Si on casse le
     helper, les tests qui s'en servent cassent. Toute modif du helper exige
