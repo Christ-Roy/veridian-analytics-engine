@@ -13,6 +13,11 @@ import express, {
   type NextFunction,
 } from "express";
 import { z } from "zod";
+import {
+  createTenantStatusBuilder,
+  makeStaminadsPageviewsFetcher,
+  type PageviewsFetcher,
+} from "./tenant-status.js";
 
 export interface BridgeConfig {
   staminadsUrl: string;
@@ -65,7 +70,20 @@ export function validateConfig(cfg: BridgeConfig): void {
   }
 }
 
-export function createApp(cfg: BridgeConfig): Express {
+/**
+ * Options optionnelles pour `createApp`. Permet d'injecter des dépendances
+ * mockables (utile pour les tests qui veulent piloter les counts staminads
+ * sans monter un faux serveur HTTP).
+ */
+export interface CreateAppOptions {
+  /**
+   * Override du fetcher pageviews 30j utilisé par `/api/admin/tenant/:id/status`.
+   * Par défaut, on en construit un qui interroge staminads via analytics.query.
+   */
+  pageviewsFetcher?: PageviewsFetcher;
+}
+
+export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Express {
   validateConfig(cfg);
 
   const app = express();
@@ -330,6 +348,55 @@ export function createApp(cfg: BridgeConfig): Express {
       res.status(500).json({ error: "internal", message: (err as Error).message });
     }
   });
+
+  /**
+   * GET /api/admin/tenant/:workspaceId/status
+   *
+   * Renvoie l'état des services Veridian (actifs / inactifs) pour un
+   * workspace staminads. Le `workspaceId` est l'id staminads (retourné par
+   * provision-tenant dans `staminadsWorkspaceId`).
+   *
+   * V1 (sprint A2) :
+   *   - `pageviews` : query staminads.analytics (30j)
+   *   - `forms` / `calls` / `gsc` / `ads` / `pagespeed` : 0, inactifs avec
+   *     TODO marqués dans `src/tenant-status.ts` (B1 forms, A4 gsc, etc.)
+   *
+   * Erreurs :
+   *   - 401/403 : auth (cf requireVeridianAdmin)
+   *   - 400     : workspaceId vide / manquant
+   *   - 500     : exception inattendue
+   */
+  const tenantStatusBuilder = createTenantStatusBuilder({
+    fetchPageviews30d:
+      opts.pageviewsFetcher ??
+      makeStaminadsPageviewsFetcher({
+        staminadsUrl: cfg.staminadsUrl,
+        getAdminToken,
+      }),
+  });
+
+  app.get(
+    "/api/admin/tenant/:workspaceId/status",
+    requireVeridianAdmin,
+    async (req, res) => {
+      const rawId = req.params.workspaceId;
+      // express 5 type Params : string | string[]. Sur une route avec un
+      // simple :workspaceId, on n'a jamais un array, mais TS l'exige.
+      const workspaceId = Array.isArray(rawId) ? rawId[0] : rawId;
+      if (!workspaceId || workspaceId.length === 0) {
+        res.status(400).json({ error: "missing_workspace_id" });
+        return;
+      }
+      try {
+        const status = await tenantStatusBuilder.build(workspaceId);
+        res.json(status);
+      } catch (err) {
+        res
+          .status(500)
+          .json({ error: "internal", message: (err as Error).message });
+      }
+    },
+  );
 
   return app;
 }
