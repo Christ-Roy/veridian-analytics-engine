@@ -532,25 +532,35 @@ jobs:
           DEPLOY
 
       - name: Smoke test (engine + bridge)
+        # timeout-minutes : garde-fou dur. Même si un curl part en vrille,
+        # le step ne peut pas bouffer tout le budget du job.
+        timeout-minutes: 7
         run: |
+          # IMPORTANT : --max-time + --connect-timeout sur CHAQUE curl.
+          # Sans ça, un curl peut bloquer indéfiniment (handshake TLS qui
+          # stalle, connexion acceptée mais sans réponse) → la boucle
+          # n'itère jamais et le job entier se fait tuer au timeout.
+          CURL="curl -skf --connect-timeout 8 --max-time 15"
           echo "Waiting for staminads engine to be healthy..."
           for i in $(seq 1 30); do
-            if curl -skf https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null; then
+            if $CURL https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null; then
               echo "✓ engine up after ${i}0s"
               break
             fi
             sleep 10
           done
-          curl -skf https://analytics-engine.staging.veridian.site/api/setup.status || (echo "engine KO" && exit 1)
+          $CURL https://analytics-engine.staging.veridian.site/api/setup.status >/dev/null \
+            || { echo "engine KO"; exit 1; }
           echo "Waiting for bridge..."
           for i in $(seq 1 12); do
-            if curl -skf https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
+            if $CURL https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
               echo "✓ bridge up after ${i}0s"
               break
             fi
             sleep 10
           done
-          curl -skf https://analytics-engine-bridge.staging.veridian.site/health || (echo "bridge KO" && exit 1)
+          $CURL https://analytics-engine-bridge.staging.veridian.site/health >/dev/null \
+            || { echo "bridge KO"; exit 1; }
           echo "Staging deploy : ✓ smoke OK"
 
       - name: Cleanup secrets
