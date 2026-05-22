@@ -7,8 +7,10 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
-    "test:ci": "node --import tsx --test --test-reporter=tap tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
+    "test": "node --import tsx --test --test-reporter=spec 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts'",
+    "test:ci": "node --import tsx --test --test-reporter=tap 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts'",
+    "test:integration": "node --import tsx --test --test-reporter=spec 'tests/**/*.integration.test.ts'",
+    "test:integration:ci": "node --import tsx --test --test-reporter=tap 'tests/**/*.integration.test.ts'",
     "test:e2e": "playwright test",
     "test:e2e:smoke": "playwright test tests/e2e/smoke/",
     "test:e2e:promise": "playwright test tests/e2e/promise-flows/",

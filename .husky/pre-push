@@ -2,17 +2,22 @@
 # Veridian Analytics Engine — Husky pre-push
 # Constitution CI §3 : aucun --no-verify, jamais.
 #
-# Checks bloquants :
-#   1. Refuse push sur 'main' (staminads upstream)
+# Checks bloquants (ordre exact) :
+#   1. Refuse push sur 'main' (photo de prod)
 #   2. Conventional Commits sur tous les commits du push
-#   3. Test-mapping : fichiers critiques modifiés → tests correspondants
-#   4. Audit static : eval/exec/secrets en dur dans le diff
-#   5. ENV sync : process.env.X ↔ .env.example
-#   6. Bridge typecheck + tests
-#   7. npm audit --omit=dev --audit-level=high sur veridian-bridge
+#   3. Test-mapping : fichiers source modifiés → AU MOINS un test correspondant
+#   4. Integration-coverage : fichiers CRITIQUES modifiés → test *.integration.test.ts
+#      (mode warn/allowlist tant que T2-T5 écrivent leurs tests — cf. le script)
+#   5. Audit static : eval/exec/secrets + it.only/xdescribe dans les tests
+#   6. ENV sync : process.env.X ↔ .env.example
+#   7. Bridge typecheck + tests UNITAIRES (test:ci — exclut *.integration.test.ts)
+#   8. npm audit --omit=dev --audit-level=high sur veridian-bridge
 #
-# Si push sur 'staging' : check supplémentaire intégration ClickHouse (skippé
-# tant que pas câblé proprement en local, sinon CI le couvre).
+# IMPORTANT — unitaires vs intégration :
+#   Le pre-push ne lance PAS les tests d'intégration (*.integration.test.ts) :
+#   trop lents (vrai Postgres/staminads), c'est le job CI `integration-tests`
+#   qui les exécute. Le pre-push VÉRIFIE seulement qu'ils EXISTENT pour les
+#   fichiers critiques touchés (étape 4). Cf. docs/CI-ARCHITECTURE.md §2.
 
 set -e
 
@@ -28,8 +33,9 @@ fi
 # Préférence : origin/<branche-courante> si remote existe
 BASE_REF="${BASE_REF:-origin/$CURRENT_BRANCH}"
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-  # Pas de remote pour cette branche, fallback sur origin/dev
-  BASE_REF="origin/dev"
+  # Pas de remote pour cette branche, fallback sur origin/staging
+  # (modèle de branches refondu 2026-05-22 : main ← staging, plus de 'dev')
+  BASE_REF="origin/staging"
 fi
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
   # Fallback ultime
@@ -49,21 +55,32 @@ if [ -x "$REPO_ROOT/scripts/ci/check-test-mapping.sh" ]; then
   "$REPO_ROOT/scripts/ci/check-test-mapping.sh"
 fi
 
-# ─── 4. Audit static ──────────────────────────────────────────────
+# ─── 4. Integration-coverage ──────────────────────────────────────
+# Vérifie que les fichiers CRITIQUES touchés ont un test *.integration.test.ts.
+# NE lance PAS les tests d'intégration (la CI s'en charge) — vérifie juste
+# qu'ils existent. Mode warn/allowlist tant que T2-T5 montent la couverture.
+if [ -x "$REPO_ROOT/scripts/ci/check-integration-coverage.sh" ]; then
+  echo "─── Pre-push : integration-coverage (fichiers critiques) ───"
+  "$REPO_ROOT/scripts/ci/check-integration-coverage.sh"
+fi
+
+# ─── 5. Audit static ──────────────────────────────────────────────
 if [ -x "$REPO_ROOT/scripts/ci/static-audit.sh" ]; then
-  echo "─── Pre-push : static audit (eval/exec/secrets) ───"
+  echo "─── Pre-push : static audit (eval/exec/secrets/it.only) ───"
   "$REPO_ROOT/scripts/ci/static-audit.sh"
 fi
 
-# ─── 5. ENV sync ──────────────────────────────────────────────────
+# ─── 6. ENV sync ──────────────────────────────────────────────────
 if [ -x "$REPO_ROOT/scripts/ci/check-env-sync.sh" ]; then
   echo "─── Pre-push : env sync (process.env ↔ .env.example) ───"
   "$REPO_ROOT/scripts/ci/check-env-sync.sh"
 fi
 
-# ─── 6. Bridge typecheck + tests ──────────────────────────────────
+# ─── 7. Bridge typecheck + tests unitaires ────────────────────────
+# test:ci exclut les *.integration.test.ts (trop lents pour le pre-push —
+# c'est le job CI `integration-tests` qui les lance contre un vrai Postgres).
 if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
-  echo "─── Pre-push : bridge typecheck + tests ───"
+  echo "─── Pre-push : bridge typecheck + tests unitaires ───"
   cd "$REPO_ROOT/veridian-bridge"
   if [ ! -d node_modules ]; then
     echo "  installing bridge deps (first run)..."
@@ -72,7 +89,7 @@ if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
   npx tsc --noEmit
   npm run test:ci
 
-  # ─── 7. npm audit prod-only ──────────────────────────────────────
+  # ─── 8. npm audit prod-only ──────────────────────────────────────
   echo "─── Pre-push : bridge CVE audit (high+critical bloquant) ───"
   # --omit=dev pour ne pas brûler sur des CVE de devDependencies
   if ! npm audit --omit=dev --audit-level=high 2>&1; then

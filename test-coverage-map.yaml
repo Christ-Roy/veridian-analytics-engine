@@ -13,6 +13,37 @@
 # par leurs e2e dans api/test/*.e2e-spec.ts. On les déclare explicitement
 # ici pour que la modif d'un controller upstream sans toucher son e2e
 # soit refusée par le pre-push.
+#
+# ─── DEUX NIVEAUX DE TEST : covered_by vs integration_covered_by ─────────
+#
+#   covered_by:             tests unitaires/rapides — peuvent tourner contre
+#                           un FakePrismaClient in-memory. Lancés en pre-push.
+#                           Exigés par check-test-mapping.sh.
+#
+#   integration_covered_by: tests d'intégration RÉELS — `*.integration.test.ts`
+#                           qui tapent un vrai Postgres / une vraie staminads.
+#                           PAS lancés en pre-push (trop lents) — exécutés par
+#                           le job CI `integration-tests`. Exigés par
+#                           check-integration-coverage.sh pour les fichiers
+#                           CRITIQUES (forms/, push/, hub/, gsc/, hub-hmac.ts,
+#                           paywall.ts, score.ts, tenant-status.ts).
+#
+# Un test vert sur FakePrisma ne garantit RIEN sur le vrai comportement
+# Postgres (contraintes @@unique, P2002, transactions, cascade FK, @db.Date).
+# La section integration_covered_by est remplie par les agents T1-T5 au fur
+# et à mesure qu'ils livrent leurs suites d'intégration. Tant qu'elle n'est
+# pas complète, check-integration-coverage.sh tourne en mode `warn` +
+# allowlist (cf. l'en-tête de ce script + CI-ARCHITECTURE.md §2.5).
+#
+# Exemple de bloc avec les deux niveaux :
+#   - sources:
+#       - veridian-bridge/src/forms/ingest.ts
+#     covered_by:
+#       - veridian-bridge/tests/forms/dedup-by-email.test.ts
+#     integration_covered_by:
+#       - veridian-bridge/tests/integration/forms-dedup.integration.test.ts
+#     reason: |
+#       ...
 
 # ─── BRIDGE VERIDIAN (notre code) ───────────────────────────────────────
 

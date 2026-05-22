@@ -74,26 +74,88 @@ Valide le format Conventional Commits :
 
 ### §2.3 `pre-push` (~30s premier run, < 10s ensuite avec node_modules)
 
-Pipeline complet avant push :
+Pipeline complet avant push, **dans cet ordre exact** :
 
 1. **`check-protected-branch.sh`** — refuse push sur `main`.
 2. **`check-conventional-commits.sh`** — valide tous les subjects du range `BASE_REF..HEAD`.
 3. **`check-test-mapping.sh`** — fichier source modifié = test correspondant exigé
-   (canonique ou via `test-coverage-map.yaml`).
-4. **`static-audit.sh`** — scan les fichiers TS du diff :
-   - Patterns CRITIQUES (bloquants) : `eval()`, `new Function()`, `exec()/execSync()`, secrets hard-codés.
-   - Patterns WARNINGS : `any`, `@ts-ignore`, `TODO:SECURITY`, `console.log` de secrets, `.skip()`.
-5. **`check-env-sync.sh`** — `process.env.X` dans le code = déclaré dans `.env.example`.
-6. **Bridge typecheck + tests** — `tsc --noEmit` + `npm run test:ci`.
-7. **`npm audit --omit=dev --audit-level=high`** sur veridian-bridge — bloquant.
+   (canonique ou via `test-coverage-map.yaml` section `covered_by:`).
+4. **`check-integration-coverage.sh`** — fichier **CRITIQUE** modifié = test
+   d'**intégration** `*.integration.test.ts` exigé (cf. §2.5). NE lance PAS
+   les tests d'intégration, vérifie seulement qu'ils EXISTENT.
+5. **`static-audit.sh`** — scan les fichiers TS du diff (code + tests) :
+   - CRITIQUES bloquants (code) : `eval()`, `new Function()`, `exec()/execSync()`, secrets hard-codés.
+   - CRITIQUES bloquants (tests) : `it.only`/`test.only`/`describe.only` (un `only`
+     oublié masque tous les autres tests du fichier), `xit`/`xdescribe`/`xtest`.
+   - WARNINGS : `any`, `@ts-ignore`, `TODO:SECURITY`, `console.log` de secrets,
+     `it.skip`/`describe.skip` (test désactivé).
+6. **`check-env-sync.sh`** — `process.env.X` dans le code = déclaré dans `.env.example`.
+7. **Bridge typecheck + tests UNITAIRES** — `tsc --noEmit` + `npm run test:ci`
+   (exclut les `*.integration.test.ts` — cf. §2.5).
+8. **`npm audit --omit=dev --audit-level=high`** sur veridian-bridge — bloquant.
 
 ### §2.4 Exception : skip d'urgence
 
 Variables d'env :
 - `SKIP_ENV_SYNC=1` — désactive le check ENV sync (rare, dette éphémère).
 - `BASE_REF=<ref>` — override la branche de référence (par défaut `origin/<branche>`).
+- `INTEGRATION_GATE=block|warn` — force le mode du gate intégration (cf. §2.5).
 
 Toute utilisation = à éviter et expliquer dans le message de commit.
+**`--no-verify` reste strictement interdit (Constitution CI §3).**
+
+### §2.5 Tests unitaires (fakes) vs tests d'intégration (réels)
+
+> Décidé par Robert 2026-05-22 (sprint T-INTEGRATION-TESTS). Objectif :
+> **"CI verte = tout a été testé sérieusement"**, pas contre des mocks.
+
+**Le problème.** Le sprint giga a livré ~222 tests bridge "verts", mais
+29/34 fichiers tournent contre un `FakePrismaClient` in-memory maison.
+Un test `dedup-by-email` qui passe sur FakePrisma ne garantit RIEN sur le
+vrai comportement Postgres : contrainte `@@unique`, erreur `P2002`,
+transactions, cascade FK, types `@db.Date`. **Tests verts ≠ code correct.**
+
+**La parade : deux niveaux de tests, deux conventions de nommage.**
+
+| Niveau | Nommage | Tape quoi | Lancé où | Rapide ? |
+|---|---|---|---|---|
+| **Unitaire** | `*.test.ts` | `FakePrismaClient`, `fake-staminads` | pre-push (`test:ci`) + CI | oui (~30s) |
+| **Intégration** | `*.integration.test.ts` | vrai Postgres 16 + vraie staminads | CI uniquement (job `integration-tests`) | non (minutes) |
+
+- **`test:ci`** (pre-push) glob `tests/**/!(*.integration).test.ts` — exclut
+  explicitement les `*.integration.test.ts`. Le pre-push reste rapide.
+- **`test:integration`** / **`test:integration:ci`** glob `tests/**/*.integration.test.ts`
+  — lancés par le job CI contre des services réels (cf. §3.3).
+
+**Le gate `check-integration-coverage.sh`.** `check-test-mapping.sh` (étape 3)
+exige qu'un fichier source ait UN test — mais un test fake suffit à le
+satisfaire. Le gate intégration ajoute un niveau : pour chaque **fichier
+CRITIQUE** modifié, il exige qu'il existe au moins un `*.integration.test.ts`
+qui le couvre (mapping via la section `integration_covered_by:` du
+`test-coverage-map.yaml`).
+
+**Fichiers critiques** (chemins du fork — sous `veridian-bridge/src/`) :
+`forms/*`, `push/*`, `hub/*`, `gsc/*`, `hub-hmac.ts`, `paywall.ts`,
+`score.ts`, `tenant-status.ts`. Ce sont les chemins où un faux positif de
+test fake = bug de provisioning, billing, dedup ou sécurité en prod.
+
+**Mode du gate — `warn` aujourd'hui, `block` à terme.**
+Tant que les agents T1-T5 écrivent la suite d'intégration, le gate tourne
+en mode `warn` + **allowlist transitoire** (les fichiers pas encore couverts
+sont listés dans le script avec un `# TODO: intégration T*`). Un fichier
+critique sans test d'intégration → WARNING jaune, le push passe. Ça ne
+bloque PAS le travail des agents pendant qu'ils montent la couverture.
+
+**Passage `warn` → `block`** (à faire quand T2-T5 ont livré) :
+1. T2-T5 ont mergé leurs `*.integration.test.ts` sur `staging`.
+2. Chaque groupe de fichiers critiques a sa section `integration_covered_by:`
+   dans `test-coverage-map.yaml`.
+3. L'`ALLOWLIST` de `check-integration-coverage.sh` est vidée.
+4. Passer la constante `MODE="block"` en tête du script.
+
+À partir de là : tout nouveau fichier critique sans `*.integration.test.ts`
+fait **échouer le pre-push**. C'est l'état cible — "CI verte = tout testé
+sérieusement".
 
 ## §3. Workflows GitHub Actions
 
@@ -479,10 +541,25 @@ syntax errors de workflows avant deploy.
 3. **JAMAIS désactiver un check existant** sans remplacement par un meilleur.
 4. **Pre-push lent = on optimise**, pas on désactive.
 5. **Chaque modif de fichier source = test correspondant exigé** (ou déclaration coverage-map).
-6. **CVE high/critical bloque** — on patch avant deploy.
-7. **Audit static eval/exec/secrets** ne pardonne rien.
+6. **Chaque modif de fichier CRITIQUE = test d'intégration exigé** (`*.integration.test.ts`,
+   cf. §2.5) — gate `warn`/allowlist aujourd'hui, `block` à terme.
+7. **CVE high/critical bloque** — on patch avant deploy.
+8. **Audit static eval/exec/secrets/it.only** ne pardonne rien.
 
 ## §19. Changelog
+
+- **2026-05-22** — Phase 3 (Husky ultra-strict + gate couverture intégration, T6) :
+  - Nouveau gate `check-integration-coverage.sh` : un fichier critique
+    (`forms/`, `push/`, `hub/`, `gsc/`, `hub-hmac.ts`, `paywall.ts`,
+    `score.ts`, `tenant-status.ts`) modifié exige un `*.integration.test.ts`.
+    Mode `warn` + allowlist transitoire tant que T1-T5 montent la couverture.
+  - `static-audit.sh` durci : `it.only`/`describe.only`/`xdescribe` bloquants
+    dans les fichiers de tests ; `it.skip`/`describe.skip` en warning.
+  - Split tests unitaires (fakes, pre-push) vs intégration (réels, CI) :
+    `test:ci` exclut les `*.integration.test.ts` ; ajout `test:integration`.
+  - `pre-push` réordonné : protected-branch → conv-commits → test-mapping →
+    integration-coverage → static-audit → env-sync → typecheck+tests → audit.
+  - Fix fallback BASE_REF obsolète (`origin/dev` → `origin/staging`).
 
 - **2026-05-21** — Phase 2 (CI/Husky hardening) :
   - Ajout `pre-commit` (lint-staged) + `commit-msg` (conventional commits).

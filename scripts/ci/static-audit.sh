@@ -10,6 +10,12 @@
 #   - dangerouslySetInnerHTML sans sanitization explicite (XSS)
 #   - process.env access sans default fallback dans le code source (hors index.ts)
 #
+# Patterns spécifiques aux FICHIERS DE TESTS (scannés sur les tests seuls) :
+#   - it.only / test.only / describe.only → BLOQUANT (un only oublié masque
+#     silencieusement tous les autres tests du fichier — CI verte trompeuse)
+#   - xit / xdescribe / xtest → BLOQUANT (bloc de tests désactivé)
+#   - it.skip / test.skip / describe.skip → WARNING (test désactivé)
+#
 # Mode :
 #   - Pre-push : scan le diff origin/<branche>..HEAD
 #   - CI : scan le diff PR head..base
@@ -34,22 +40,35 @@ BLUE=$'\033[0;34m'
 NC=$'\033[0m'
 
 # ─── Résolution des fichiers à scanner ──────────────────────────────────────
+# On scanne :
+#   - le code source (veridian-bridge/src, sdk/src, console/src) : patterns RCE/secrets
+#   - les fichiers de tests (*.test.ts, *.spec.ts, **/tests/**) : patterns it.only/xdescribe
+SCAN_REGEX='^(veridian-bridge/src|sdk/src|console/src).*\.(ts|tsx)$|(\.test\.(ts|tsx)|\.spec\.(ts|tsx))$|^[^ ]*/tests?/.*\.(ts|tsx)$'
+
 if [ "${ALL:-0}" = "1" ]; then
-  FILES=$(find veridian-bridge/src sdk/src console/src -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null || true)
+  FILES=$(find veridian-bridge/src sdk/src console/src veridian-bridge/tests sdk/tests \
+    -type f \( -name '*.ts' -o -name '*.tsx' \) 2>/dev/null || true)
   MODE="all-tree"
 else
   BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD)}"
-  if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    BASE_REF="origin/staging"
+  if [ "$BASE_REF" = "HEAD" ]; then
+    # Mode working-tree : diff non-commité + staged
+    FILES=$( (git diff --name-only HEAD; git diff --cached --name-only) | \
+      sort -u | grep -v '^$' | grep -E "$SCAN_REGEX" || true)
+    MODE="working tree"
+  else
+    if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+      BASE_REF="origin/staging"
+    fi
+    if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+      # Premier push, pas encore d'upstream — pas de diff à scanner
+      echo "${YELLOW}⚠ BASE_REF inaccessible (premier push?), audit static skip${NC}"
+      exit 0
+    fi
+    FILES=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null | \
+      grep -E "$SCAN_REGEX" || true)
+    MODE="diff vs $BASE_REF"
   fi
-  if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    # Premier push, pas encore d'upstream — pas de diff à scanner
-    echo "${YELLOW}⚠ BASE_REF inaccessible (premier push?), audit static skip${NC}"
-    exit 0
-  fi
-  FILES=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null | \
-    grep -E '^(veridian-bridge/src|sdk/src|console/src).*\.(ts|tsx)$' || true)
-  MODE="diff vs $BASE_REF"
 fi
 
 if [ -z "$FILES" ]; then
@@ -79,7 +98,24 @@ declare -a WARNING_PATTERNS=(
   '@ts-ignore|@ts-ignore désactive le typecheck — préfère @ts-expect-error'
   'TODO.*SECURITY|TODO sécurité non résolu'
   'FIXME.*SECURITY|FIXME sécurité non résolu'
-  '\.skip\s*\(|test.skip / it.skip — test désactivé'
+)
+
+# Patterns TEST-CRITIQUES — bloquent le push (scannés UNIQUEMENT dans les
+# fichiers de tests). Un `.only` oublié masque silencieusement tous les autres
+# tests du fichier → CI verte mais couverture trompeuse. C'est exactement le
+# genre de "théâtre de tests" que ce repo veut éliminer (cf. T-INTEGRATION).
+#
+# ⚠ Ces patterns CONTIENNENT un `|` (alternance regex). On utilise donc une
+# TABULATION comme séparateur pattern/description, pas le `|`.
+TAB=$(printf '\t')
+declare -a TEST_CRITICAL_PATTERNS=(
+  "(^|[^a-zA-Z.])(it|test|describe)\\.only\\s*\\(${TAB}.only() oublié — masque les autres tests du fichier"
+  "(^|[^a-zA-Z])(xit|xdescribe|xtest)\\s*\\(${TAB}xit/xdescribe — bloc de tests désactivé (préfère .skip explicite ou supprime)"
+)
+
+# Patterns TEST-WARNINGS — signalés mais non bloquants (fichiers de tests).
+declare -a TEST_WARNING_PATTERNS=(
+  "(^|[^a-zA-Z.])(it|test|describe)\\.skip\\s*\\(${TAB}test.skip / describe.skip — test désactivé"
 )
 
 # Patterns SECRETS — bloquent le push (regex de tokens en clair commités)
@@ -158,6 +194,46 @@ for entry in "${WARNING_PATTERNS[@]}"; do
     fi
   done
 done
+
+# ─── Patterns spécifiques aux fichiers de TESTS ─────────────────────────────
+# Les loops ci-dessus skippent les tests (eval dans une fixture = OK). Mais
+# certains patterns sont AU CONTRAIRE des problèmes uniquement dans les tests :
+# un `.only` oublié, un bloc `xdescribe`. On les scanne ici, sur les tests SEULS.
+TEST_FILES=""
+for f in $FILES; do
+  case "$f" in
+    */tests/*|*.test.ts|*.test.tsx|*.spec.ts|*.spec.tsx) TEST_FILES="$TEST_FILES $f" ;;
+  esac
+done
+
+if [ -n "$TEST_FILES" ]; then
+  # TEST-CRITICAL (bloquant) — séparateur TAB (les patterns contiennent des `|`)
+  for entry in "${TEST_CRITICAL_PATTERNS[@]}"; do
+    IFS="$TAB" read -r pattern desc <<< "$entry"
+    for f in $TEST_FILES; do
+      [ ! -f "$f" ] && continue
+      MATCHES=$(grep_code "$pattern" "$f")
+      if [ -n "$MATCHES" ]; then
+        echo "${RED}✗ TEST-CRITICAL${NC} $f"
+        echo "    pattern : $desc"
+        echo "$MATCHES" | head -3 | sed 's/^/      /'
+        CRITICAL=$((CRITICAL + 1))
+      fi
+    done
+  done
+  # TEST-WARNING (non bloquant) — séparateur TAB
+  for entry in "${TEST_WARNING_PATTERNS[@]}"; do
+    IFS="$TAB" read -r pattern desc <<< "$entry"
+    for f in $TEST_FILES; do
+      [ ! -f "$f" ] && continue
+      MATCHES=$(grep_code "$pattern" "$f")
+      if [ -n "$MATCHES" ]; then
+        echo "${YELLOW}⚠ TEST-WARN${NC} $f : $desc"
+        WARNINGS=$((WARNINGS + 1))
+      fi
+    done
+  done
+fi
 
 echo
 if [ "$CRITICAL" -gt 0 ]; then
