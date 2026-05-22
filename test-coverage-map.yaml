@@ -51,9 +51,14 @@
     - veridian-bridge/src/score.ts
   covered_by:
     - veridian-bridge/tests/score.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/analytics/score.integration.test.ts
   reason: |
-    Computation pure du score Veridian global + endpoint admin. Tests valident
-    pondération + labels + auth.
+    Computation pure du score Veridian global + endpoint admin. Tests unitaires
+    valident pondération + labels + auth (FakeStaminads).
+    Test d'INTÉGRATION (T5) : GET /api/admin/tenant/:wsId/score contre une VRAIE
+    staminads adossée à un vrai ClickHouse — pageviews/goals comptés par
+    ClickHouse à partir d'événements réellement insérés.
 
 - sources:
     - veridian-bridge/src/app.ts
@@ -88,12 +93,16 @@
     - veridian-bridge/src/tenant-status.ts
   covered_by:
     - veridian-bridge/tests/tenant-status.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/analytics/tenant-status.integration.test.ts
   reason: |
     Port du buildTenantStatus() legacy. La factory createTenantStatusBuilder
     + le helper makeStaminadsPageviewsFetcher sont testés via le pageviewsFetcher
-    injecté dans createApp() (workspace vide, 1500 PV, auth, 403). Les TODOs
-    forms/calls/gsc/ads/pagespeed seront couverts par les tests des tickets
-    correspondants (B1, A4) qui ajouteront leur propre fetcher.
+    injecté dans createApp() (workspace vide, 1500 PV, auth, 403).
+    Test d'INTÉGRATION (T5) : GET /api/admin/tenant/:wsId/status SANS fetcher
+    injecté — le bridge fait un VRAI appel HTTP analytics.query vers une
+    staminads adossée à un vrai ClickHouse. Les TODOs forms/calls/gsc/ads/
+    pagespeed restent couverts par les tickets correspondants (B1, A4).
 
 - sources:
     - veridian-bridge/src/shadow-marketing.ts
@@ -629,6 +638,12 @@
     - veridian-bridge/tests/push/send-notification.test.ts
     - veridian-bridge/tests/push/vapid-key.test.ts
     - veridian-bridge/tests/push/expired-subscription-cleanup.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/push/subscribe.integration.test.ts
+    - veridian-bridge/tests/integration/push/unsubscribe.integration.test.ts
+    - veridian-bridge/tests/integration/push/send-notification.integration.test.ts
+    - veridian-bridge/tests/integration/push/expired-cleanup.integration.test.ts
+    - veridian-bridge/tests/integration/push/cascade.integration.test.ts
   reason: |
     Port des push notifications PWA depuis veridian-analytics legacy.
     - index.ts : subscribePushClient (idempotent par endpoint),
