@@ -484,6 +484,11 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY_STAGING }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY_STAGING }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT_STAGING }}
+          # Clé AES-256-GCM (64 hex) — chiffrement at-rest des credentials
+          # bridge : tokens GSC (A4) + credentials VoIP self-service (U8).
+          # Sans elle, les features Settings/credentials se désactivent
+          # proprement (graceful degradation) — mais restent inertes.
+          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY_STAGING }}
         run: |
           ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             "cat > /opt/staging/analytics-engine/.env <<ENV
@@ -503,6 +508,7 @@ jobs:
           VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
           VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
           VAPID_SUBJECT=${VAPID_SUBJECT}
+          TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
           ENV
           chmod 600 /opt/staging/analytics-engine/.env"
 
