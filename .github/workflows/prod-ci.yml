@@ -40,6 +40,12 @@ permissions:
   contents: read
   packages: write
   security-events: write
+  # actions: read — requis par le job `structural-gate` : il appelle
+  # `gh run list --workflow staging-deploy.yml` pour vérifier qu'un run
+  # staging vert ≤24h existe sur un ancêtre du HEAD. Sans cette permission
+  # l'appel API renvoie 403, le `2>/dev/null || echo '[]'` l'avale, RUNS
+  # est vide et le gate bloque TOUTE promotion structurelle à tort.
+  actions: read
 
 env:
   REGISTRY: ghcr.io
@@ -76,9 +82,13 @@ jobs:
           NOW_TS=$(date -u +%s)
           MAX_AGE=$((24 * 3600))
 
+          # Pas de `2>/dev/null || echo '[]'` : un échec de `gh run list`
+          # (403 permission, rate-limit, panne API) doit faire ÉCHOUER le
+          # gate bruyamment — pas le transformer en faux "aucun staging
+          # vert" silencieux.
           RUNS=$(gh run list --workflow staging-deploy.yml --branch staging \
                               --status success --limit 20 \
-                              --json databaseId,headSha,createdAt 2>/dev/null || echo '[]')
+                              --json databaseId,headSha,createdAt)
           MATCH=""
           while IFS=$'\t' read -r run_id sha created; do
             ts=$(date -u -d "$created" +%s 2>/dev/null || echo 0)
