@@ -18,6 +18,11 @@ import {
   makeStaminadsPageviewsFetcher,
   type PageviewsFetcher,
 } from "./tenant-status.js";
+import {
+  createCheckTrackerHandler,
+  makeStaminadsRecentActivityFetcher,
+  type RecentActivityFetcher,
+} from "./check-tracker.js";
 import { SHADOW_MARKETING } from "./shadow-marketing.js";
 import { buildCountsFromStaminadsRows, computeScore } from "./score.js";
 import { hubHmacMiddleware } from "./hub-hmac.js";
@@ -118,6 +123,12 @@ export interface CreateAppOptions {
    * Par défaut, on en construit un qui interroge staminads via analytics.query.
    */
   pageviewsFetcher?: PageviewsFetcher;
+  /**
+   * Override du fetcher d'activité récente utilisé par
+   * `/api/admin/tenant/:id/check-tracker` (onboarding wizard U4). Par défaut,
+   * on en construit un qui interroge staminads via analytics.query (24h).
+   */
+  recentActivityFetcher?: RecentActivityFetcher;
 }
 
 export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Express {
@@ -524,6 +535,39 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
           .json({ error: "internal", message: (err as Error).message });
       }
     },
+  );
+
+  /**
+   * GET /api/admin/tenant/:workspaceId/check-tracker
+   *
+   * Endpoint de l'onboarding wizard `/welcome` (U4 / ex-C3). Le wizard poll
+   * cet endpoint toutes les 5s pendant que le nouveau tenant colle le snippet
+   * sur son site, pour détecter le premier pageview reçu.
+   *
+   * Réponse : { status: 'ok'|'waiting', firstSeenAt: string|null, totalEvents24h }
+   *
+   * Erreurs :
+   *   - 401/403 : auth (cf requireVeridianAdmin)
+   *   - 400     : workspaceId vide / manquant
+   *   - 500     : exception inattendue
+   *
+   * Un workspace inconnu ou vide n'est PAS une erreur : staminads renvoie 0
+   * pageview → on répond 200 `{ status: 'waiting' }`. C'est l'état nominal
+   * d'un site qui n'a pas encore posé le tracker.
+   */
+  const checkTrackerHandler = createCheckTrackerHandler({
+    fetchRecentActivity:
+      opts.recentActivityFetcher ??
+      makeStaminadsRecentActivityFetcher({
+        staminadsUrl: cfg.staminadsUrl,
+        getAdminToken,
+      }),
+  });
+
+  app.get(
+    "/api/admin/tenant/:workspaceId/check-tracker",
+    requireVeridianAdmin,
+    checkTrackerHandler,
   );
 
   /**

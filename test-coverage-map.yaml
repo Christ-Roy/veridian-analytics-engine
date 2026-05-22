@@ -105,6 +105,22 @@
     pagespeed restent couverts par les tickets correspondants (B1, A4).
 
 - sources:
+    - veridian-bridge/src/check-tracker.ts
+  covered_by:
+    - veridian-bridge/tests/check-tracker.test.ts
+  reason: |
+    Endpoint GET /api/admin/tenant/:wsId/check-tracker — poll par
+    l'onboarding wizard `/welcome` (ticket U4 / ex-C3) pour détecter le
+    premier pageview reçu après pose du snippet. Factory
+    createCheckTrackerHandler + helper makeStaminadsRecentActivityFetcher
+    testés via le recentActivityFetcher injecté dans createApp() (0 event
+    → waiting, events → ok + firstSeenAt, auth 401/403, exception → 500)
+    et via un faux serveur HTTP minimal pour le helper (parsing rows,
+    somme pageviews, earliest date, fail-safe staminads down / 500).
+    PAS un fichier critique (hors forms/push/hub/gsc/score/tenant-status)
+    → pas de test d'intégration exigé par check-integration-coverage.sh.
+
+- sources:
     - veridian-bridge/src/shadow-marketing.ts
   covered_by:
     - veridian-bridge/tests/shadow-marketing.test.ts
@@ -523,6 +539,24 @@
     Vitest + React Testing Library — 16 cas couvrant rendu, formats
     Intl fr-FR, build mailto:, edge cases (data vide, impersonating=
     false, fallback siteDomain).
+
+- sources:
+    - console/src/veridian/pages/welcome.tsx
+    - console/src/veridian/api.ts
+    - console/src/routes/_authenticated/veridian.welcome.$workspaceId.tsx
+  covered_by:
+    - console/src/veridian/pages/__tests__/welcome.test.tsx
+  reason: |
+    Onboarding wizard `/welcome` — ticket U4 (ex-C3), giga-sprint UI
+    2026-05-22. Wizard 3 étapes (copie snippet → pose dans le site →
+    vérification) qui poll GET /api/admin/tenant/:wsId/check-tracker
+    toutes les 5s. Tests Vitest + RTL — 12 cas : buildTrackerSnippet
+    (workspaceId + endpoint embarqués, slash final retiré), bouton
+    copier (navigator.clipboard.writeText + toast), navigation entre
+    étapes, polling waiting → ok → onComplete, timeout 60s → panneau
+    d'aide, erreur 403 → message d'accès refusé. La route TanStack
+    `veridian.welcome.$workspaceId.tsx` est un thin wrapper (resolve
+    endpoint + navigate onComplete) couvert indirectement.
 
 - sources:
     - console/public/sw.js

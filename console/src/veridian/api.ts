@@ -67,6 +67,17 @@ export type ShadowMarketingResponse = Record<
   }
 >;
 
+/**
+ * Réponse de `GET /api/admin/tenant/:wsId/check-tracker` — endpoint poll
+ * par l'onboarding wizard `/welcome` (U4). Miroir du handler bridge
+ * `veridian-bridge/src/check-tracker.ts`.
+ */
+export interface CheckTrackerResponse {
+  status: 'ok' | 'waiting';
+  firstSeenAt: string | null;
+  totalEvents24h: number;
+}
+
 // ─── Erreur typée ────────────────────────────────────────────────────────
 
 export class BridgeApiError extends Error {
@@ -166,6 +177,22 @@ export function fetchShadowMarketing(
     requireAdmin: false,
     signal: opts.signal,
   });
+}
+
+/**
+ * Vérifie si le tracker est actif pour un workspace — poll par l'onboarding
+ * wizard `/welcome` toutes les 5s. `status: 'ok'` dès le premier pageview
+ * reçu. Un workspace vide n'est PAS une erreur : le bridge répond 200
+ * `{ status: 'waiting' }`.
+ */
+export function fetchCheckTracker(
+  workspaceId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<CheckTrackerResponse> {
+  return fetchJson<CheckTrackerResponse>(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/check-tracker`,
+    { requireAdmin: true, signal: opts.signal },
+  );
 }
 
 // ─── Aggregator parallèle ────────────────────────────────────────────────
