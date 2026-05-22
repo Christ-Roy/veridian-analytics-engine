@@ -312,7 +312,7 @@ jobs:
       # les CVE upstream sans bloquer un release Veridian — l'équipe upstream
       # corrige à son rythme.
       - name: Trivy image scan — engine (warn-only)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
         with:
           scan-type: 'image'
@@ -324,7 +324,7 @@ jobs:
 
       # Bridge = code Veridian. BLOQUANT.
       - name: Trivy image scan — bridge (bloquant)
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}'
