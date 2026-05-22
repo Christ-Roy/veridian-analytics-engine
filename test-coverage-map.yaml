@@ -795,14 +795,17 @@
     - veridian-bridge/tests/gsc-query-parsing.test.ts
     - veridian-bridge/tests/push/subscribe.test.ts
     - veridian-bridge/tests/push/send-notification.test.ts
+    - veridian-bridge/tests/voip/providers-ovh.test.ts
     - veridian-bridge/tests/integration/_harness/smoke.integration.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/voip/sync.integration.test.ts
   reason: |
     Schema Prisma (Tenant, GscProperty, GscDaily, PushSubscription,
-    PushNotification). Les tests unitaires reflètent les contraintes dans
-    le FakePrismaClient in-memory. Le test d'INTÉGRATION smoke valide les
-    contraintes RÉELLES contre Postgres : @@unique → P2002, onDelete
-    Cascade, defaults. `prisma migrate deploy` au boot du harness valide
-    le schéma vs DB réelle.
+    PushNotification, TenantCredential, TenantSettings, SipCall). Les tests
+    unitaires reflètent les contraintes dans le FakePrismaClient in-memory.
+    Les tests d'INTÉGRATION (smoke + voip/sync) valident les contraintes
+    RÉELLES contre Postgres : @@unique → P2002, onDelete Cascade, defaults.
+    `prisma migrate deploy` au boot du harness valide le schéma vs DB réelle.
 
 # ─── Harness tests d'intégration (T-INTEGRATION-TESTS) ─────────────────
 
@@ -907,6 +910,74 @@
     FormSubmission/Lead/LeadSession. Reflète les contraintes du schéma
     (unique (siteId,email), (siteId,formSlug)). Modif du helper → casse
     les tests forms qui s'en servent.
+
+# ─── VoIP call logs (B-VOIP) ───────────────────────────────────────────
+
+- sources:
+    - veridian-bridge/src/voip/index.ts
+    - veridian-bridge/src/voip/types.ts
+    - veridian-bridge/src/voip/credentials.ts
+    - veridian-bridge/src/voip/match.ts
+    - veridian-bridge/src/voip/sync.ts
+    - veridian-bridge/src/voip/query.ts
+    - veridian-bridge/src/voip/routes.ts
+    - veridian-bridge/src/voip/providers/ovh.ts
+    - veridian-bridge/src/voip/providers/telnyx.ts
+  covered_by:
+    - veridian-bridge/tests/voip/match.test.ts
+    - veridian-bridge/tests/voip/providers-ovh.test.ts
+    - veridian-bridge/tests/voip/providers-telnyx.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/voip/sync.integration.test.ts
+  reason: |
+    Ingestion des logs d'appels VoIP (CDR) → table SipCall. Port de la
+    logique `sipCall` du legacy veridian-analytics.
+
+    Coordination U8 : B-VOIP NE gère PAS le stockage des credentials. Les
+    creds VoIP sont saisis via la page Settings (U8) et persistés dans
+    `TenantCredential` (kind voip_ovh / voip_telnyx), chiffrés AES-256-GCM
+    par `src/credentials/`. B-VOIP n'a PAS de table de creds dédiée :
+    `src/voip/credentials.ts` est un simple adaptateur de LECTURE qui
+    déchiffre les TenantCredential VoIP et expose `LoadedVoipCredential`
+    au sync. Le chiffrement, la validation de forme et le CRUD (saisie /
+    test / suppression) sont couverts par les tests U8 (credentials-*).
+
+    - providers/ovh.ts : client OVH Telephony — signature HMAC-SHA1,
+      DÉCOUVRE les billingAccounts (/telephony) puis les serviceNames
+      (/service) puis pull les voiceConsumption de chaque ligne. Les creds
+      U8 (3 clés OVH, pas de billingAccount) suffisent : zéro champ
+      supplémentaire à demander au tenant. Normalisation CDR, filtre par
+      fenêtre de dates, skip 404 d'une conso purgée.
+    - providers/telnyx.ts : client Telnyx Detail Records API — pagination,
+      backoff 429/5xx (3 retries), mapping des statuts.
+    - match.ts : matching visitorId — un appel inbound dont le numéro
+      appelant == Lead.phone est relié au visitorId de la LeadSession la
+      plus récente (numéro normalisé E.164, 9 derniers chiffres).
+    - sync.ts : syncCallLogs (un tenant) + syncAllCallLogs (cron) —
+      upsert idempotent sur @@unique(provider, externalId), fail-soft par
+      provider ; met à jour status/lastSyncAt du TenantCredential.
+    - query.ts : listCalls — lecture du tab Calls + stats agrégées.
+    - routes.ts : 3 endpoints admin (sync, sync-all IP-allowlist, calls).
+      Le CRUD des creds est servi par U8, pas dupliqué ici.
+
+    Tests UNITAIRES (covered_by) : 3 fichiers — normalisation des numéros,
+    clients OVH/Telnyx contre des mocks fetch HTTP (aucun réseau réel).
+
+    Tests d'INTÉGRATION RÉELS (integration_covered_by) : 1 fichier
+    `*.integration.test.ts` qui tape un VRAI Postgres via le harness
+    `bootBridgeWithRealDB()`. Ce que les fakes ne pouvaient PAS prouver :
+    - lecture des creds : les TenantCredential VoIP (seedés via le store
+      U8 `saveCredential`) sont RÉELLEMENT déchiffrés ; lecture SQL brute
+      qui vérifie qu'aucun secret n'est en clair.
+    - idempotence : la vraie contrainte @@unique(provider, externalId)
+      garantit qu'un re-sync upsert sans dupliquer ; re-sync avec valeur
+      modifiée → la row reflète la nouvelle valeur.
+    - matching visitorId : un appel inbound est RÉELLEMENT relié au
+      visitorId via la chaîne Lead.phone → LeadSession en Postgres.
+    - cascade FK : suppression Tenant → cascade sur SipCall.
+    - endpoints HTTP : auth Bearer, 404 tenant inconnu, fail-soft réseau.
+    Suite SÉRIALISÉE + fichier auto-isolant (Tenant à id unique
+    cross-process, assertions scopées) → déterministe.
 
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #

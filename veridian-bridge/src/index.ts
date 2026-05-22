@@ -23,6 +23,7 @@ import {
   readEncryptionKeyFromEnv,
   CredentialCryptoError,
 } from "./credentials/index.js";
+import { registerVoipRoutes } from "./voip/index.js";
 import { getPrisma } from "./db/prisma.js";
 import { registerProvisionExistingRoutes } from "./admin/provision-existing-tenant.js";
 import type { Request, Response, NextFunction } from "express";
@@ -357,6 +358,62 @@ try {
   console.warn(
     `[bridge] provision-existing-tenant disabled: ${(err as Error).message}`,
   );
+}
+
+// ─── VoIP call logs (B-VOIP) — optional ─────────────────────────────────────
+//
+// Pull les CDR (OVH Telephony / Telnyx) → table SipCall + tab Calls. Lit les
+// credentials VoIP saisis par le tenant via la page Settings (TenantCredential,
+// U8). Câblé si BRIDGE_DATABASE_URL + TOKEN_ENCRYPTION_KEY sont présents.
+try {
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new CredentialCryptoError(
+      "BRIDGE_DATABASE_URL missing — VoIP feature disabled",
+    );
+  }
+  const encryptionKey = readEncryptionKeyFromEnv();
+  const prisma = getPrisma();
+
+  function requireAdminForVoip(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  const voipCronAllowedIps = (process.env.VOIP_CRON_ALLOWED_IPS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  registerVoipRoutes(app, {
+    prisma,
+    requireAdmin: requireAdminForVoip,
+    adminApiKey: cfg.veridianAdminApiKey,
+    encryptionKey,
+    cronAllowedIps:
+      voipCronAllowedIps.length > 0 ? voipCronAllowedIps : undefined,
+  });
+  console.log("[bridge] VoIP routes registered");
+} catch (err) {
+  if (err instanceof CredentialCryptoError) {
+    console.warn(`[bridge] VoIP disabled: ${err.message}`);
+  } else {
+    console.warn(
+      `[bridge] VoIP init failed (continuing without): ${(err as Error).message}`,
+    );
+  }
 }
 
 app.listen(PORT, () => {

@@ -74,6 +74,7 @@ import { registerGscRoutes } from "../../../src/gsc/routes.js";
 import { registerFormsRoutes } from "../../../src/forms/routes.js";
 import { registerPushRoutes } from "../../../src/push/routes.js";
 import { registerSettingsRoutes } from "../../../src/settings/routes.js";
+import { registerVoipRoutes } from "../../../src/voip/routes.js";
 import { setPrismaClientForTests } from "../../../src/db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 import { PrismaTenantStore, ensureOwnerTable } from "./prisma-tenant-store.js";
@@ -328,6 +329,13 @@ export async function bootBridgeWithRealDB(
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  registerVoipRoutes(app, {
+    prisma,
+    requireAdmin,
+    adminApiKey: TEST_ADMIN_KEY,
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
   // 7. Listen sur port éphémère.
   const { url, closeServer } = await listen(app);
 
@@ -406,6 +414,7 @@ const APP_TABLES = [
   "TenantOwner",
   "TenantCredential",
   "TenantSettings",
+  "SipCall",
   "PushNotification",
   "PushSubscription",
   "LeadSession",

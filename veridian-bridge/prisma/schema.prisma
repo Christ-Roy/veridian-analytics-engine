@@ -57,6 +57,7 @@ model Tenant {
   pushNotifications PushNotification[]
   credentials       TenantCredential[]
   settings          TenantSettings?
+  sipCalls          SipCall[]
 
   @@index([status])
   @@index([hubTenantId])
@@ -365,4 +366,42 @@ model PushNotification {
   tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, sentAt])
+}
+
+// ─── SipCall (B-VOIP) ──────────────────────────────────────────────────────
+//
+// Un appel téléphonique remonté depuis un provider VoIP (OVH Telephony /
+// Telnyx). Alimente le tab Calls du dashboard. Port de la logique `sipCall`
+// du legacy veridian-analytics.
+//
+// Les credentials VoIP du tenant vivent dans `TenantCredential` (kind
+// `voip_ovh` / `voip_telnyx`, table U8) — pas de table de creds dédiée ici.
+// Le cron B-VOIP les déchiffre pour pull les CDR puis upsert ici.
+//
+// Idempotence : `@@unique([provider, externalId])` — un re-sync upsert sans
+// dupliquer (`externalId` est l'id stable de l'appel chez le provider).
+//
+// `visitorId` : matché si l'appel provient d'un clic `tel:` tracké par le
+// tracker Veridian (relie l'appel téléphonique à la session web).
+
+model SipCall {
+  id            String   @id @default(cuid())
+  tenantId      String
+  siteId        String?
+  provider      String   // 'ovh' | 'telnyx'
+  externalId    String   // id de l'appel chez le provider
+  direction     String   // 'inbound' | 'outbound'
+  fromNumber    String
+  toNumber      String
+  durationSec   Int      @default(0)
+  status        String   // 'answered' | 'missed' | 'busy' | 'failed'
+  recordingUrl  String?
+  startedAt     DateTime
+  visitorId     String?  // matché si l'appel vient d'un clic tel: tracké
+  createdAt     DateTime @default(now())
+
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalId])
+  @@index([tenantId, startedAt])
 }
