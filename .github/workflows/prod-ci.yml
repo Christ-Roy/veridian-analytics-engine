@@ -177,9 +177,16 @@ jobs:
           cache-from: type=gha,scope=bridge-prod
           cache-to: type=gha,scope=bridge-prod,mode=max
 
+  # if explicite : `build` est gated `if: always()` (à cause du
+  # structural-gate qui peut être skipped sur workflow_dispatch). Sans
+  # `if:` propre, GitHub évalue `success()` qui retourne false dès qu'un
+  # job de la chaîne (ici structural-gate) est skipped → trivy/deploy se
+  # faisaient skipper même quand le build était vert. `!cancelled() &&
+  # needs.build.result == 'success'` les lie au vrai résultat du build.
   trivy-bridge:
     name: Trivy image — bridge (bloquant)
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     uses: ./.github/workflows/_trivy-image.yml
     with:
       image-ref: ghcr.io/christ-roy/veridian-analytics-bridge:latest
@@ -193,6 +200,7 @@ jobs:
   trivy-engine:
     name: Trivy image — engine (warn-only)
     needs: build
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     uses: ./.github/workflows/_trivy-image.yml
     with:
       image-ref: ghcr.io/christ-roy/veridian-analytics-engine:latest
@@ -211,6 +219,10 @@ jobs:
   deploy-prod:
     name: Deploy prod (Dokploy API)
     needs: [build, trivy-bridge]
+    # Deploy seulement si build vert ET trivy-bridge vert (bloquant).
+    # `if:` explicite — même raison que trivy-bridge (chaîne avec
+    # structural-gate skippable). trivy-engine est warn-only, non requis.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.trivy-bridge.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
@@ -267,6 +279,9 @@ jobs:
   e2e-prod-smoke:
     name: Playwright smoke prod
     needs: deploy-prod
+    # if explicite — même raison que trivy/deploy (chaîne avec
+    # structural-gate skippable sur workflow_dispatch).
+    if: ${{ !cancelled() && needs.deploy-prod.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
