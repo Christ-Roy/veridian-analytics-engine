@@ -138,21 +138,33 @@
     - veridian-bridge/tests/hub/hmac-invalid-signature.test.ts
     - veridian-bridge/tests/hub/hmac-replay-attack.test.ts
     - veridian-bridge/tests/hub/hmac-body-modified.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/hmac.integration.test.ts
   reason: |
     Lib HMAC Hub (Pattern A §6.1) : verifyHubHmac + hubHmacMiddleware +
     assertSkipHmacAllowed. 4 fichiers de tests couvrent : signature valide,
     signature invalide, anti-replay timestamp ±5min, body modifié après
     signature. Constant-time compare via crypto.timingSafeEqual.
+    Intégration T2 (hmac.integration.test.ts) : prouve l'effet de bord RÉEL
+    contre un vrai Postgres — signature valide → mutation persistée en DB ;
+    replay / tamper / bad-sig / headers manquants → 401 ET la table Tenant
+    reste vide (le middleware court-circuite avant le handler).
 
 - sources:
     - veridian-bridge/src/paywall.ts
   covered_by:
     - veridian-bridge/tests/hub/paywall-required.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/paywall.integration.test.ts
   reason: |
     Lib paywall V1 (stub) : requireActivePlan() lève PaywallError(402) si
     tenant.status ∈ {suspended, trial_expired, soft_deleted}. V2 (S3) :
     obfuscation field-level. Tests : 6 scénarios couvrant tous les status +
     helper isPlanActive + tenant introuvable.
+    Intégration T2 (paywall.integration.test.ts) : requireActivePlan branché
+    sur le VRAI PrismaTenantStore — status posé directement en Postgres, les
+    3 statuts non-actifs lèvent 402, un UPDATE de status en DB est reflété
+    immédiatement (pas de cache mémoire).
 
 - sources:
     - veridian-bridge/src/hub/store.ts
@@ -162,12 +174,20 @@
     - veridian-bridge/tests/hub/provision-cas-c.test.ts
     - veridian-bridge/tests/hub/attach-owner.test.ts
     - veridian-bridge/tests/hub/paywall-required.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/provision.integration.test.ts
+    - veridian-bridge/tests/integration/hub/attach-owner.integration.test.ts
+    - veridian-bridge/tests/integration/hub/health.integration.test.ts
+    - veridian-bridge/tests/integration/hub/paywall.integration.test.ts
   reason: |
     Interface TenantStore + impl InMemoryTenantStore. À substituer par
     PrismaTenantStore quand A4 sera mergée (Tenant model déjà câblé en A4
     avec les colonnes B3 préemptées : hubTenantId, plan, planSource, status,
     apiKey, suspendedAt, softDeletedAt). Tests provision + attach-owner +
     paywall exercent toutes les méthodes du store.
+    Intégration T2 : les 4 suites hub/ exercent PrismaTenantStore contre un
+    VRAI Postgres — create/refreshApiKey/attachOwner/findById/findByHubTenantId
+    avec les vraies contraintes @@unique (P2002) et la cascade FK.
 
 - sources:
     - veridian-bridge/src/hub/provision.ts
@@ -175,31 +195,48 @@
     - veridian-bridge/tests/hub/provision-cas-a.test.ts
     - veridian-bridge/tests/hub/provision-cas-b.test.ts
     - veridian-bridge/tests/hub/provision-cas-c.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/provision.integration.test.ts
   reason: |
     Endpoint POST /api/tenants/provision (CONTRAT-HUB §5.1). 3 cas
     idempotents A/B/C : nouveau tenant, ré-attach (refresh apiKey),
     conflit owner_email (409). Coordonne avec hook staminads pour créer
     workspace + apiKey.
+    Intégration T2 (provision.integration.test.ts) : les 3 cas A/B/C contre
+    un VRAI Postgres — Cas A vérifie la row Tenant réellement écrite et
+    relisible, Cas B l'idempotence + refresh apiKey persisté, Cas C le 409
+    sans mutation. Couvre aussi les vraies contraintes @@unique
+    (workspaceId / hubTenantId / apiKey → P2002).
 
 - sources:
     - veridian-bridge/src/hub/attach-owner.ts
   covered_by:
     - veridian-bridge/tests/hub/attach-owner.test.ts
     - veridian-bridge/tests/hub/attach-owner-idempotent.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/attach-owner.integration.test.ts
   reason: |
     Endpoint POST /api/tenants/attach-owner (CONTRAT-HUB §5.3). Lie un
     user au tenant en mode OWNER. Idempotent : same (tenant, email, user_id)
     → already_attached:true. 404 si tenant inexistant.
+    Intégration T2 (attach-owner.integration.test.ts) : le lien user↔tenant
+    est vérifié RÉELLEMENT dans la table annexe TenantOwner de Postgres ;
+    re-attach idempotent prouvé par COUNT(*) = 1 (pas de doublon).
 
 - sources:
     - veridian-bridge/src/hub/health.ts
   covered_by:
     - veridian-bridge/tests/hub/health.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/hub/health.integration.test.ts
   reason: |
     Endpoint GET /api/tenants/:id/health (CONTRAT-HUB §5.5). Renvoie
     status + magic_link_capable + api_key_valid + stats (last_event_at,
     sites_count, pageviews_30d). loadStats injectable côté factory pour
     brancher staminads /analytics.query plus tard.
+    Intégration T2 (health.integration.test.ts) : sites_count calculé par un
+    vrai query Prisma site.count contre la table Site de Postgres ;
+    owner_attached / magic_link_capable dérivés de données DB réelles.
 
 - sources:
     - veridian-bridge/tests/hub/helpers.ts
