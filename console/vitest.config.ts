@@ -12,7 +12,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
-    include: ['src/veridian/__tests__/**/*.test.{ts,tsx}'],
+    include: [
+      'src/veridian/__tests__/**/*.test.{ts,tsx}',
+      'src/veridian/pages/__tests__/**/*.test.{ts,tsx}',
+    ],
     exclude: ['node_modules', 'dist', 'scripts/**'],
     setupFiles: ['./src/veridian/__tests__/setup.ts'],
     css: false,

@@ -185,6 +185,7 @@ function WorkspaceLayout() {
                   { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
                   { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
                   { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
+                  { to: '/veridian/dashboard/$workspaceId', label: 'Veridian' },
                   { to: '/workspaces/$workspaceId/settings', label: 'Settings' },
                 ].map(({ to, label, exact }) => {
                   const resolvedPath = to.replace('$workspaceId', workspaceId)
@@ -416,6 +417,7 @@ function WorkspaceLayout() {
                     { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
                     { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
                     { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
+                    { to: '/veridian/dashboard/$workspaceId', label: 'Veridian' },
                   ].map(({ to, label, exact }) => {
                     const resolvedPath = to.replace('$workspaceId', workspaceId)
                     const isActive = exact

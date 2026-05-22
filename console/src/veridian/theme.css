@@ -1,0 +1,190 @@
+/**
+ * Veridian Theme — scoped CSS variables
+ *
+ * Stratégie : on n'écrase PAS le thème AntDesign / staminads upstream.
+ * Tout le rendu Veridian vit sous `.veridian-scope` (wrapper sur la page).
+ * Tailwind v4 lit ces variables via `@theme inline` plus bas — du coup les
+ * classes `bg-card`, `text-muted-foreground`, `border-border`, etc. utilisées
+ * par les composants C1 (port shadcn/ui) marchent automatiquement DANS le
+ * scope Veridian, mais ne fuitent pas sur les pages AntDesign.
+ *
+ * Palette : dark moderne, dérivée du legacy `veridian-analytics/app/globals.css`
+ * avec un primary plus saturé (cyan/teal Veridian) pour les CTA et le hero
+ * score (plus engageant que le bleu staminads).
+ *
+ * Inspiration : Linear, Vercel, Plausible — sobre, dense, lisible.
+ */
+
+.veridian-scope {
+  /* Surfaces — dark elegant, légèrement bleuté pour ne pas être plat noir */
+  --background: 224 24% 6%;
+  --foreground: 210 20% 96%;
+
+  /* Cards : un poil plus claires que background pour créer de la profondeur */
+  --card: 222 20% 9%;
+  --card-foreground: 210 20% 96%;
+
+  /* Primary : teal Veridian (signature couleur) — utilisé pour CTA, hero,
+     active state. Suffisamment saturé pour pop sans être agressif. */
+  --primary: 174 72% 56%;
+  --primary-foreground: 224 30% 8%;
+
+  /* Secondary : neutre froid pour les surfaces sub */
+  --secondary: 222 15% 13%;
+  --secondary-foreground: 210 20% 96%;
+
+  /* Muted : ton bas pour texte secondaire / shadow marketing */
+  --muted: 222 15% 13%;
+  --muted-foreground: 215 16% 65%;
+
+  /* Accent : utilisé par hover/focus subtils */
+  --accent: 222 20% 14%;
+  --accent-foreground: 210 20% 98%;
+
+  /* Destructive — pour les erreurs */
+  --destructive: 0 72% 56%;
+  --destructive-foreground: 210 20% 98%;
+
+  /* Borders : ton très bas pour ne pas hurler */
+  --border: 222 15% 16%;
+  --input: 222 15% 16%;
+  --ring: 174 72% 56%;
+
+  --radius: 0.75rem;
+
+  /* Typo */
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+
+  /* Reset Ant Design qui parfois fuit (les pages parentes utilisent AntD) */
+  & a {
+    text-decoration: none;
+  }
+  & h1,
+  & h2,
+  & h3 {
+    letter-spacing: -0.02em;
+  }
+}
+
+/* ─── Tailwind v4 theme bridge ──────────────────────────────────────────
+   Tailwind v4 utilise @theme inline pour mapper les CSS vars vers les
+   utilities. Tu peux donc faire `bg-card`, `text-muted-foreground`,
+   `border-border` dans tous les composants Veridian. */
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius: var(--radius);
+}
+
+/* ─── Animations ──────────────────────────────────────────────────────── */
+
+@keyframes veridian-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes veridian-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes veridian-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 12px hsl(var(--primary) / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 hsl(var(--primary) / 0);
+  }
+}
+
+.veridian-scope .veridian-fade-in {
+  animation: veridian-fade-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.veridian-scope .veridian-fade-in-delay-1 {
+  animation: veridian-fade-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 80ms both;
+}
+
+.veridian-scope .veridian-fade-in-delay-2 {
+  animation: veridian-fade-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 160ms both;
+}
+
+.veridian-scope .veridian-fade-in-delay-3 {
+  animation: veridian-fade-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) 240ms both;
+}
+
+.veridian-scope .veridian-skeleton {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted) / 0.5) 0%,
+    hsl(var(--muted) / 0.8) 50%,
+    hsl(var(--muted) / 0.5) 100%
+  );
+  background-size: 200% 100%;
+  animation: veridian-shimmer 1.6s ease-in-out infinite;
+}
+
+.veridian-scope .veridian-pulse-ring {
+  animation: veridian-pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ─── Hero score : effet de glow subtil derrière le grand chiffre ─────── */
+.veridian-scope .veridian-score-glow {
+  position: relative;
+  isolation: isolate;
+}
+.veridian-scope .veridian-score-glow::before {
+  content: '';
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(
+    closest-side,
+    hsl(var(--primary) / 0.18),
+    transparent 70%
+  );
+  z-index: -1;
+  pointer-events: none;
+}
