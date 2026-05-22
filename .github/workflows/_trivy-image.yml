@@ -1,0 +1,116 @@
+name: _trivy-image (reusable)
+
+# Reusable Trivy image scan. Inspiré de veridian-hub/_trivy-image.yml.
+#
+# Bloque sur CRITICAL ou HIGH avec fix dispo (ignore-unfixed=true par défaut).
+# SBOM CycloneDX + SARIF générés pour traçabilité supply chain.
+#
+# Convention analytics-engine :
+#   - bridge → BLOQUANT (continue-on-error=false) — code Veridian
+#   - engine → WARNING (continue-on-error=true) — upstream staminads AGPL
+#     que l'on suit pinned, on ne bloque pas un release sur leurs CVE.
+
+on:
+  workflow_call:
+    inputs:
+      image-ref:
+        description: "Image à scanner (ex: ghcr.io/christ-roy/veridian-analytics-bridge:tag)"
+        required: true
+        type: string
+      severity:
+        description: "Sévérités bloquantes (CSV)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      ignore-unfixed:
+        description: "Ignorer les CVE sans patch dispo upstream"
+        required: false
+        type: boolean
+        default: true
+      sbom-upload:
+        description: "Génère + upload SBOM CycloneDX"
+        required: false
+        type: boolean
+        default: true
+      sarif-upload:
+        description: "Upload SARIF vers GitHub Security tab"
+        required: false
+        type: boolean
+        default: true
+      continue-on-error:
+        description: "Non-bloquant (utile pour engine upstream)"
+        required: false
+        type: boolean
+        default: false
+      trivyignore-path:
+        description: "Chemin vers .trivyignore (défaut : .trivyignore racine)"
+        required: false
+        type: string
+        default: '.trivyignore'
+
+jobs:
+  trivy:
+    name: Trivy scan (CRIT/HIGH ${{ inputs.continue-on-error && 'warn' || 'bloquant' }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: ${{ inputs.continue-on-error }}
+        with:
+          image-ref: ${{ inputs.image-ref }}
+          severity: ${{ inputs.severity }}
+          exit-code: '1'
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          format: 'table'
+          vuln-type: 'os,library'
+          timeout: '10m'
+          trivyignores: ${{ inputs.trivyignore-path }}
+
+      - name: Generate SBOM (CycloneDX)
+        if: ${{ inputs.sbom-upload }}
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true
+        with:
+          image-ref: ${{ inputs.image-ref }}
+          format: 'cyclonedx'
+          output: 'trivy-sbom.cdx.json'
+          exit-code: '0'
+          timeout: '10m'
+
+      - name: Upload SBOM artifact
+        if: ${{ inputs.sbom-upload }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sbom-${{ github.run_id }}-${{ github.job }}
+          path: trivy-sbom.cdx.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Generate SARIF report
+        if: ${{ inputs.sarif-upload }}
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true
+        with:
+          image-ref: ${{ inputs.image-ref }}
+          severity: ${{ inputs.severity }}
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          format: 'sarif'
+          output: 'trivy-image.sarif'
+          vuln-type: 'os,library'
+          timeout: '10m'
+          trivyignores: ${{ inputs.trivyignore-path }}
+
+      - name: Upload SARIF to GitHub Security tab
+        if: ${{ inputs.sarif-upload }}
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-image.sarif'
+          category: 'trivy-image-${{ github.job }}'

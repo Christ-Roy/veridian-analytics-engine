@@ -1,0 +1,20 @@
+# .trivyignore — analytics-engine root scope
+#
+# Ce fichier liste les CVE / findings Trivy à ignorer pour les scans
+# `_trivy-fs.yml` et `_trivy-image.yml` sur l'image engine (staminads upstream).
+#
+# Convention :
+#   1. Une CVE ne s'ajoute QUE si elle est documentée (lien + raison).
+#   2. On préfère bumper la dep fautive plutôt que d'ignorer.
+#   3. Engine = upstream staminads — on remonte les fix upstream avant
+#      d'ignorer côté Veridian.
+#
+# Pour le bridge : voir veridian-bridge/.trivyignore (scope plus strict).
+#
+# Format : 1 CVE par ligne, commentaire #ABOVE la ligne expliquant pourquoi.
+#
+# Exemple :
+# # CVE-XXXX-YYYY — dependency Z@1.2.3, no fix upstream, mitigated by Y, removed-when:
+# CVE-XXXX-YYYY
+
+# (Aucune CVE actuellement ignorée — phase initiale)

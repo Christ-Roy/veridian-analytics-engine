@@ -1,0 +1,105 @@
+name: Security cron (Trivy daily)
+
+# Cron quotidien Trivy sur les images analytics-engine deployed (latest GHCR).
+# Détecte les CVE upstream sorties APRÈS le merge.
+# Si CRIT/HIGH apparaît sur bridge : ce workflow fail et un agent doit ouvrir
+# une PR de bump deps. Sur engine : warn-only (upstream staminads, on suit).
+#
+# Référence : SPRINT-GITOPS-VERIDIAN.md "Cron Trivy quotidien".
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # 3h UTC = 4h/5h Paris
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+  security-events: write
+
+jobs:
+  # Bridge = code Veridian, BLOQUANT (fail le job si CVE HIGH/CRITICAL)
+  trivy-bridge:
+    name: Trivy bridge (bloquant)
+    uses: ./.github/workflows/_trivy-image.yml
+    with:
+      image-ref: ghcr.io/christ-roy/veridian-analytics-bridge:latest
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      sbom-upload: true
+      sarif-upload: true
+      continue-on-error: false
+      trivyignore-path: 'veridian-bridge/.trivyignore'
+
+  # Engine = upstream staminads, WARN-ONLY (visibilité sans bloquer)
+  trivy-engine:
+    name: Trivy engine (warn-only)
+    uses: ./.github/workflows/_trivy-image.yml
+    with:
+      image-ref: ghcr.io/christ-roy/veridian-analytics-engine:latest
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      sbom-upload: true
+      sarif-upload: true
+      continue-on-error: true
+      trivyignore-path: '.trivyignore'
+
+  # FS scan hebdo : re-scan le repo pour CVE lockfile + misconfig + secret
+  trivy-fs-weekly:
+    name: Trivy FS hebdo
+    if: github.event.schedule == '0 3 * * *' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/_trivy-fs.yml
+    with:
+      scan-path: '.'
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      skip-license: true
+      sarif-upload: true
+      continue-on-error: true
+
+  # Notification GitHub Issue si trivy-bridge fail
+  notify-on-failure:
+    name: Open GitHub issue on bridge CVE
+    needs: trivy-bridge
+    if: always() && needs.trivy-bridge.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Idempotent : si une issue "[security-cron]" est déjà ouverte, on l'update
+          # plutôt que de spam le tracker chaque jour.
+          EXISTING=$(gh issue list --search '[security-cron] in:title state:open' --json number --jq '.[0].number' || echo "")
+          BODY=$(cat <<EOF
+          CVE HIGH ou CRITICAL détectée sur \`ghcr.io/christ-roy/veridian-analytics-bridge:latest\`.
+
+          - Run : ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          - Date : $(date -u +%FT%TZ)
+
+          ## Action attendue
+
+          1. \`cd veridian-bridge && npm audit --omit=dev --audit-level=high\`
+          2. \`npm audit fix\` ou bump manuel des deps fautives
+          3. PR vers \`dev\` puis \`staging\`
+          4. CI verte → fermer cette issue
+
+          Si pas de fix dispo (CVE upstream sans patch) : documenter dans
+          \`veridian-bridge/.trivyignore\` avec justification + lien CVE.
+          EOF
+          )
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+            echo "Updated existing issue #$EXISTING"
+          else
+            gh issue create \
+              --title "[security-cron] CVE HIGH/CRITICAL sur bridge image — $(date -u +%F)" \
+              --body "$BODY" \
+              --label "security,bug" || gh issue create \
+              --title "[security-cron] CVE HIGH/CRITICAL sur bridge image — $(date -u +%F)" \
+              --body "$BODY"
+          fi

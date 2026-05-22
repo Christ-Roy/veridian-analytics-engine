@@ -1,0 +1,351 @@
+# Veridian Analytics Engine — Prod CI/CD
+#
+# Trigger : push sur `staging` (auto-promotion vers main si tier 🟢 BAS)
+#           OU push direct sur main (cas d'urgence + post-rollback)
+#           OU workflow_dispatch manuel
+#
+# Pipeline :
+#   1. structural-gate     — exige staging vert ≤24h si fichiers structurels
+#   2. promote-to-main     — ff-merge staging → main si [risk:low] dans subject
+#   3. (sur main) build    — image GHCR + Trivy bloquant (bridge)
+#   4. deploy-prod         — Dokploy API (composeId TBD) ou SSH prod-pub
+#   5. e2e-prod-smoke      — Playwright contre URLs prod
+#   6. rollback-prod       — retag :rollback + redeploy si smoke fail
+#
+# Inspiré directement de veridian-hub/.github/workflows/hub-ci.yml.
+
+name: Prod CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'releases/**'
+      - 'TODO.md'
+      - 'todo/**'
+  workflow_dispatch:
+    inputs:
+      skip-rollback:
+        description: "Skip auto-rollback (debug uniquement)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: analytics-engine-prod-${{ github.ref }}
+  cancel-in-progress: false   # prod = sérialisé, pas de cancel mi-deploy
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+env:
+  REGISTRY: ghcr.io
+  ENGINE_IMAGE: christ-roy/veridian-analytics-engine
+  BRIDGE_IMAGE: christ-roy/veridian-analytics-bridge
+
+jobs:
+  # ─── Étage 0 : Structural gate ───────────────────────────────────
+  # Si HEAD touche Dockerfile/compose/package-lock/workflows, exige un
+  # run staging vert ≤24h sur un ancêtre. Skip sur workflow_dispatch.
+  structural-gate:
+    name: Structural change gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    outputs:
+      has-structural: ${{ steps.detect.outputs.has-structural }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - name: Detect structural changes
+        id: detect
+        run: ./scripts/ci/check-structural-changes.sh || true
+        env:
+          BASE_REF: HEAD~1
+      - name: Require staging fresh (gh CLI lookup)
+        if: steps.detect.outputs.has-structural == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Cherche un run staging-deploy.yml vert ≤24h sur un SHA ancêtre HEAD
+          HEAD_ANCESTORS=$(git log --format='%H' -n 50)
+          NOW_TS=$(date -u +%s)
+          MAX_AGE=$((24 * 3600))
+
+          RUNS=$(gh run list --workflow staging-deploy.yml --branch staging \
+                              --status success --limit 20 \
+                              --json databaseId,headSha,createdAt 2>/dev/null || echo '[]')
+          MATCH=""
+          while IFS=$'\t' read -r run_id sha created; do
+            ts=$(date -u -d "$created" +%s 2>/dev/null || echo 0)
+            age=$((NOW_TS - ts))
+            [ "$age" -gt "$MAX_AGE" ] && continue
+            if echo "$HEAD_ANCESTORS" | grep -q "^${sha}$"; then
+              MATCH="run=$run_id sha=$sha age=$((age/3600))h"
+              break
+            fi
+          done < <(echo "$RUNS" | jq -r '.[] | "\(.databaseId)\t\(.headSha)\t\(.createdAt)"')
+
+          if [ -z "$MATCH" ]; then
+            echo "::error::Aucun staging vert récent (≤24h) sur ancêtre HEAD. Bloqué."
+            echo "Rejouer staging avant de promote sur main."
+            exit 1
+          fi
+          echo "✓ Staging fresh trouvé : $MATCH"
+
+  # ─── Étage 1 : Build prod ─────────────────────────────────────────
+  build:
+    name: Build prod images
+    needs: structural-gate
+    if: |
+      always() &&
+      (needs.structural-gate.result == 'success' || needs.structural-gate.result == 'skipped') &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    outputs:
+      engine_tag: ${{ steps.tag.outputs.engine_tag }}
+      bridge_tag: ${{ steps.tag.outputs.bridge_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: tag
+        run: |
+          SHA=${GITHUB_SHA:0:7}
+          {
+            echo "engine_tag=prod-${SHA}"
+            echo "bridge_tag=prod-${SHA}"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag latest as :rollback (pre-deploy)
+        continue-on-error: true
+        run: |
+          for img in "${{ env.ENGINE_IMAGE }}" "${{ env.BRIDGE_IMAGE }}"; do
+            docker pull "${{ env.REGISTRY }}/${img}:latest" 2>/dev/null && \
+              docker tag "${{ env.REGISTRY }}/${img}:latest" "${{ env.REGISTRY }}/${img}:rollback" && \
+              docker push "${{ env.REGISTRY }}/${img}:rollback" || true
+          done
+
+      - name: Build + push engine
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.engine_tag }}
+            ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:latest
+          cache-from: type=gha,scope=engine-prod
+          cache-to: type=gha,scope=engine-prod,mode=max
+
+      - name: Build + push bridge
+        uses: docker/build-push-action@v5
+        with:
+          context: veridian-bridge
+          file: veridian-bridge/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}
+            ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:latest
+          cache-from: type=gha,scope=bridge-prod
+          cache-to: type=gha,scope=bridge-prod,mode=max
+
+  trivy-bridge:
+    name: Trivy image — bridge (bloquant)
+    needs: build
+    uses: ./.github/workflows/_trivy-image.yml
+    with:
+      image-ref: ghcr.io/christ-roy/veridian-analytics-bridge:latest
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      sbom-upload: true
+      sarif-upload: true
+      continue-on-error: false
+      trivyignore-path: 'veridian-bridge/.trivyignore'
+
+  trivy-engine:
+    name: Trivy image — engine (warn-only)
+    needs: build
+    uses: ./.github/workflows/_trivy-image.yml
+    with:
+      image-ref: ghcr.io/christ-roy/veridian-analytics-engine:latest
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      sbom-upload: true
+      sarif-upload: true
+      continue-on-error: true   # upstream staminads, on suit
+      trivyignore-path: '.trivyignore'
+
+  # ─── Étage 2 : Deploy prod ────────────────────────────────────────
+  # Suppose un compose Dokploy "analytics-engine" sur prod-pub. Pour
+  # l'instant on suppose deploy via Dokploy API (à câbler dans var
+  # ANALYTICS_DOKPLOY_COMPOSE_ID quand connu). Fallback : skip deploy
+  # avec warning si vars absentes.
+  deploy-prod:
+    name: Deploy prod (Dokploy API)
+    needs: [build, trivy-bridge]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://analytics-engine.app.veridian.site
+    steps:
+      - name: Trigger Dokploy redeploy
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          VPS_HOST: ${{ vars.PROD_VPS_HOST }}
+          VPS_USER: ${{ vars.PROD_VPS_USER }}
+          DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$VPS_HOST" ] || [ -z "$DOKPLOY_COMPOSE_ID" ]; then
+            echo "::warning::Prod deploy not configured (set DEPLOY_SSH_KEY + PROD_VPS_HOST + ANALYTICS_DOKPLOY_COMPOSE_ID)"
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -s << DEPLOY
+            set -e
+            DKEY=\$(grep '^DOKPLOY_API_KEY=' ~/credentials/.all-creds.env | cut -d= -f2)
+            # Pre-pull latest pour réduire downtime
+            docker pull ghcr.io/christ-roy/veridian-analytics-engine:latest
+            docker pull ghcr.io/christ-roy/veridian-analytics-bridge:latest
+            # compose.deploy = re-clone Git + up (GitOps custom-git)
+            curl -sf -X POST \
+              -H "x-api-key: \$DKEY" \
+              -H "Content-Type: application/json" \
+              -d '{"json":{"composeId":"$DOKPLOY_COMPOSE_ID"}}' \
+              http://localhost:3000/api/trpc/compose.deploy && echo "deploy triggered"
+          DEPLOY
+
+      - name: Health check (max 3min)
+        run: |
+          for i in $(seq 1 18); do
+            if curl -sf https://analytics-engine-bridge.app.veridian.site/health >/dev/null 2>&1; then
+              echo "✓ bridge prod healthy after $((i*10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::bridge prod not healthy after 3min"
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+  # ─── Étage 3 : Smoke E2E prod ─────────────────────────────────────
+  e2e-prod-smoke:
+    name: Playwright smoke prod
+    needs: deploy-prod
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ENGINE_URL: https://analytics-engine.app.veridian.site
+      BRIDGE_URL: https://analytics-engine-bridge.app.veridian.site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install bridge deps
+        working-directory: veridian-bridge
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Install Playwright chromium
+        working-directory: veridian-bridge
+        run: npx playwright install --with-deps chromium
+      - name: Run smoke E2E
+        working-directory: veridian-bridge
+        run: npx playwright test tests/e2e/smoke/ --reporter=list
+      - name: Upload trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-prod-smoke-trace
+          path: veridian-bridge/test-results/
+          retention-days: 7
+
+  # ─── Étage 4 : Rollback auto ──────────────────────────────────────
+  rollback-prod:
+    name: Rollback prod (auto on failure)
+    needs: [deploy-prod, e2e-prod-smoke]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/main' &&
+      (needs.deploy-prod.result == 'failure' || needs.e2e-prod-smoke.result == 'failure') &&
+      inputs.skip-rollback != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Retag :rollback as :latest + redeploy
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          VPS_HOST: ${{ vars.PROD_VPS_HOST }}
+          VPS_USER: ${{ vars.PROD_VPS_USER }}
+          DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$VPS_HOST" ] || [ -z "$DOKPLOY_COMPOSE_ID" ]; then
+            echo "::warning::Prod rollback not configured"
+            exit 0
+          fi
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -s << ROLLBACK
+            set -e
+            for img in christ-roy/veridian-analytics-engine christ-roy/veridian-analytics-bridge; do
+              ROLLBACK_ID=\$(docker images ghcr.io/\${img}:rollback --format '{{.ID}}' 2>/dev/null | head -1)
+              if [ -n "\$ROLLBACK_ID" ]; then
+                docker tag "\$ROLLBACK_ID" ghcr.io/\${img}:latest
+                echo "✓ Retagged :rollback → :latest for \${img}"
+              else
+                echo "::warning::No :rollback image for \${img}"
+              fi
+            done
+            DKEY=\$(grep '^DOKPLOY_API_KEY=' ~/credentials/.all-creds.env | cut -d= -f2)
+            curl -sf -X POST \
+              -H "x-api-key: \$DKEY" \
+              -H "Content-Type: application/json" \
+              -d '{"json":{"composeId":"$DOKPLOY_COMPOSE_ID"}}' \
+              http://localhost:3000/api/trpc/compose.redeploy && echo "rollback redeploy triggered"
+          ROLLBACK
+
+          for i in $(seq 1 18); do
+            if curl -sf https://analytics-engine-bridge.app.veridian.site/health >/dev/null 2>&1; then
+              echo "✓ rollback healthy after $((i*10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Rollback not confirmed — intervention manuelle requise"
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts

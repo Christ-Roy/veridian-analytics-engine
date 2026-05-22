@@ -191,6 +191,67 @@
     en CI étage 2 (bloquant). Le build + boot via healthcheck du compose
     POC valide qu'il run correctement. .trivyignore documente les CVE VEX.
 
+# ─── E2E Playwright (CI hardening 2026-05-21) ──────────────────────────
+
+- sources:
+    - veridian-bridge/playwright.config.ts
+    - veridian-bridge/tests/e2e/helpers/bridge-fixture.ts
+    - veridian-bridge/tests/e2e/helpers/fixtures.ts
+  covered_by:
+    - veridian-bridge/tests/e2e/smoke/health-check.spec.ts
+    - veridian-bridge/tests/e2e/smoke/cold-start.spec.ts
+    - veridian-bridge/tests/e2e/promise-flows/01-tenant-provision.spec.ts
+    - veridian-bridge/tests/e2e/promise-flows/02-tracker-to-dashboard.spec.ts
+    - veridian-bridge/tests/e2e/promise-flows/05-shadow-marketing.spec.ts
+    - veridian-bridge/tests/e2e/promise-flows/06-edge-cases.spec.ts
+  reason: |
+    Stack E2E Playwright introduite par le sprint CI/Husky hardening 2026-05-21.
+    8 specs au total (6 promise-flows + 2 smoke). Le bridge boot local sur
+    port éphémère (helpers/bridge-fixture.ts) ou pointe sur URL distante via
+    BRIDGE_URL. Les specs 03 (forms) et 04 (gsc-oauth) sont en test.skip()
+    tant que les tickets B1 et A4 ne sont pas mergés sur dev.
+
+# ─── Scripts CI nouveaux (hardening 2026-05-21) ────────────────────────
+
+- sources:
+    - scripts/ci/static-audit.sh
+    - scripts/ci/check-conventional-commits.sh
+    - scripts/ci/check-protected-branch.sh
+    - scripts/ci/lint-staged.sh
+    - scripts/ci/check-env-sync.sh
+    - scripts/ci/check-structural-changes.sh
+    - scripts/ci/smoke-prod.sh
+  covered_by:
+    - .husky/pre-commit
+    - .husky/pre-push
+    - .husky/commit-msg
+    - .github/workflows/dev-checks.yml
+    - .github/workflows/staging-deploy.yml
+    - .github/workflows/prod-ci.yml
+  reason: |
+    Scripts CI consommés par les hooks Husky (pre-commit/pre-push/commit-msg)
+    et les workflows GitHub Actions. Self-test : chaque push exerce ces
+    scripts dans le hook pre-push, donc ils sont validés à chaque commit.
+
+# ─── Workflows GitHub Actions (CI hardening) ──────────────────────────
+
+- sources:
+    - .github/workflows/_audit-cve.yml
+    - .github/workflows/_trivy-fs.yml
+    - .github/workflows/_trivy-image.yml
+    - .github/workflows/dev-checks.yml
+    - .github/workflows/staging-deploy.yml
+    - .github/workflows/prod-ci.yml
+    - .github/workflows/security-cron.yml
+    - .github/workflows/gsc-sync-cron.yml
+  covered_by:
+    - .github/workflows/staging-deploy.yml
+    - .github/workflows/dev-checks.yml
+  reason: |
+    Self-validating : tout commit modifiant un workflow déclenche sa propre
+    exécution. dev-checks.yml runs sur push dev, staging-deploy.yml runs sur
+    push staging. Reusable workflows (_*.yml) validés par leurs callers.
+
 # ─── STAMINADS UPSTREAM API (couverture via e2e) ────────────────────────
 
 - sources:

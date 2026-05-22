@@ -1,0 +1,65 @@
+#!/usr/bin/env sh
+# Veridian Analytics Engine — Husky commit-msg
+# Valide le format Conventional Commits du message de commit.
+#
+# Format attendu : <type>(<scope>)?: <subject>
+# Types autorisés : feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert
+# Subject max 72 chars
+#
+# Skipped :
+#   - Merge commits (auto-générés par git)
+#   - Revert commits auto-générés par `git revert`
+
+COMMIT_MSG_FILE="$1"
+SUBJECT=$(head -1 "$COMMIT_MSG_FILE")
+
+# Skip merge / revert auto / squash auto
+# "Merge "* couvre "Merge branch ..." et "Merge remote-tracking ..." auto-générés.
+case "$SUBJECT" in
+  "Merge "*)
+    exit 0 ;;
+  "Revert \"Revert "*)
+    exit 0 ;;
+  "fixup!"*|"squash!"*|"amend!"*)
+    exit 0 ;;
+esac
+
+CONV_REGEX='^(feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert)(\([a-z0-9_/.-]+\))?!?: .+$'
+MAX_LEN=72
+
+# Format check
+if ! echo "$SUBJECT" | grep -qE "$CONV_REGEX"; then
+  cat <<EOF
+✗ Commit refusé — format Conventional Commits invalide.
+
+Subject : $SUBJECT
+
+Attendu : <type>(<scope>)?: <subject>
+  - type ∈ feat|fix|chore|docs|refactor|test|ci|build|perf|style|revert
+  - scope optionnel (a-z, 0-9, _, /, ., -)
+  - subject non vide
+
+Exemples valides :
+  feat(bridge): add /api/admin/tenant/:id/score
+  fix(hub): handle expired HMAC timestamp
+  chore(ci): bump trivy-action to v0.36.0
+  docs: update CI-ARCHITECTURE rollback policy
+EOF
+  exit 1
+fi
+
+# Length check — wc -m compte les caractères (pas les octets), important
+# pour les subjects avec accents (é, è) qui font 2 octets en UTF-8.
+LEN=$(printf '%s' "$SUBJECT" | wc -m)
+if [ "$LEN" -gt "$MAX_LEN" ]; then
+  cat <<EOF
+✗ Commit refusé — subject trop long ($LEN chars > $MAX_LEN).
+
+Subject : $SUBJECT
+
+Garde le subject concis. Mets les détails dans le body après une ligne vide.
+EOF
+  exit 1
+fi
+
+exit 0

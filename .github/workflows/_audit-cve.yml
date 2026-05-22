@@ -1,0 +1,69 @@
+name: _audit-cve (reusable)
+
+# Reusable CVE audit gate. Bloque sur npm audit critical OU high.
+# Référence : CLAUDE.md "Sécurité — règles non négociables" + standard Veridian.
+# Inspiré de veridian-hub/.github/workflows/_audit-cve.yml.
+#
+# Chaque package (veridian-bridge, sdk, api) appelle ce workflow avec son path.
+
+on:
+  workflow_call:
+    inputs:
+      app-path:
+        description: "Chemin vers le package (ex: veridian-bridge, sdk, api)"
+        required: true
+        type: string
+      node-version:
+        description: "Version Node"
+        required: false
+        type: string
+        default: "22"
+      omit-dev:
+        description: "Audit prod-only (recommandé pour packages déployés)"
+        required: false
+        type: boolean
+        default: true
+      level:
+        description: "Niveau bloquant (low|moderate|high|critical)"
+        required: false
+        type: string
+        default: "high"
+
+jobs:
+  audit:
+    name: CVE audit (${{ inputs.level }}+critical bloquant)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: ${{ inputs.app-path }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'npm'
+          cache-dependency-path: ${{ inputs.app-path }}/package-lock.json
+
+      - name: Install (lockfile only — no scripts)
+        run: |
+          npm ci --ignore-scripts || npm install --ignore-scripts --no-audit --no-fund
+
+      - name: npm audit (level=${{ inputs.level }} bloquant)
+        run: |
+          set +e
+          OMIT_FLAG=""
+          if [ "${{ inputs.omit-dev }}" = "true" ]; then
+            OMIT_FLAG="--omit=dev"
+          fi
+          npm audit $OMIT_FLAG --audit-level=${{ inputs.level }}
+          AUDIT_EXIT=$?
+          if [ $AUDIT_EXIT -ne 0 ]; then
+            echo ""
+            echo "::error::CVE audit échoué — vulnérabilité ${{ inputs.level }}+ détectée dans ${{ inputs.app-path }}."
+            echo "::error::Voir CLAUDE.md 'Sécurité — règles non négociables' : on patch AVANT de déployer."
+            echo "::error::Pour debug : cd ${{ inputs.app-path }} && npm audit --audit-level=${{ inputs.level }}"
+            exit 1
+          fi
+          echo "✓ Pas de CVE ${{ inputs.level }}+ détectée"

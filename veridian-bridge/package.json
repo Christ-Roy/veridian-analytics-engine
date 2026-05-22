@@ -9,6 +9,9 @@
     "start": "tsx src/index.ts",
     "test": "node --import tsx --test --test-reporter=spec tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
     "test:ci": "node --import tsx --test --test-reporter=tap tests/*.test.ts tests/hub/*.test.ts tests/integration/*.test.ts tests/forms/*.test.ts tests/push/*.test.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:smoke": "playwright test tests/e2e/smoke/",
+    "test:e2e:promise": "playwright test tests/e2e/promise-flows/",
     "typecheck": "tsc --noEmit",
     "prisma:generate": "prisma generate --schema=./prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=./prisma/schema.prisma",
@@ -23,6 +26,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.5",
     "@types/web-push": "^3.6.4",

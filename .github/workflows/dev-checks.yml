@@ -1,12 +1,12 @@
-# Veridian Analytics Engine — CI dev (quick checks only)
+# Veridian Analytics Engine — CI dev (durcie phase 2)
 #
 # Branche `dev` = bac à sable hot-reload sur dev-pub via Tailscale.
 # Pas de deploy CI, pas de build d'image GHCR : le dev tourne en bind-mount
 # sur dev-pub (cf scripts/dev-up.sh).
 #
-# Ce workflow garantit juste qu'on ne casse pas l'app au sens "ça compile + tests
-# passent". Il ne BLOQUE rien — c'est volontaire pour ship-fast en POC démo
-# (cf master prompt sprint Convince-Robert).
+# Ce workflow est désormais bloquant côté checks (vs. POC initial où il ne
+# bloquait rien). On garde la même surface — pas de build/deploy — mais
+# tout ce qui peut être vérifié sans environnement réel doit passer vert.
 
 name: Dev checks (no deploy)
 
@@ -18,26 +18,38 @@ on:
       - 'docs/**'
       - 'releases/**'
       - 'TODO.md'
+      - 'todo/**'
   pull_request:
     branches: [dev]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'releases/**'
+      - 'TODO.md'
+      - 'todo/**'
   workflow_dispatch:
 
 concurrency:
   group: analytics-engine-dev-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
+  # ─── Étage A : Quick checks (lint + test) ─────────────────────────
   bridge-checks:
     name: Bridge — typecheck + tests
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    permissions:
-      contents: read
     defaults:
       run:
         working-directory: veridian-bridge
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -51,8 +63,6 @@ jobs:
     name: SDK — build + vitest
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    permissions:
-      contents: read
     defaults:
       run:
         working-directory: sdk
@@ -67,26 +77,75 @@ jobs:
       - run: npm run build
       - run: npm test
 
-  # NB : les tests Jest API sont déjà couverts par .github/workflows/test.yml
-  # (upstream staminads, push:[main, dev]). On ne les duplique pas ici.
+  # NB : les tests Jest API upstream tournent dans test.yml séparé.
+  # Ils ne sont PAS bloquants ici parce que le fork upstream a parfois des
+  # tests cassés sur dev qu'on triage en phase 2 (cf. CI-ARCHITECTURE.md §6).
 
-  compose-lint:
-    name: Compose dev — syntax check
+  # ─── Étage B : Audit static + ENV sync ───────────────────────────
+  static-audit:
+    name: Audit static (eval/exec/secrets)
     runs-on: ubuntu-latest
     timeout-minutes: 4
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
-      - name: yamllint compose/dev.yml
+        with:
+          fetch-depth: 0
+      - name: Run static audit
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'dev' }}
+        run: |
+          # Pour les pushes (pas PR), compare HEAD à HEAD~1
+          if [ "${{ github.event_name }}" = "push" ]; then
+            export BASE_REF="HEAD~1"
+          fi
+          ./scripts/ci/static-audit.sh
+      - name: Run env sync
+        run: ./scripts/ci/check-env-sync.sh
+
+  # ─── Étage C : YAML + compose lint ───────────────────────────────
+  compose-lint:
+    name: Compose — syntax check
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tooling
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq yamllint
-          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable}}" \
-            compose/dev.yml .github/workflows/dev-checks.yml
-      - name: docker compose config
+      - name: yamllint compose + workflows
+        run: |
+          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable, comments-indentation: disable}}" \
+            compose/*.yml \
+            .github/workflows/*.yml
+      - name: docker compose dev — config check
         env:
           CLICKHOUSE_PASSWORD: ci-clickhouse-pass
           ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
           STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
           VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
         run: docker compose -f compose/dev.yml config -q
+
+  # ─── Étage D : Trivy FS scan (non bloquant sur dev) ──────────────
+  trivy-fs:
+    name: Trivy FS scan (warn-only sur dev)
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/_trivy-fs.yml
+    with:
+      scan-path: '.'
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      skip-license: true
+      sarif-upload: true
+      continue-on-error: true   # warn-only sur dev — bloquant côté staging/prod
+
+  # ─── Étage E : CVE audit bridge (bloquant sur high) ──────────────
+  audit-bridge:
+    name: CVE audit (bridge)
+    uses: ./.github/workflows/_audit-cve.yml
+    with:
+      app-path: veridian-bridge
+      node-version: "22"
+      omit-dev: true
+      level: "high"

@@ -1,0 +1,79 @@
+name: GSC sync cron (daily)
+
+# Cron quotidien pour sync les data GSC (Google Search Console) de tous les
+# tenants ayant lié leur compte Google.
+#
+# Endpoint cible : POST /api/admin/gsc/sync-all sur le bridge prod.
+#
+# ⚠️ DÉSACTIVÉ par défaut tant que le ticket A4 (GSC OAuth + sync route) n'est
+# pas mergé sur staging puis prod. Pour activer :
+#   1. A4 mergé sur dev → tests verts
+#   2. A4 mergé sur staging → smoke E2E vert
+#   3. A4 mergé sur main → cron-trigger activé
+#   4. Retirer le `if: false` ci-dessous et merger sur main
+#
+# Référence : todo/A4-gsc-integration-port.md
+
+on:
+  # enable when A4 prod-ready :
+  # schedule:
+  #   - cron: '0 4 * * *'   # 4h UTC = 5h/6h Paris (après security-cron 3h)
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Cible : staging ou prod"
+        type: choice
+        options: [staging, prod]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  gsc-sync:
+    name: GSC sync — ${{ inputs.target || 'prod' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Garde-fou : tant que A4 pas prêt, on bloque l'exécution réelle même si
+    # le workflow_dispatch est déclenché par erreur.
+    # Activation : créer la variable `GSC_SYNC_ENABLED=true` dans
+    # Settings → Variables → Actions (var repo-level).
+    if: vars.GSC_SYNC_ENABLED == 'true'
+    steps:
+      - name: Resolve bridge URL
+        id: url
+        run: |
+          TARGET="${{ inputs.target || 'prod' }}"
+          if [ "$TARGET" = "staging" ]; then
+            echo "url=https://analytics-engine-bridge.staging.veridian.site" >> "$GITHUB_OUTPUT"
+          else
+            echo "url=https://analytics-engine-bridge.app.veridian.site" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call /api/admin/gsc/sync-all
+        env:
+          BRIDGE_URL: ${{ steps.url.outputs.url }}
+          ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY }}
+        run: |
+          if [ -z "$ADMIN_API_KEY" ]; then
+            echo "::error::VERIDIAN_ADMIN_API_KEY secret manquant"
+            exit 1
+          fi
+          RESPONSE=$(curl -sf -X POST \
+            -H "Authorization: Bearer $ADMIN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            --max-time 600 \
+            "$BRIDGE_URL/api/admin/gsc/sync-all")
+          echo "$RESPONSE" | jq -r '.synced[] | "✓ \(.tenantId) — \(.rows) rows"' || echo "$RESPONSE"
+
+      - name: Alert on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue list --search '[gsc-sync] in:title state:open' --json number --jq '.[0].number' || \
+            gh issue create \
+              --title "[gsc-sync] sync échoué — $(date -u +%F)" \
+              --body "Le cron GSC sync a échoué. Voir run ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+              --label "bug,gsc" || true

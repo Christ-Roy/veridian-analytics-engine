@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+# Veridian Analytics Engine — Husky pre-commit
+# Constitution CI §3 : aucun --no-verify, jamais.
+#
+# Checks pre-commit (rapides, < 5s en tout) :
+#   1. Refuse commit sur 'main' (staminads upstream)
+#   2. lint-staged : console.log non commentés, secrets, megafiles, YAML invalide
+#
+# Le typecheck et les tests sont en pre-push (plus lents, justifiés là).
+
+set -e
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
+# ─── 1. Branche protégée ───
+if [ -x "$REPO_ROOT/scripts/ci/check-protected-branch.sh" ]; then
+  "$REPO_ROOT/scripts/ci/check-protected-branch.sh" "$CURRENT_BRANCH"
+fi
+
+# ─── 2. Lint-staged ───
+if [ -x "$REPO_ROOT/scripts/ci/lint-staged.sh" ]; then
+  echo "─── Pre-commit : lint-staged ───"
+  "$REPO_ROOT/scripts/ci/lint-staged.sh"
+fi
+
+exit 0

@@ -1,25 +1,67 @@
 #!/usr/bin/env sh
 # Veridian Analytics Engine — Husky pre-push
 # Constitution CI §3 : aucun --no-verify, jamais.
+#
+# Checks bloquants :
+#   1. Refuse push sur 'main' (staminads upstream)
+#   2. Conventional Commits sur tous les commits du push
+#   3. Test-mapping : fichiers critiques modifiés → tests correspondants
+#   4. Audit static : eval/exec/secrets en dur dans le diff
+#   5. ENV sync : process.env.X ↔ .env.example
+#   6. Bridge typecheck + tests
+#   7. npm audit --omit=dev --audit-level=high sur veridian-bridge
+#
+# Si push sur 'staging' : check supplémentaire intégration ClickHouse (skippé
+# tant que pas câblé proprement en local, sinon CI le couvre).
 
 set -e
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
+CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
-# 1. Test-mapping : fichier critique modifié sans test = refus
-if [ -x "$REPO_ROOT/scripts/ci/check-test-mapping.sh" ]; then
-  BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD)}"
-  if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    BASE_REF="origin/staging"
-  fi
-  export BASE_REF
-  echo "─── Pre-push : test-mapping vs $BASE_REF ───"
-  "$REPO_ROOT/scripts/ci/check-test-mapping.sh"
-else
-  echo "⚠ scripts/ci/check-test-mapping.sh absent, mapping check skip"
+# ─── 1. Branche protégée ──────────────────────────────────────────
+if [ -x "$REPO_ROOT/scripts/ci/check-protected-branch.sh" ]; then
+  "$REPO_ROOT/scripts/ci/check-protected-branch.sh" "$CURRENT_BRANCH"
 fi
 
-# 2. Bridge typecheck + tests (rapide, ~3s + ~3s)
+# ─── BASE_REF resolution ─────────────────────────────────────────
+# Préférence : origin/<branche-courante> si remote existe
+BASE_REF="${BASE_REF:-origin/$CURRENT_BRANCH}"
+if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+  # Pas de remote pour cette branche, fallback sur origin/dev
+  BASE_REF="origin/dev"
+fi
+if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+  # Fallback ultime
+  BASE_REF="HEAD~1"
+fi
+export BASE_REF
+
+# ─── 2. Conventional Commits ──────────────────────────────────────
+if [ -x "$REPO_ROOT/scripts/ci/check-conventional-commits.sh" ]; then
+  echo "─── Pre-push : conventional commits (vs $BASE_REF) ───"
+  "$REPO_ROOT/scripts/ci/check-conventional-commits.sh"
+fi
+
+# ─── 3. Test-mapping ──────────────────────────────────────────────
+if [ -x "$REPO_ROOT/scripts/ci/check-test-mapping.sh" ]; then
+  echo "─── Pre-push : test-mapping (vs $BASE_REF) ───"
+  "$REPO_ROOT/scripts/ci/check-test-mapping.sh"
+fi
+
+# ─── 4. Audit static ──────────────────────────────────────────────
+if [ -x "$REPO_ROOT/scripts/ci/static-audit.sh" ]; then
+  echo "─── Pre-push : static audit (eval/exec/secrets) ───"
+  "$REPO_ROOT/scripts/ci/static-audit.sh"
+fi
+
+# ─── 5. ENV sync ──────────────────────────────────────────────────
+if [ -x "$REPO_ROOT/scripts/ci/check-env-sync.sh" ]; then
+  echo "─── Pre-push : env sync (process.env ↔ .env.example) ───"
+  "$REPO_ROOT/scripts/ci/check-env-sync.sh"
+fi
+
+# ─── 6. Bridge typecheck + tests ──────────────────────────────────
 if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
   echo "─── Pre-push : bridge typecheck + tests ───"
   cd "$REPO_ROOT/veridian-bridge"
@@ -29,6 +71,17 @@ if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
   fi
   npx tsc --noEmit
   npm run test:ci
+
+  # ─── 7. npm audit prod-only ──────────────────────────────────────
+  echo "─── Pre-push : bridge CVE audit (high+critical bloquant) ───"
+  # --omit=dev pour ne pas brûler sur des CVE de devDependencies
+  if ! npm audit --omit=dev --audit-level=high 2>&1; then
+    echo ""
+    echo "✗ CVE high/critical détectée dans veridian-bridge"
+    echo "  Fix avant push. Cf. CLAUDE.md 'Sécurité — règles non négociables'."
+    exit 1
+  fi
+
   cd "$REPO_ROOT"
 fi
 

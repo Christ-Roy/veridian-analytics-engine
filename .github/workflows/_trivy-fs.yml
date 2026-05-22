@@ -1,0 +1,94 @@
+name: _trivy-fs (reusable)
+
+# Reusable Trivy filesystem scan. Inspiré de veridian-hub/_trivy-fs.yml.
+#
+# 4 scanners en 1 run :
+#   - vuln    (CVE sur deps lockfiles : package.json, etc.)
+#   - misconfig (IaC : Dockerfile, docker-compose)
+#   - secret  (clés API / tokens en clair commitées)
+#   - license (licences refusées, optionnel — désactivé par défaut côté analytics-engine
+#     parce que staminads upstream est AGPL-3.0 qu'on accepte explicitement)
+#
+# Complémentaire à _trivy-image.yml (CVE OS + libs système dans l'image build).
+
+on:
+  workflow_call:
+    inputs:
+      scan-path:
+        description: "Chemin à scanner (défaut : racine)"
+        required: false
+        type: string
+        default: '.'
+      severity:
+        description: "Sévérités bloquantes (CSV)"
+        required: false
+        type: string
+        default: "CRITICAL,HIGH"
+      ignore-unfixed:
+        description: "Ignorer les CVE sans patch dispo upstream"
+        required: false
+        type: boolean
+        default: true
+      skip-license:
+        description: "Skip license scanner (par défaut true sur analytics-engine — AGPL upstream)"
+        required: false
+        type: boolean
+        default: true
+      sarif-upload:
+        description: "Upload SARIF vers GitHub Security tab"
+        required: false
+        type: boolean
+        default: true
+      continue-on-error:
+        description: "Si true, le scan ne bloque pas le workflow (utile sur upstream staminads)"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  trivy-fs:
+    name: Trivy FS (vuln+config+secret)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: ${{ inputs.continue-on-error }}
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ inputs.scan-path }}
+          severity: ${{ inputs.severity }}
+          exit-code: '1'
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          format: 'table'
+          scanners: ${{ inputs.skip-license && 'vuln,misconfig,secret' || 'vuln,misconfig,secret,license' }}
+          timeout: '10m'
+          trivyignores: '.trivyignore'
+
+      - name: Generate SARIF report
+        if: ${{ inputs.sarif-upload }}
+        uses: aquasecurity/trivy-action@0.36.0
+        continue-on-error: true
+        with:
+          scan-type: 'fs'
+          scan-ref: ${{ inputs.scan-path }}
+          severity: ${{ inputs.severity }}
+          exit-code: '0'
+          ignore-unfixed: ${{ inputs.ignore-unfixed }}
+          format: 'sarif'
+          output: 'trivy-fs.sarif'
+          scanners: ${{ inputs.skip-license && 'vuln,misconfig,secret' || 'vuln,misconfig,secret,license' }}
+          timeout: '10m'
+          trivyignores: '.trivyignore'
+
+      - name: Upload SARIF to GitHub Security tab
+        if: ${{ inputs.sarif-upload }}
+        uses: github/codeql-action/upload-sarif@v3
+        continue-on-error: true
+        with:
+          sarif_file: 'trivy-fs.sarif'
+          category: 'trivy-fs-${{ inputs.scan-path }}'

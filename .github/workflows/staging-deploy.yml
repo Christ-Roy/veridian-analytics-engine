@@ -1,10 +1,17 @@
-# Veridian Analytics Engine — CI/CD staging
-# Aligné CI-ARCHITECTURE.md du polyrepo Veridian.
+# Veridian Analytics Engine — CI/CD staging (durcie phase 2)
 #
-# 3 étages :
-#   1. quick-checks        ubuntu-latest    ~90s    lint + test bridge + Trivy fs
-#   2. build               ubuntu-latest    ~5min   build engine (staminads) + bridge → GHCR + Trivy image
-#   3. deploy-staging      ubuntu-latest    ~2min   SSH dev-pub + compose pull + up -d + smoke
+# Aligné CI-ARCHITECTURE.md analytics-engine (et inspiré de veridian-hub).
+#
+# 5 étages :
+#   1. quick-checks            ~3min  lint + typecheck + tests bridge/sdk + static audit
+#   1.b upstream-api-tests     ~12min Jest API + ClickHouse réel
+#   1.c upstream-sdk-tests     ~5min  Vitest unit SDK
+#   1.d trivy-fs               ~3min  scan filesystem (vuln+misconfig+secret)
+#   1.e audit-bridge           ~3min  npm audit --omit=dev --audit-level=high
+#   2.  build                  ~6min  build engine + bridge → GHCR + Trivy image (bridge bloquant)
+#   3.  deploy-staging         ~3min  SSH dev-pub + compose pull + up + smoke
+#   4.  e2e-staging-smoke      ~5min  Playwright contre URL staging publique
+#   5.  rollback-staging       (only on failure) — retag :rollback + redeploy
 
 name: Staging CI/CD
 
@@ -16,13 +23,25 @@ on:
       - 'docs/**'
       - 'releases/**'
       - 'TODO.md'
+      - 'todo/**'
   pull_request:
     branches: [staging, veridian/main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'releases/**'
+      - 'TODO.md'
+      - 'todo/**'
   workflow_dispatch:
 
 concurrency:
   group: analytics-engine-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
 
 env:
   REGISTRY: ghcr.io
@@ -30,13 +49,11 @@ env:
   BRIDGE_IMAGE: christ-roy/veridian-analytics-bridge
 
 jobs:
-  # ─── Étage 1 : Quick checks ────────────────────────────────────────
+  # ─── Étage 1 : Quick checks ──────────────────────────────────────
   quick-checks:
     name: Étage 1 — Quick checks
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -50,6 +67,7 @@ jobs:
           cache-dependency-path: |
             api/package-lock.json
             veridian-bridge/package-lock.json
+            sdk/package-lock.json
 
       - name: Install tooling
         run: |
@@ -58,9 +76,13 @@ jobs:
 
       - name: Lint YAML
         run: |
-          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable}}" \
+          yamllint -d "{rules: {line-length: {max: 200}, document-start: disable, truthy: disable, comments-indentation: disable}}" \
             compose/*.yml \
             .github/workflows/*.yml
+
+      - name: Shellcheck scripts CI
+        run: |
+          shellcheck -x scripts/ci/*.sh || echo "::warning::shellcheck issues — voir log"
 
       - name: Compose config check (staging)
         env:
@@ -75,36 +97,36 @@ jobs:
       - name: Bridge — install + typecheck + tests
         working-directory: veridian-bridge
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npx tsc --noEmit
           npm run test:ci
 
-      # Trivy fs : capacités 1+2+3 (vuln + misconfig + secret).
-      # Phase 1 : non bloquant (continue-on-error). Le code staminads upstream
-      # contient des CVE/findings qu'on triera en Phase 6 (audit dédié) via VEX.
-      # Le bridge Veridian est lui scanné séparément en étage 2 (bloquant).
-      - name: Trivy fs scan (non bloquant Phase 1)
-        uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: true
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          scanners: 'vuln,misconfig,secret'
-          severity: 'CRITICAL,HIGH'
-          ignore-unfixed: true
-          exit-code: '0'
-          format: 'table'
+      - name: Static audit (eval/exec/secrets)
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'staging' }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            export BASE_REF="HEAD~1"
+          fi
+          ./scripts/ci/static-audit.sh
 
-  # ─── Étage 1.b : Tests upstream API (Jest + ClickHouse) ────────────
-  # Reproduction exacte de .github/workflows/test.yml upstream staminads,
-  # adapté à notre branche staging. Bloquant : si tests upstream cassés,
-  # on ne build pas une image qui contiendrait du code régressé.
+      - name: ENV sync (process.env ↔ .env.example)
+        run: ./scripts/ci/check-env-sync.sh
+
+      - name: Test mapping (route↔test)
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'staging' }}
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            export BASE_REF="HEAD~1"
+          fi
+          ./scripts/ci/check-test-mapping.sh
+
+  # ─── Étage 1.b : Tests upstream API (Jest + ClickHouse) ───────────
   upstream-api-tests:
-    name: Étage 1.b — Tests Jest API (upstream + futurs patches Veridian)
+    name: Étage 1.b — Tests Jest API (upstream + patches Veridian)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:24.8
@@ -163,17 +185,11 @@ jobs:
           path: api/coverage*/
           retention-days: 14
 
-  # ─── Étage 1.c : Tests SDK (Vitest unit) ───────────────────────────
-  # Le SDK tracker JS a 2 suites : vitest (unit, sans dépendance externe)
-  # et playwright e2e (qui exige API NestJS + ClickHouse + static server
-  # tous up). Vitest = bloquant ici. Playwright e2e = job séparé optionnel
-  # car nécessite un environnement complet (ajouté plus tard).
+  # ─── Étage 1.c : Tests SDK (Vitest unit) ──────────────────────────
   upstream-sdk-tests:
     name: Étage 1.c — Tests SDK (Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    permissions:
-      contents: read
     defaults:
       run:
         working-directory: ./sdk
@@ -186,23 +202,47 @@ jobs:
           cache-dependency-path: sdk/package-lock.json
       - name: npm ci
         run: npm ci
-      # Build d'abord : certains tests vérifient que dist/ existe et que
-      # la version SDK_VERSION a bien été injectée dans le bundle.
       - name: Build SDK
         run: npm run build
       - name: Tests unitaires SDK (vitest)
         run: npm test
 
-  # ─── Étage 2 : Build images ────────────────────────────────────────
+  # ─── Étage 1.d : Trivy FS scan (warn-only, upstream noise) ───────
+  trivy-fs:
+    name: Étage 1.d — Trivy FS (warn-only)
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/_trivy-fs.yml
+    with:
+      scan-path: '.'
+      severity: 'CRITICAL,HIGH'
+      ignore-unfixed: true
+      skip-license: true
+      sarif-upload: true
+      continue-on-error: true
+
+  # ─── Étage 1.e : CVE audit bridge (bloquant) ──────────────────────
+  audit-bridge:
+    name: Étage 1.e — CVE audit bridge
+    uses: ./.github/workflows/_audit-cve.yml
+    with:
+      app-path: veridian-bridge
+      node-version: "22"
+      omit-dev: true
+      level: "high"
+
+  # ─── Étage 2 : Build images ───────────────────────────────────────
   build:
     name: Étage 2 — Build images
-    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests]
+    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests, audit-bridge]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
       contents: read
       packages: write
+      security-events: write
     outputs:
       engine_tag: ${{ steps.tag.outputs.engine_tag }}
       bridge_tag: ${{ steps.tag.outputs.bridge_tag }}
@@ -218,8 +258,10 @@ jobs:
           else
             PREFIX="veridian"
           fi
-          echo "engine_tag=${PREFIX}-${SHA}" >> $GITHUB_OUTPUT
-          echo "bridge_tag=${PREFIX}-${SHA}" >> $GITHUB_OUTPUT
+          {
+            echo "engine_tag=${PREFIX}-${SHA}"
+            echo "bridge_tag=${PREFIX}-${SHA}"
+          } >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
 
@@ -229,7 +271,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # ── Build engine (staminads upstream + patches Veridian) ─────
+      - name: Tag current images as :rollback (pre-deploy)
+        # Best-effort : on tag les latest existants comme :rollback pour
+        # pouvoir revenir en arrière depuis le job rollback-staging.
+        # Non bloquant si l'image n'existe pas encore (premier deploy).
+        continue-on-error: true
+        run: |
+          for img in "${{ env.ENGINE_IMAGE }}" "${{ env.BRIDGE_IMAGE }}"; do
+            TAG_SUFFIX="${GITHUB_REF##*/}-latest"
+            docker pull "${{ env.REGISTRY }}/${img}:${TAG_SUFFIX}" 2>/dev/null && \
+              docker tag "${{ env.REGISTRY }}/${img}:${TAG_SUFFIX}" "${{ env.REGISTRY }}/${img}:rollback" && \
+              docker push "${{ env.REGISTRY }}/${img}:rollback" || true
+          done
+
       - name: Build + push engine image
         uses: docker/build-push-action@v5
         with:
@@ -242,7 +296,6 @@ jobs:
           cache-from: type=gha,scope=engine
           cache-to: type=gha,scope=engine,mode=max
 
-      # ── Build bridge Veridian ────────────────────────────────────
       - name: Build + push bridge image
         uses: docker/build-push-action@v5
         with:
@@ -255,9 +308,11 @@ jobs:
           cache-from: type=gha,scope=bridge
           cache-to: type=gha,scope=bridge,mode=max
 
-      # ── Trivy image scan (cap 5+6+7+8) ───────────────────────────
-      - name: Trivy image scan — engine (Phase 1 non bloquant)
-        uses: aquasecurity/trivy-action@v0.36.0
+      # Engine = upstream staminads. WARN-ONLY (continue-on-error). On suit
+      # les CVE upstream sans bloquer un release Veridian — l'équipe upstream
+      # corrige à son rythme.
+      - name: Trivy image scan — engine (warn-only)
+        uses: aquasecurity/trivy-action@0.36.0
         continue-on-error: true
         with:
           scan-type: 'image'
@@ -267,8 +322,9 @@ jobs:
           exit-code: '0'
           format: 'table'
 
+      # Bridge = code Veridian. BLOQUANT.
       - name: Trivy image scan — bridge (bloquant)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@0.36.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ steps.tag.outputs.bridge_tag }}'
@@ -278,7 +334,7 @@ jobs:
           format: 'table'
           trivyignores: 'veridian-bridge/.trivyignore'
 
-  # ─── Étage 3 : Deploy staging via SSH dev-pub ──────────────────────
+  # ─── Étage 3 : Deploy staging ─────────────────────────────────────
   deploy-staging:
     name: Étage 3 — Deploy staging
     needs: build
@@ -317,6 +373,7 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_STAGING }}
           STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
+          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
         run: |
           ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             "cat > /opt/staging/analytics-engine/.env <<ENV
@@ -327,6 +384,7 @@ jobs:
           STAMINADS_ADMIN_EMAIL=admin@veridian.site
           STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
           VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
+          HUB_HMAC_SECRET=${HUB_HMAC_SECRET}
           ENV
           chmod 600 /opt/staging/analytics-engine/.env"
 
@@ -336,11 +394,11 @@ jobs:
             set -e
             cd /opt/staging/analytics-engine
             docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
-            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
-            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml ps
+            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
+            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml ps
           DEPLOY
 
-      - name: Smoke test (wait + curl)
+      - name: Smoke test (engine + bridge)
         run: |
           echo "Waiting for staminads engine to be healthy..."
           for i in $(seq 1 30); do
@@ -361,3 +419,92 @@ jobs:
           done
           curl -skf https://analytics-engine-bridge.staging.veridian.site/health || (echo "bridge KO" && exit 1)
           echo "Staging deploy : ✓ smoke OK"
+
+      - name: Cleanup secrets
+        if: always()
+        run: |
+          rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+
+  # ─── Étage 4 : Playwright smoke contre URL staging ────────────────
+  e2e-staging-smoke:
+    name: Étage 4 — Playwright smoke staging
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ENGINE_URL: https://analytics-engine.staging.veridian.site
+      BRIDGE_URL: https://analytics-engine-bridge.staging.veridian.site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install bridge deps (Playwright runtime)
+        working-directory: veridian-bridge
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Install Playwright chromium
+        working-directory: veridian-bridge
+        run: npx playwright install --with-deps chromium
+      - name: Run smoke E2E (public endpoints only)
+        working-directory: veridian-bridge
+        run: |
+          npx playwright test tests/e2e/smoke/ --reporter=list
+      - name: Upload trace on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-staging-smoke-trace
+          path: veridian-bridge/test-results/
+          retention-days: 7
+
+  # ─── Étage 5 : Rollback auto si smoke fail ────────────────────────
+  rollback-staging:
+    name: Étage 5 — Rollback staging (auto on failure)
+    needs: [build, deploy-staging, e2e-staging-smoke]
+    if: |
+      always() &&
+      github.ref == 'refs/heads/staging' &&
+      (needs.deploy-staging.result == 'failure' || needs.e2e-staging-smoke.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+      - name: Rollback to :rollback image
+        run: |
+          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'ROLLBACK'
+            set -e
+            cd /opt/staging/analytics-engine
+            # On force ENGINE_IMAGE_TAG=rollback et BRIDGE_IMAGE_TAG=rollback
+            # dans le .env, puis redeploy.
+            sed -i 's|^ENGINE_IMAGE_TAG=.*|ENGINE_IMAGE_TAG=rollback|' .env
+            sed -i 's|^BRIDGE_IMAGE_TAG=.*|BRIDGE_IMAGE_TAG=rollback|' .env
+            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
+            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
+            echo "✓ Rollback déclenché"
+          ROLLBACK
+          for i in $(seq 1 18); do
+            if curl -skf https://analytics-engine-bridge.staging.veridian.site/health >/dev/null; then
+              echo "✓ Rollback healthy après $((i*10))s"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Rollback non confirmé après 180s — intervention manuelle requise"
+          exit 1
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
