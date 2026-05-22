@@ -604,6 +604,58 @@
     `veridian.welcome.$workspaceId.tsx` est un thin wrapper (resolve
     endpoint + navigate onComplete) couvert indirectement.
 
+# ─── Tab Calls + flow auth + pages d'erreur (U9) ──────────────────────
+
+- sources:
+    - console/src/veridian/pages/dashboard-tabs/calls-tab.tsx
+    - console/src/veridian/pages/dashboard-tabs/calls-tab-views.tsx
+    - console/src/veridian/pages/dashboard-tabs/calls-hooks.ts
+    - console/src/veridian/api.ts
+  covered_by:
+    - console/src/veridian/pages/__tests__/calls-tab.test.tsx
+  reason: |
+    Tab Calls (VoIP) du dashboard Veridian — ticket U9, giga-sprint UI
+    2026-05-22. Contrairement aux tabs Forms/GSC/Push (stubs « bientôt »),
+    le tab Calls est une VRAIE page : stats (total / manqués / durée
+    moyenne / taux de réponse), graphe appels/jour, table des appels
+    (date / direction / numéro / durée / statut / enregistrement).
+    Consomme GET /api/admin/tenant/:wsId/calls?days=30 (endpoint livré
+    par le ticket B-VOIP) via le hook `useCalls`.
+
+    Tests Vitest + RTL — couvre : loading skeleton, succès (stats +
+    graphe + table), 404 « B-VOIP pas encore livré » → état not-connected
+    (JAMAIS une erreur rouge), voipConnected=false → not-connected, CTA
+    Settings (onOpenSettings) + fallback mailto, empty state (VoIP
+    branché 0 appel), erreur 500 + retry, message friendly 403, et les
+    formateurs `formatDuration` / `formatCallDate`.
+
+- sources:
+    - console/src/veridian/auth-shell.tsx
+  covered_by:
+    - console/src/veridian/__tests__/auth-shell.test.tsx
+  reason: |
+    AuthShell — chrome commun des pages d'auth (login, mot de passe
+    oublié, reset), ticket U9. Centralise le branding : switche le logo
+    Veridian vs Staminads selon le flag runtime `isDemo` de AuthContext.
+    Avant U9, seule `login.tsx` brandait correctement ; forgot/reset
+    affichaient le logo Staminads en dur même sur une instance Veridian.
+    Les routes `login.tsx` / `forgot-password.tsx` /
+    `reset-password.$token.tsx` sont des thin wrappers de formulaire
+    AntDesign autour d'AuthShell — hors scope Vitest (src/routes/**) ;
+    la logique de branding testée est dans AuthShell.
+
+- sources:
+    - console/src/veridian/error-pages.tsx
+  covered_by:
+    - console/src/veridian/__tests__/error-pages.test.tsx
+  reason: |
+    Pages 404 + erreur générique brandées Veridian (ticket U9), branchées
+    sur le routeur via `__root.tsx` (notFoundComponent / errorComponent)
+    et `router.tsx` (defaultNotFoundComponent). Remplacent le fallback
+    technique nu de TanStack (404) et l'ancien Result anglais sur fond
+    gris (erreur). Tests Vitest + RTL : rendu, libellés français, lien
+    de retour dashboard, surfaçage du message d'erreur.
+
 - sources:
     - console/src/veridian/pages/settings.tsx
     - console/src/veridian/pages/settings-helpers.ts

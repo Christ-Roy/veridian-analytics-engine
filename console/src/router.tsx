@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { createRouter } from '@tanstack/react-router'
 import { routeTree } from './routeTree.gen'
 import type { AuthState } from './lib/auth'
+import { NotFoundPage } from './veridian/error-pages'
 
 export interface RouterContext {
   auth: AuthState
@@ -13,6 +14,8 @@ export function createAppRouter(queryClient: QueryClient) {
     routeTree,
     context: { auth: undefined!, queryClient },
     defaultPreload: 'intent',
+    // 404 brandé Veridian pour toute route enfant non trouvée (ticket U9).
+    defaultNotFoundComponent: NotFoundPage,
   })
 }
 

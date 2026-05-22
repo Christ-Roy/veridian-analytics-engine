@@ -311,10 +311,37 @@ jobs:
       omit-dev: true
       level: "high"
 
+  # ─── Étage 1.g : Tests console Veridian (Vitest + RTL) ────────────
+  #
+  # La console embarque les composants/pages Veridian (dashboard, tabs,
+  # welcome, auth-shell, error-pages) sous `console/src/veridian/**`, testés
+  # par `console/vitest.config.ts` (scopé strictement sur ce dossier — pas
+  # de Tailwind ni TanStack Router à monter). Sans ce job, ces suites
+  # n'étaient validées que par le pre-push local. Le build (étage 2) ne
+  # vérifie que la compilation TS, pas les assertions de comportement.
+  console-checks:
+    name: Étage 1.g — Tests console Veridian (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: ./console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: console/package-lock.json
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+      - name: Vitest (console/src/veridian)
+        run: npm run test
+
   # ─── Étage 2 : Build images ───────────────────────────────────────
   build:
     name: Étage 2 — Build images
-    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests, integration-tests, audit-bridge]
+    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests, integration-tests, audit-bridge, console-checks]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25

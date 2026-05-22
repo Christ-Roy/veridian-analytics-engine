@@ -78,6 +78,68 @@ export interface CheckTrackerResponse {
   totalEvents24h: number;
 }
 
+// ─── Calls / VoIP (U9 — consomme l'endpoint livré par B-VOIP) ─────────────
+
+/**
+ * Direction d'un appel téléphonique.
+ */
+export type CallDirection = 'inbound' | 'outbound';
+
+/**
+ * Statut d'un appel — miroir du champ `status` du modèle Prisma `SipCall`
+ * côté bridge (cf ticket B-VOIP).
+ */
+export type CallStatus = 'answered' | 'missed' | 'busy' | 'failed';
+
+/**
+ * Un appel téléphonique tel que renvoyé par
+ * `GET /api/admin/tenant/:wsId/calls`. Miroir (subset client) du modèle
+ * Prisma `SipCall` du bridge — défini ici par U9 pour que le tab Calls soit
+ * prêt avant que B-VOIP ne livre. Quand B-VOIP livre son endpoint, le
+ * payload DOIT respecter ce contrat (sinon coordination cross-ticket).
+ */
+export interface CallRecord {
+  id: string;
+  /** ISO 8601 — début de l'appel. */
+  startedAt: string;
+  direction: CallDirection;
+  /** Numéro de l'interlocuteur (le client distant). */
+  peerNumber: string;
+  /** Durée en secondes. 0 pour un appel non décroché. */
+  durationSec: number;
+  status: CallStatus;
+  /** URL de l'enregistrement audio, si disponible. */
+  recordingUrl: string | null;
+}
+
+/**
+ * Réponse de `GET /api/admin/tenant/:wsId/calls?days=N` — alimente le tab
+ * Calls du dashboard. Le bridge agrège déjà les stats côté serveur pour
+ * éviter de recalculer côté client sur de gros volumes.
+ *
+ * `voipConnected: false` n'est PAS une erreur : le tenant n'a simplement
+ * pas branché de provider VoIP (cf Settings U8). L'UI affiche alors un
+ * état "Connectez votre téléphonie" avec CTA vers les réglages.
+ */
+export interface CallsResponse {
+  workspaceId: string;
+  /** Nombre de jours couverts par la fenêtre (echo du query param). */
+  days: number;
+  /** false si aucun `TenantCredential` VoIP n'est branché pour ce tenant. */
+  voipConnected: boolean;
+  calls: CallRecord[];
+  stats: {
+    total: number;
+    missed: number;
+    /** Durée moyenne en secondes (appels répondus uniquement). */
+    avgDurationSec: number;
+    /** Taux de réponse 0..1 (répondus / total). */
+    answerRate: number;
+  };
+  /** Série journalière pour le graphe appels/jour, du plus ancien au récent. */
+  daily: Array<{ day: string; total: number; missed: number }>;
+}
+
 // ─── Erreur typée ────────────────────────────────────────────────────────
 
 export class BridgeApiError extends Error {
@@ -212,6 +274,27 @@ export function fetchCheckTracker(
 ): Promise<CheckTrackerResponse> {
   return fetchJson<CheckTrackerResponse>(
     `/api/admin/tenant/${encodeURIComponent(workspaceId)}/check-tracker`,
+    { requireAdmin: true, signal: opts.signal },
+  );
+}
+
+/**
+ * Récupère les logs d'appels VoIP d'un tenant sur une fenêtre de `days`
+ * jours — consommé par le tab Calls (U9).
+ *
+ * Endpoint livré par le ticket B-VOIP. Tant que B-VOIP n'est pas mergé,
+ * le bridge répond 404 et le hook `useCalls` traite ce cas comme un état
+ * "téléphonie non branchée" propre (pas une erreur rouge).
+ */
+export function fetchCalls(
+  workspaceId: string,
+  days: number,
+  opts: { signal?: AbortSignal } = {},
+): Promise<CallsResponse> {
+  return fetchJson<CallsResponse>(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/calls?days=${encodeURIComponent(
+      String(days),
+    )}`,
     { requireAdmin: true, signal: opts.signal },
   );
 }

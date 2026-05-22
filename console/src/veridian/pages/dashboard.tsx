@@ -22,6 +22,7 @@ import {
 import { FormsTabStub } from './dashboard-tabs/forms-tab';
 import { GscTabStub } from './dashboard-tabs/gsc-tab';
 import { PushTabStub } from './dashboard-tabs/push-tab';
+import { CallsTab } from './dashboard-tabs/calls-tab';
 import '../theme.css';
 
 /**
@@ -67,7 +68,7 @@ type ViewState =
   | { kind: 'error'; error: Error }
   | { kind: 'ready'; data: DashboardPayload };
 
-type ActiveTab = 'overview' | 'forms' | 'gsc' | 'push';
+type ActiveTab = 'overview' | 'forms' | 'gsc' | 'push' | 'calls';
 
 export function VeridianDashboardPage({
   workspaceId,
@@ -147,6 +148,13 @@ export function VeridianDashboardPage({
 
         {state.kind === 'ready' && activeTab === 'gsc' && (
           <GscTabStub
+            siteDomain={tenantDomain ?? `${workspaceId}.veridian.site`}
+          />
+        )}
+
+        {state.kind === 'ready' && activeTab === 'calls' && (
+          <CallsTab
+            workspaceId={workspaceId}
             siteDomain={tenantDomain ?? `${workspaceId}.veridian.site`}
           />
         )}
@@ -244,6 +252,7 @@ function TabsBar({
     { key: 'overview', label: 'Vue d’ensemble' },
     { key: 'forms', label: 'Formulaires', soon: true },
     { key: 'gsc', label: 'Search Console', soon: true },
+    { key: 'calls', label: 'Appels' },
     { key: 'push', label: 'Notifications', soon: true },
   ];
   return (

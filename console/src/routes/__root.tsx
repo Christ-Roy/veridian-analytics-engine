@@ -1,8 +1,9 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
-import { ConfigProvider, Result, Button } from 'antd'
+import { ConfigProvider } from 'antd'
 import type { RouterContext } from '../router'
 import { DemoBanner } from '../veridian/demo-banner'
 import { DemoFooter } from '../veridian/demo-footer'
+import { NotFoundPage, AppErrorPage } from '../veridian/error-pages'
 
 function RootLayout() {
   // DemoBanner / DemoFooter render nothing unless IS_DEMO=true (gated on
@@ -28,20 +29,10 @@ function RootLayout() {
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
-  errorComponent: ({ error }) => (
-    <ConfigProvider>
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Result
-          status="error"
-          title="Something went wrong"
-          subTitle={error?.message || 'An unexpected error occurred'}
-          extra={
-            <Button type="primary" onClick={() => window.location.href = '/'}>
-              Go Home
-            </Button>
-          }
-        />
-      </div>
-    </ConfigProvider>
-  ),
+  // 404 brandé Veridian (ticket U9) — remplace le fallback technique nu de
+  // TanStack pour toute route inconnue.
+  notFoundComponent: NotFoundPage,
+  // Écran d'erreur brandé Veridian (ticket U9) — remplace l'ancien Result
+  // anglais sur fond gris.
+  errorComponent: ({ error }) => <AppErrorPage error={error} />,
 })

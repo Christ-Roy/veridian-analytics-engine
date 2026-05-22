@@ -67,6 +67,25 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  console-checks:
+    name: Console — tests Veridian (Vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      # Suites Vitest + RTL des composants/pages Veridian embarqués dans la
+      # console (scopées sur console/src/veridian/** par vitest.config.ts).
+      - run: npm run test
+
   # NB : les tests Jest API upstream tournent dans test.yml séparé.
   # Ils ne sont PAS bloquants ici parce que le fork upstream a parfois des
   # tests cassés sur dev qu'on triage en phase 2 (cf. CI-ARCHITECTURE.md §6).
