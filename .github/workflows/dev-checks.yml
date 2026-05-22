@@ -1,26 +1,16 @@
-# Veridian Analytics Engine — CI dev (durcie phase 2)
+# Veridian Analytics Engine — CI quick checks (no deploy)
 #
-# Branche `dev` = bac à sable hot-reload sur dev-pub via Tailscale.
-# Pas de deploy CI, pas de build d'image GHCR : le dev tourne en bind-mount
-# sur dev-pub (cf scripts/dev-up.sh).
-#
-# Ce workflow est désormais bloquant côté checks (vs. POC initial où il ne
-# bloquait rien). On garde la même surface — pas de build/deploy — mais
-# tout ce qui peut être vérifié sans environnement réel doit passer vert.
+# Modèle de branches (refonte 2026-05-22) : main ← staging.
+# Ce workflow tourne sur les PR vers `staging` et `main` : il garantit que
+# rien ne casse avant un merge (SDK build, audit static, compose lint,
+# trivy-fs, bridge typecheck, CVE). Pas de build/deploy — c'est
+# staging-deploy.yml qui déploie sur push staging.
 
-name: Dev checks (no deploy)
+name: Quick checks (no deploy)
 
 on:
-  push:
-    branches: [dev]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
-      - 'releases/**'
-      - 'TODO.md'
-      - 'todo/**'
   pull_request:
-    branches: [dev]
+    branches: [staging, main]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -30,7 +20,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: analytics-engine-dev-${{ github.ref }}
+  group: analytics-engine-checks-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

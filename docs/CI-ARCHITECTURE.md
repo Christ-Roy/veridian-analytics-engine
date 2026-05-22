@@ -1,6 +1,6 @@
 # CI-ARCHITECTURE — Veridian Analytics Engine
 
-> **Statut** : Phase 2 (durcissement) — 2026-05-21
+> **Statut** : Phase 3 (refonte branches main←staging) — 2026-05-22
 > **Référence parente** : [veridian-hub CI-ARCHITECTURE.md](../../veridian-hub/docs/CI-ARCHITECTURE.md)
 > **Maintainer** : agent CI/Husky hardening
 
@@ -13,30 +13,38 @@ console Solid + ClickHouse).
 ## §1. Vue d'ensemble
 
 ```
-   ┌────────────────┐       ┌────────────────┐       ┌────────────────┐
-   │  branche `dev` │──────▶│ branche `staging` ─────▶│ branche `main` │
-   │  bac à sable   │       │ trunk prod-prep │       │ photo de prod  │
-   │  hot-reload    │       │ analytics-engine│       │ analytics-eng. │
-   └────────────────┘       └────────────────┘       └────────────────┘
-        │                          │                          │
-        ▼                          ▼                          ▼
-   dev-checks.yml          staging-deploy.yml          prod-ci.yml
-   (no deploy, gates)      (deploy dev-pub +           (build + Dokploy +
-                            Playwright smoke +          smoke + rollback)
-                            rollback auto)
+        feat/* fix/* chore/*
+                │
+                ▼  (PR → quick-checks)
+   ┌────────────────────┐            ┌────────────────┐
+   │  branche `staging` │───────────▶│ branche `main` │
+   │  trunk de travail  │  promotion │  photo de prod │
+   │  + deploy dev-pub  │  ff-only   │  analytics-eng.│
+   └────────────────────┘            └────────────────┘
+        │                                    │
+        ▼                                    ▼
+   staging-deploy.yml                  prod-ci.yml
+   (deploy dev-pub hot-reload +        (build GHCR + Dokploy +
+    Playwright smoke + rollback)        smoke + rollback auto)
+
+   dev-checks.yml = quick-checks sur les PR vers staging/main
 ```
 
-**Trois trunks** parallèles :
+**Deux trunks** (refonte 2026-05-22 — était 3 branches `dev`/`staging`/`main`
++ `veridian/main` orphelin) :
 
 | Branche | Rôle | Workflow CI | URL |
 |---|---|---|---|
-| `main` | Tracking staminads upstream (read-only) | `test.yml` (Jest upstream) | — |
-| `dev` | Sandbox hot-reload dev-pub via Tailscale | `dev-checks.yml` | (Tailscale only) |
-| `staging` | Trunk de prod-prep, deploy auto | `staging-deploy.yml` | `analytics-engine[-bridge].staging.veridian.site` |
-| `veridian/main` | Ancien trunk avant rename (alias staging) | `staging-deploy.yml` | — |
+| `staging` | Trunk de travail + deploy dev-pub hot-reload | `staging-deploy.yml` | `analytics-engine[-bridge].staging.veridian.site` |
+| `main` | Photo de prod (branche par défaut), promotion ff depuis staging | `prod-ci.yml` | `analytics-engine[-bridge].app.veridian.site` |
 
-> ⚠️ **`main` est staminads upstream** — ne reçoit JAMAIS de commits Veridian.
-> Le hook `pre-commit` + `pre-push` refusent les commits sur cette branche.
+> ⚠️ **`main` ne reçoit JAMAIS de commits directs** — on y arrive par
+> promotion fast-forward depuis `staging`. Le hook `pre-commit`+`pre-push`
+> refuse les commits sur `main`.
+>
+> L'upstream staminads se sync via le remote `upstream` (pas une branche
+> locale qui le miroir) : `git fetch upstream && git merge upstream/main`
+> depuis `staging`.
 
 **Note 2026-05-21** : `prod-ci.yml` est câblé mais le compose Dokploy prod
 n'est pas encore créé (cf. §16 "Reste à câbler"). Le deploy-prod skip avec
@@ -105,7 +113,7 @@ Inspirés directement de veridian-hub :
 - Filesystem scan dev/staging → **warn-only** (upstream noise)
 - Filesystem scan prod cron → idem warn-only mais avec issue auto si CVE
 
-### §3.2 `dev-checks.yml` (push dev)
+### §3.2 `dev-checks.yml` (PR vers staging/main)
 
 Pipeline rapide, **aucun deploy** :
 
@@ -121,7 +129,7 @@ Pipeline rapide, **aucun deploy** :
 └─────────────────────┘  └─────────────────────┘  └─────────────────────┘
 ```
 
-Concurrency : `analytics-engine-dev-${{ github.ref }}` avec cancel-in-progress.
+Concurrency : `analytics-engine-checks-${{ github.ref }}` avec cancel-in-progress.
 
 ### §3.3 `staging-deploy.yml` (push staging)
 
@@ -358,7 +366,7 @@ Quand le trafic réel justifie le durcissement, on alignera sur le pattern
 - **`chore/<slug>`** : branche chore (ce ticket = `chore/ci-husky-hardening`).
 
 **Workflow agent** :
-1. Créer `chore/<slug>` depuis `origin/dev`
+1. Créer `chore/<slug>` depuis `origin/staging`
 2. Bosser dessus (commits Conventional Commits)
 3. Push → CI dev-checks tourne
 4. Merge `dev` (ff-only) → CI re-tourne sur dev
@@ -457,7 +465,7 @@ Pas de workspace npm/pnpm. Build et release séparés (engine vs bridge GHCR).
 ## §17. Self-validation
 
 Chaque workflow modifié déclenche son propre run :
-- `dev-checks.yml` runs sur push dev (donc lui-même se self-test).
+- `dev-checks.yml` runs sur les PR vers staging/main.
 - `staging-deploy.yml` runs sur push staging (idem).
 - Reusable `_*.yml` sont validés par leur premier caller.
 

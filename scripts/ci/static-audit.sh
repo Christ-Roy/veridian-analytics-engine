@@ -40,7 +40,7 @@ if [ "${ALL:-0}" = "1" ]; then
 else
   BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD)}"
   if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    BASE_REF="origin/dev"
+    BASE_REF="origin/staging"
   fi
   if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
     # Premier push, pas encore d'upstream — pas de diff à scanner

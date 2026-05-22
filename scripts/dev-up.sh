@@ -7,7 +7,7 @@
 #   ssh dev-pub 'bash /opt/dev/analytics-engine/scripts/dev-up.sh'
 #
 # Ce script :
-#   1. Sync le repo (branche `dev`) dans /opt/dev/analytics-engine
+#   1. Sync le repo (branche `staging`) dans /opt/dev/analytics-engine
 #   2. Écrit .env.dev si manquant (sinon le préserve)
 #   3. (Re)build + lance le compose dev
 #   4. Affiche les URLs Tailscale et l'état

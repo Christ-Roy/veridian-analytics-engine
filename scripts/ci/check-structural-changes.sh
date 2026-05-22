@@ -14,7 +14,7 @@
 #
 # Usage :
 #   - CI prod (BASE_REF=HEAD~1 sur push staging, ou origin/staging sur PR)
-#   - Manuel (BASE_REF=origin/dev pour la branche courante)
+#   - Manuel (BASE_REF=origin/staging pour la branche courante)
 
 set -euo pipefail
 

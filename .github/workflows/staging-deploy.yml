@@ -17,7 +17,7 @@ name: Staging CI/CD
 
 on:
   push:
-    branches: [staging, veridian/main]
+    branches: [staging]
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -25,7 +25,7 @@ on:
       - 'TODO.md'
       - 'todo/**'
   pull_request:
-    branches: [staging, veridian/main]
+    branches: [staging]
     paths-ignore:
       - '**.md'
       - 'docs/**'

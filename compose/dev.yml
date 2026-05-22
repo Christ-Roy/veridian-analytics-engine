@@ -6,7 +6,7 @@
 # stack se reload toute seule (NestJS watch, tsx watch, Vite HMR).
 #
 # Pas d'image GHCR : build local sur dev-pub depuis Dockerfile.dev. Code source
-# bind-monté depuis /opt/dev/analytics-engine (clone du repo branche `dev`).
+# bind-monté depuis /opt/dev/analytics-engine (clone du repo branche `staging`).
 #
 # Exposition : Traefik staging-edge (réseau privé Tailscale uniquement).
 # Le wildcard *.staging.veridian.site → dev-pub (joignable uniquement via tailnet).
