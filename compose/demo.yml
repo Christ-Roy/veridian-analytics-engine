@@ -19,11 +19,11 @@
 #   docker compose -f compose/demo.yml up -d
 #
 # Required env (Dokploy ENV panel, see docs/DEMO-PUBLIC.md):
-#   ENGINE_IMAGE_TAG     = staging-<sha7> or veridian-latest
-#   CLICKHOUSE_PASSWORD  = dedicated demo ClickHouse password
+#   ENGINE_IMAGE_TAG     = veridian-<sha7> or staging-<sha7>
 #   ENCRYPTION_KEY       = 32+ chars, openssl rand -hex 32 (demo-only key)
 #   DEMO_SECRET          = 32-byte hex, openssl rand -hex 32
 #                          (~/credentials/.all-creds.env -> DEMO_SECRET_ANALYTICS)
+# ClickHouse runs password-less on the internal demo network (throwaway data).
 # ============================================================================
 
 services:
@@ -36,11 +36,18 @@ services:
       TZ: UTC
       CLICKHOUSE_DB: staminads_system
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD requis}
+      # Empty password — see the clickhouse-users config below. The store is
+      # internal-only and the demo data is throwaway.
+      CLICKHOUSE_PASSWORD: ""
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
       - clickhouse-demo-data:/var/lib/clickhouse
-      - ../clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+    # Inline users.d config (Compose `configs` with `content:`) — no repo bind
+    # mount needed, so this compose deploys cleanly via Dokploy sourceType:raw.
+    # Mirrors clickhouse-users.xml: default user, any IP, access management on.
+    configs:
+      - source: clickhouse-users
+        target: /etc/clickhouse-server/users.d/users.xml
     networks:
       - demo-internal
     healthcheck:
@@ -72,7 +79,7 @@ services:
       CLICKHOUSE_SYSTEM_DATABASE: staminads_system
       CLICKHOUSE_DATABASE: staminads
       CLICKHOUSE_USER: default
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_PASSWORD: ""
       # Demo mode: blocks all write endpoints (DemoRestrictedGuard), enables
       # the anonymous /api/demo.login auto-login and Veridian branding.
       IS_DEMO: "true"
@@ -113,6 +120,27 @@ networks:
     external: true
   demo-internal:
     driver: bridge
+
+configs:
+  # Same content as clickhouse-users.xml at the repo root. The default user
+  # has an empty password — ClickHouse is reachable ONLY on the internal
+  # demo-internal network (never published to a host port), so this matches
+  # the staging stack's posture. The demo data is throwaway (re-seeded
+  # nightly) and contains no real customer data.
+  clickhouse-users:
+    content: |
+      <?xml version="1.0"?>
+      <clickhouse>
+        <users>
+          <default>
+            <password></password>
+            <networks><ip>::/0</ip></networks>
+            <profile>default</profile>
+            <quota>default</quota>
+            <access_management>1</access_management>
+          </default>
+        </users>
+      </clickhouse>
 
 volumes:
   clickhouse-demo-data:

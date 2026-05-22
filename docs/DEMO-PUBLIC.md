@@ -67,10 +67,14 @@ docker compose -f compose/demo.yml up -d
 
 | Variable | Source |
 |---|---|
-| `ENGINE_IMAGE_TAG` | tag GHCR, ex `veridian-latest` ou `staging-<sha7>` |
-| `CLICKHOUSE_PASSWORD` | `ANALYTICS_DEMO_CLICKHOUSE_PASSWORD` (all-creds.env) |
+| `ENGINE_IMAGE_TAG` | tag GHCR, ex `veridian-<sha7>` ou `staging-latest` |
 | `ENCRYPTION_KEY` | `ANALYTICS_DEMO_ENCRYPTION_KEY` (all-creds.env) |
 | `DEMO_SECRET` | `DEMO_SECRET_ANALYTICS` (all-creds.env) |
+
+ClickHouse tourne **sans mot de passe** sur le réseau interne `demo-internal`
+(jamais exposé, données jetables re-seedées chaque nuit). Le compose embarque
+la config `users.d` en inline (`configs:` Compose) — pas de bind-mount, donc
+déployable en `sourceType: raw` sur Dokploy.
 
 ### DNS
 
