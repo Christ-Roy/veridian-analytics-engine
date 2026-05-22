@@ -632,6 +632,17 @@
     - veridian-bridge/tests/forms/rate-limit.test.ts
     - veridian-bridge/tests/forms/list-submissions.test.ts
     - veridian-bridge/tests/forms/xss-sanitization.test.ts
+  integration_covered_by:
+    # T3 — suite d'intégration RÉELLE contre un vrai Postgres 16 (compose/test.yml).
+    # Prouve la chaîne FormSubmission → Lead → LeadSession + les contraintes SQL
+    # (@@unique([siteId,email]), cascade FK) que le FakePrismaClient ne garantit pas.
+    - veridian-bridge/tests/integration/forms/ingest-happy-path.integration.test.ts
+    - veridian-bridge/tests/integration/forms/dedup-by-email.integration.test.ts
+    - veridian-bridge/tests/integration/forms/missing-sitekey.integration.test.ts
+    - veridian-bridge/tests/integration/forms/rate-limit.integration.test.ts
+    - veridian-bridge/tests/integration/forms/xss-sanitization.integration.test.ts
+    - veridian-bridge/tests/integration/forms/list-submissions.integration.test.ts
+    - veridian-bridge/tests/integration/forms/cascade-delete.integration.test.ts
   reason: |
     Port de la chaîne FormSubmission → Lead → LeadSession depuis
     veridian-analytics legacy (lib/ingest.ts + app/api/ingest/form).
@@ -646,6 +657,10 @@
     - rate-limit.ts : sliding window in-memory par IP.
     Tests : 6 fichiers — happy path, dedup email, siteKey invalide (401),
     rate-limit (429 à la 11e req), list + pagination, sanitization XSS.
+    Tests d'intégration (T3) : 7 fichiers *.integration.test.ts contre un
+    VRAI Postgres — la dedup est prouvée sur la contrainte SQL réelle
+    @@unique([siteId,email]) (test P2002 direct), la cascade FK est vérifiée
+    par DELETE réel, le JSONB sanitizé est relu depuis Postgres.
 
 - sources:
     - veridian-bridge/tests/helpers/fake-prisma-forms.ts
