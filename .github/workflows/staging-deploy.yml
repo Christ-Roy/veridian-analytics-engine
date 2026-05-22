@@ -447,20 +447,28 @@ jobs:
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
           BRIDGE_DB_PASSWORD: ${{ secrets.BRIDGE_DB_PASSWORD_STAGING }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY_STAGING }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY_STAGING }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT_STAGING }}
         run: |
           ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             "cat > /opt/staging/analytics-engine/.env <<ENV
           ENGINE_IMAGE_TAG=${ENGINE_TAG}
           BRIDGE_IMAGE_TAG=${BRIDGE_TAG}
+          NODE_ENV=production
           CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
           STAMINADS_ADMIN_EMAIL=admin@veridian.site
           STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
           VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
           HUB_HMAC_SECRET=${HUB_HMAC_SECRET}
+          SKIP_HMAC=false
           BRIDGE_DB_USER=bridge
           BRIDGE_DB_PASSWORD=${BRIDGE_DB_PASSWORD}
           BRIDGE_DB_NAME=veridian_bridge
+          VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+          VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+          VAPID_SUBJECT=${VAPID_SUBJECT}
           ENV
           chmod 600 /opt/staging/analytics-engine/.env"
 

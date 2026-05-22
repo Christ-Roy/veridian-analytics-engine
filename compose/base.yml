@@ -47,14 +47,29 @@ services:
     environment:
       TZ: UTC
       PORT: "3000"
+      # NODE_ENV : par défaut production. dev.yml l'override en development.
+      NODE_ENV: ${NODE_ENV:-production}
       JWT_EXPIRES_IN: 7d
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requis (32+ chars, openssl rand -hex 32)}
+      # JWT_SECRET optionnel : si absent, le code retombe sur ENCRYPTION_KEY
+      # (api/src/subscriptions/subscriptions.module.ts).
+      JWT_SECRET: ${JWT_SECRET:-}
       CLICKHOUSE_HOST: http://clickhouse:8123
       CLICKHOUSE_SYSTEM_DATABASE: staminads_system
       CLICKHOUSE_DATABASE: staminads
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       IS_DEMO: "false"
+      # SMTP global optionnel : si vide, chaque workspace doit configurer son
+      # propre SMTP pour envoyer des emails (invitations, reset password).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Veridian Analytics}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@veridian.site}
+      # DEMO_SECRET optionnel : protège les endpoints de génération de fixtures démo.
+      DEMO_SECRET: ${DEMO_SECRET:-}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/setup.status || exit 1"]
       interval: 15s
@@ -92,10 +107,27 @@ services:
     environment:
       TZ: UTC
       PORT: "3002"
+      # NODE_ENV : par défaut production. Le boot guard assertSkipHmacAllowed()
+      # refuse SKIP_HMAC=true si NODE_ENV ∉ {test, development}. dev.yml l'override.
+      NODE_ENV: ${NODE_ENV:-production}
       STAMINADS_URL: http://engine:3000
       STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
       STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis (32+ chars)}
+      # URL publique du dashboard renvoyée au Hub à la réponse /provision (CONTRAT-HUB §5.1)
+      PUBLIC_DASHBOARD_URL: ${PUBLIC_DASHBOARD_URL:-https://analytics.app.veridian.site}
+      # ─── Hub HMAC (B3 — contrat §5.x, §6.1) ───────────────────────────────
+      # Secret partagé Hub↔bridge. SANS lui, /api/tenants/* refuse tout.
+      HUB_HMAC_SECRET: ${HUB_HMAC_SECRET:?HUB_HMAC_SECRET requis (32+ chars hex)}
+      # Bypass HMAC : interdit en prod/staging (boot guard throw). dev.yml l'override.
+      SKIP_HMAC: ${SKIP_HMAC:-false}
+      # ─── Push Notifications PWA (B2) ──────────────────────────────────────
+      # Clés VAPID Web Push. SANS elles, l'envoi de notifications échoue
+      # (subscriptions OK mais POST /api/push/send KO). Réutilise les clés
+      # legacy veridian-analytics pour ne PAS invalider les abonnements existants.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY requis (Push B2)}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY requis (Push B2)}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:contact@veridian.site}
       # GSC integration (A4)
       BRIDGE_DATABASE_URL: postgresql://${BRIDGE_DB_USER:-bridge}:${BRIDGE_DB_PASSWORD:-bridge_pwd}@postgres-bridge:5432/${BRIDGE_DB_NAME:-veridian_bridge}
       BRIDGE_DB_HOST: postgres-bridge

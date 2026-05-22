@@ -503,11 +503,86 @@ Prod = `cancel-in-progress: false` pour ne PAS cancel un deploy mi-vol.
 | `STAMINADS_ADMIN_PASSWORD_STAGING` | repo | admin staminads staging |
 | `VERIDIAN_ADMIN_API_KEY_STAGING` | repo | Bearer admin staging |
 | `HUB_HMAC_SECRET_ANALYTICS_STAGING` | repo | HMAC partagé Hub ↔ bridge staging |
+| `BRIDGE_DB_PASSWORD_STAGING` | repo | mot de passe Postgres bridge staging |
+| `VAPID_PUBLIC_KEY_STAGING` | repo | clé publique VAPID Web Push (B2) staging |
+| `VAPID_PRIVATE_KEY_STAGING` | repo | clé privée VAPID Web Push (B2) staging |
+| `VAPID_SUBJECT_STAGING` | repo | `mailto:` du contact VAPID staging |
 | `GITHUB_TOKEN` | auto | push GHCR + issue create |
 
 Vars (non-secret, mais env-spécifique) :
 - `PROD_VPS_HOST`, `PROD_VPS_USER` (cf. veridian-hub `VPS_HOST` / `VPS_USER`)
 - `ANALYTICS_DOKPLOY_COMPOSE_ID` (à set quand compose prod créé)
+
+> Les clés VAPID staging réutilisent les clés legacy `veridian-analytics`
+> (générées 2026-04-12, dans `~/credentials/.all-creds.env`). **Ne jamais
+> les régénérer** : ça invaliderait tous les `PushSubscription` existants.
+
+## §11bis. Variables d'environnement runtime — table ENV → source
+
+Audit complet 2026-05-22 (`fix/compose-env-audit`). Toute `process.env.X`
+lue par le code (`api/src/` + `veridian-bridge/src/`) a une source. Les ENV
+secrètes utilisent `${VAR:?}` dans le compose — jamais de valeur en clair.
+
+### Service `engine` (NestJS staminads, port 3000)
+
+| ENV | Type | dev | staging / prod |
+|---|---|---|---|
+| `NODE_ENV` | flag | `dev.yml` → `development` | `base.yml` défaut `production` |
+| `PORT` | fixe | `base.yml` `3000` | `base.yml` `3000` |
+| `JWT_EXPIRES_IN` | fixe | `base.yml` `7d` | `base.yml` `7d` |
+| `JWT_SECRET` | secret opt. | non set (fallback `ENCRYPTION_KEY`) | Dokploy ENV (sinon fallback) |
+| `ENCRYPTION_KEY` | 🔴 secret | `.env.dev` | secret `ENCRYPTION_KEY_STAGING` / Dokploy |
+| `APP_URL` | URL | `dev.yml` | `staging.yml` / Dokploy |
+| `CORS_ALLOWED_ORIGINS` | URL list | `dev.yml` | `staging.yml` / Dokploy |
+| `CLICKHOUSE_HOST` | fixe | `base.yml` `http://clickhouse:8123` | idem |
+| `CLICKHOUSE_SYSTEM_DATABASE` | fixe | `base.yml` `staminads_system` | idem |
+| `CLICKHOUSE_DATABASE` | fixe | `base.yml` `staminads` | idem |
+| `CLICKHOUSE_USER` | fixe | `base.yml` `default` | idem |
+| `CLICKHOUSE_PASSWORD` | 🔴 secret | `.env.dev` | secret `CLICKHOUSE_PASSWORD_STAGING` / Dokploy |
+| `IS_DEMO` | flag | `base.yml` `false` | `base.yml` `false` |
+| `SMTP_HOST/PORT/USER/PASSWORD` | secret opt. | `base.yml` défaut vide | Dokploy ENV (sinon SMTP par workspace) |
+| `SMTP_FROM_NAME/EMAIL` | opt. | `base.yml` défaut Veridian | `base.yml` / Dokploy |
+| `DEMO_SECRET` | secret opt. | `base.yml` défaut vide | Dokploy ENV si endpoints démo exposés |
+| `GEOIP_DB_PATH` | opt. | défaut code `./data/GeoLite2-City.mmdb` | idem |
+| `ASSISTANT_THINKING_DISABLED` | flag opt. | non set | Dokploy ENV si besoin |
+| `BACKFILL_STALE_THRESHOLD_MINUTES` | opt. | défaut code `5` | Dokploy ENV si besoin |
+
+### Service `bridge` (Express Veridian, port 3002)
+
+| ENV | Type | dev | staging / prod |
+|---|---|---|---|
+| `NODE_ENV` | flag | `dev.yml` → `development` | `base.yml` défaut `production` |
+| `PORT` | fixe | `base.yml` `3002` | `base.yml` `3002` |
+| `STAMINADS_URL` | fixe | `base.yml` `http://engine:3000` | idem |
+| `PUBLIC_STAMINADS_URL` | URL | `dev.yml` | `staging.yml` / Dokploy |
+| `STAMINADS_ADMIN_EMAIL` | opt. | `base.yml` défaut | `base.yml` / `.env` CI |
+| `STAMINADS_ADMIN_PASSWORD` | 🔴 secret | `.env.dev` | secret `STAMINADS_ADMIN_PASSWORD_STAGING` / Dokploy |
+| `VERIDIAN_ADMIN_API_KEY` | 🔴 secret | `.env.dev` | secret `VERIDIAN_ADMIN_API_KEY_STAGING` / Dokploy |
+| `PUBLIC_DASHBOARD_URL` | URL | `dev.yml` | `base.yml` défaut / Dokploy |
+| `HUB_HMAC_SECRET` | 🔴 secret | `dev.yml` défaut dev | secret `HUB_HMAC_SECRET_ANALYTICS_STAGING` / Dokploy |
+| `SKIP_HMAC` | flag | `dev.yml` → `true` | `base.yml` défaut `false` (boot guard) |
+| `VAPID_PUBLIC_KEY` | 🔴 secret | `dev.yml` opt. vide | secret `VAPID_PUBLIC_KEY_STAGING` / Dokploy |
+| `VAPID_PRIVATE_KEY` | 🔴 secret | `dev.yml` opt. vide | secret `VAPID_PRIVATE_KEY_STAGING` / Dokploy |
+| `VAPID_SUBJECT` | opt. | `dev.yml` défaut | secret `VAPID_SUBJECT_STAGING` / Dokploy |
+| `BRIDGE_DATABASE_URL` | dérivée | `base.yml` (assemblée depuis `BRIDGE_DB_*`) | idem |
+| `BRIDGE_DB_HOST/PORT/USER/NAME` | fixe/opt. | `base.yml` | `base.yml` / `.env` CI |
+| `BRIDGE_DB_PASSWORD` | 🔴 secret | `.env.dev` | secret `BRIDGE_DB_PASSWORD_STAGING` / Dokploy |
+| `GOOGLE_OAUTH_CLIENT_ID/SECRET` | secret opt. | `.env.dev` | Dokploy ENV (GSC A4) |
+| `GOOGLE_OAUTH_REDIRECT_URI` | URL opt. | `dev.yml` défaut | Dokploy ENV |
+| `TOKEN_ENCRYPTION_KEY` | 🔴 secret opt. | `.env.dev` | Dokploy ENV (chiffrement tokens OAuth) |
+| `GSC_DASHBOARD_REDIRECT_URL` | URL opt. | `base.yml` vide | Dokploy ENV |
+| `GSC_CRON_ALLOWED_IPS` | opt. | `base.yml` vide | Dokploy ENV |
+
+**Légende source** : `base.yml` = valeur/défaut dans le compose de base ;
+`staging.yml`/`dev.yml` = override par environnement ; `.env` CI = écrit par
+le job "Write .env" de `staging-deploy.yml` depuis un secret GitHub ;
+Dokploy ENV = panneau ENV du compose prod (à renseigner quand le compose
+prod analytics-engine sera créé — voir `ANALYTICS_DOKPLOY_COMPOSE_ID`).
+
+> ⚠️ **Prod analytics-engine pas encore live** : quand le compose Dokploy
+> prod sera créé, y renseigner toutes les ENV 🔴 ci-dessus, dont les 3
+> `VAPID_*` (mêmes valeurs que `~/credentials/.all-creds.env`, pas de
+> régénération) et `HUB_HMAC_SECRET` (= `HUB_HMAC_SECRET_ANALYTICS_PROD`).
 
 ## §12. paths-ignore commun
 
