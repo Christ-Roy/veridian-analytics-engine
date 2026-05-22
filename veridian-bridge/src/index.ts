@@ -11,6 +11,7 @@ import { createApp, validateConfig, type BridgeConfig } from "./app.js";
 import { assertSkipHmacAllowed } from "./hub-hmac.js";
 import { registerGscRoutes } from "./gsc/routes.js";
 import { readOauthConfigFromEnv, OauthConfigError } from "./gsc/index.js";
+import { registerFormsRoutes } from "./forms/index.js";
 import { getPrisma } from "./db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 
@@ -105,6 +106,46 @@ try {
       `[bridge] GSC init failed (continuing without): ${(err as Error).message}`,
     );
   }
+}
+
+// ─── Forms feature (B1) — optional ────────────────────────────────────
+//
+// On câble si BRIDGE_DATABASE_URL est présent (sinon pas de Prisma).
+// `getPrisma()` est partagé avec GSC : même singleton.
+try {
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new Error("BRIDGE_DATABASE_URL missing — Forms feature disabled");
+  }
+  const prisma = getPrisma();
+
+  function requireAdminForForms(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  registerFormsRoutes(app, {
+    prisma,
+    requireAdmin: requireAdminForForms,
+    staminadsUrl: cfg.staminadsUrl,
+  });
+  console.log("[bridge] Forms routes registered");
+} catch (err) {
+  console.warn(
+    `[bridge] Forms init failed (continuing without): ${(err as Error).message}`,
+  );
 }
 
 app.listen(PORT, () => {

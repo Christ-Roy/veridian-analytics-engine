@@ -428,6 +428,51 @@
     in-memory utilisé par les tests. `prisma migrate deploy` au boot du
     container valide le schéma vs DB réelle en environnements live.
 
+# ─── Forms + Leads (B1) ───────────────────────────────────────────────
+
+- sources:
+    - veridian-bridge/src/forms/index.ts
+    - veridian-bridge/src/forms/ingest.ts
+    - veridian-bridge/src/forms/query.ts
+    - veridian-bridge/src/forms/routes.ts
+    - veridian-bridge/src/forms/sanitize.ts
+    - veridian-bridge/src/forms/rate-limit.ts
+    - veridian-bridge/src/forms/staminads-event.ts
+    - veridian-bridge/src/forms/types.ts
+  covered_by:
+    - veridian-bridge/tests/forms/ingest-happy-path.test.ts
+    - veridian-bridge/tests/forms/dedup-by-email.test.ts
+    - veridian-bridge/tests/forms/missing-sitekey.test.ts
+    - veridian-bridge/tests/forms/rate-limit.test.ts
+    - veridian-bridge/tests/forms/list-submissions.test.ts
+    - veridian-bridge/tests/forms/xss-sanitization.test.ts
+  reason: |
+    Port de la chaîne FormSubmission → Lead → LeadSession depuis
+    veridian-analytics legacy (lib/ingest.ts + app/api/ingest/form).
+    - ingest.ts : ingestFormSubmission() — lookup Site par siteKey,
+      auto-create FormSchema, sanitize + extract email/phone/name,
+      upsert Lead (dedup (siteId,email)), create FormSubmission,
+      upsert LeadSession (match visitorId), best-effort event staminads.
+    - query.ts : listSubmissions() (pagination curseur) + getLeadDetails().
+    - routes.ts : POST /api/ingest/form (public, rate-limited 10/min),
+      GET /api/admin/tenant/:workspaceId/forms, GET /api/admin/lead/:leadId.
+    - sanitize.ts : strip HTML/protocoles dangereux (anti-XSS au stockage).
+    - rate-limit.ts : sliding window in-memory par IP.
+    Tests : 6 fichiers — happy path, dedup email, siteKey invalide (401),
+    rate-limit (429 à la 11e req), list + pagination, sanitization XSS.
+
+- sources:
+    - veridian-bridge/tests/helpers/fake-prisma-forms.ts
+  covered_by:
+    - veridian-bridge/tests/forms/ingest-happy-path.test.ts
+    - veridian-bridge/tests/forms/dedup-by-email.test.ts
+    - veridian-bridge/tests/forms/list-submissions.test.ts
+  reason: |
+    FakePrismaClient in-memory pour les modèles Site/FormSchema/
+    FormSubmission/Lead/LeadSession. Reflète les contraintes du schéma
+    (unique (siteId,email), (siteId,formSlug)). Modif du helper → casse
+    les tests forms qui s'en servent.
+
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #
 # - Quand on ajoute un patch Veridian (cf PATCHES.md), il DOIT venir avec :

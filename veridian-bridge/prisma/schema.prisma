@@ -52,6 +52,7 @@ model Tenant {
   updatedAt       DateTime  @updatedAt
 
   gscProperties   GscProperty[]
+  sites           Site[]
 
   @@index([status])
   @@index([hubTenantId])
@@ -116,4 +117,125 @@ model GscDaily {
 
   @@unique([gscPropertyId, date, query, page, country, device, searchType])
   @@index([gscPropertyId, date])
+}
+
+// ─── Site ─────────────────────────────────────────────────────────────────
+//
+// Un Site = un domaine client tracké par le tracker Veridian. Plusieurs Sites
+// possibles par Tenant (multi-domaines), mais en pratique 1:1 au début.
+// `siteKey` = clé publique posée dans le snippet tracker, utilisée pour
+// authentifier les POST /api/ingest/form depuis le navigateur du visiteur.
+
+model Site {
+  id              String   @id @default(cuid())
+  tenantId        String
+  siteKey         String   @unique
+  domain          String
+  name            String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  formSchemas     FormSchema[]
+  formSubmissions FormSubmission[]
+  leads           Lead[]
+
+  @@index([tenantId])
+}
+
+// ─── FormSchema ───────────────────────────────────────────────────────────
+//
+// Description d'un formulaire d'un Site. `formSlug` est l'identifiant
+// stable utilisé dans les POST (ex: "contact-devis"). `fields` est un
+// JSON array décrivant les champs ([{ name, label, type, required }]).
+// Auto-créé au premier POST avec un slug inconnu (cf forms/ingest.ts).
+
+model FormSchema {
+  id          String   @id @default(cuid())
+  siteId      String
+  formSlug    String
+  name        String
+  fields      Json     @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  site        Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  submissions FormSubmission[]
+
+  @@unique([siteId, formSlug])
+}
+
+// ─── FormSubmission ───────────────────────────────────────────────────────
+//
+// Soumission individuelle de formulaire. `data` est le payload brut envoyé
+// par le formulaire (Json), `leadId` rempli si on a pu matcher/créer un Lead
+// (email présent dans le payload).
+
+model FormSubmission {
+  id            String   @id @default(cuid())
+  siteId        String
+  formSchemaId  String?
+  formSlug      String
+  data          Json
+  ipAddress     String?
+  userAgent     String?
+  pageUrl       String?
+  visitorId     String?
+  sessionId     String?
+  leadId        String?
+  createdAt     DateTime @default(now())
+
+  site          Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  formSchema    FormSchema? @relation(fields: [formSchemaId], references: [id])
+  lead          Lead?       @relation(fields: [leadId], references: [id])
+
+  @@index([siteId, createdAt])
+  @@index([leadId])
+}
+
+// ─── Lead ─────────────────────────────────────────────────────────────────
+//
+// Lead = personne identifiée (email) liée à un Site. Dédup par (siteId, email).
+// `submissionsCount` incrémenté à chaque POST. `metadata` Json libre.
+
+model Lead {
+  id               String   @id @default(cuid())
+  siteId           String
+  email            String?
+  phone            String?
+  name             String?
+  metadata         Json?
+  firstSeenAt      DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+  submissionsCount Int      @default(1)
+
+  site             Site             @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  submissions      FormSubmission[]
+  sessions         LeadSession[]
+
+  @@unique([siteId, email])
+  @@index([siteId, lastSeenAt])
+}
+
+// ─── LeadSession ──────────────────────────────────────────────────────────
+//
+// Session web liée à un Lead. Matchée par `visitorId` (cookie tracker)
+// ou `sessionId` (session staminads). Permet de relier les pageviews
+// pré-formulaire à l'identité finale.
+
+model LeadSession {
+  id            String    @id @default(cuid())
+  leadId        String
+  visitorId     String?
+  sessionId     String?
+  source        String?
+  medium        String?
+  campaign      String?
+  startedAt     DateTime  @default(now())
+  endedAt       DateTime?
+  pageviewCount Int       @default(1)
+
+  lead          Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
 }
