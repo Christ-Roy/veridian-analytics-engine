@@ -1,0 +1,13 @@
+# systemd service — alerte quotidienne dual-tracking (migration D2).
+# Installé par scripts/migration/cron/install-diff-alert-cron.sh sur dev-pub.
+[Unit]
+Description=Veridian Analytics — alerte écart dual-tracking (migration D2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/veridian/migration-diff-alert.env
+WorkingDirectory=/opt/veridian/analytics-migration
+ExecStart=/usr/bin/env npx tsx /opt/veridian/analytics-migration/migration-diff-alert.ts --apply
+# Pas de redémarrage : oneshot piloté par le timer.

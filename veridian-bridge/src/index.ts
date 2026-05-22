@@ -24,6 +24,7 @@ import {
   CredentialCryptoError,
 } from "./credentials/index.js";
 import { getPrisma } from "./db/prisma.js";
+import { registerProvisionExistingRoutes } from "./admin/provision-existing-tenant.js";
 import type { Request, Response, NextFunction } from "express";
 
 // ─── Hub HMAC (B3) ──────────────────────────────────────────────────
@@ -246,6 +247,116 @@ try {
       `[bridge] Settings init failed (continuing without): ${(err as Error).message}`,
     );
   }
+}
+
+// ─── Provision-existing-tenant (D2 — migration des clients legacy) ────────
+//
+// Endpoint POST /api/admin/provision-existing-tenant utilisé par le script
+// scripts/migration/migrate-existing-tenants.ts. Adopte un site legacy
+// (siteKey réutilisé) en créant le workspace staminads + Tenant/Site bridge.
+try {
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new Error(
+      "BRIDGE_DATABASE_URL missing — provision-existing-tenant disabled",
+    );
+  }
+  const prisma = getPrisma();
+
+  function requireAdminForProvisionExisting(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  /**
+   * Hook staminads pour provision-existing : login admin (token court-vécu,
+   * pas de cache — l'endpoint est appelé 5x au plus pendant une migration)
+   * puis workspaces.create + apiKeys.create.
+   */
+  async function createStaminadsWorkspaceForMigration(input: {
+    workspaceId: string;
+    workspaceName: string;
+    domain: string;
+  }): Promise<{ workspaceId: string; apiKey: string }> {
+    const loginRes = await fetch(`${cfg.staminadsUrl}/api/auth.login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: cfg.adminEmail,
+        password: cfg.adminPassword,
+      }),
+    });
+    if (!loginRes.ok) {
+      throw new Error(`staminads auth.login failed: ${loginRes.status}`);
+    }
+    const { access_token: token } = (await loginRes.json()) as {
+      access_token: string;
+    };
+
+    const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        id: input.workspaceId,
+        name: input.workspaceName,
+        website: `https://${input.domain}`,
+        timezone: "Europe/Paris",
+        currency: "EUR",
+      }),
+    });
+    if (!wsRes.ok) {
+      throw new Error(`staminads workspaces.create failed: ${wsRes.status}`);
+    }
+    const ws = (await wsRes.json()) as { id: string };
+
+    const keyRes = await fetch(`${cfg.staminadsUrl}/api/apiKeys.create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        workspace_id: ws.id,
+        name: `veridian-migration-${input.workspaceId}`,
+        role: "admin",
+      }),
+    });
+    if (!keyRes.ok) {
+      throw new Error(`staminads apiKeys.create failed: ${keyRes.status}`);
+    }
+    const apiKey = (await keyRes.json()) as { key: string };
+    return { workspaceId: ws.id, apiKey: apiKey.key };
+  }
+
+  registerProvisionExistingRoutes(app, {
+    prisma,
+    requireAdmin: requireAdminForProvisionExisting,
+    createStaminadsWorkspace: createStaminadsWorkspaceForMigration,
+    publicStaminadsUrl:
+      process.env.PUBLIC_STAMINADS_URL ?? cfg.staminadsUrl,
+    publicDashboardUrl:
+      process.env.PUBLIC_DASHBOARD_URL ?? "https://analytics.app.veridian.site",
+  });
+  console.log("[bridge] provision-existing-tenant route registered");
+} catch (err) {
+  console.warn(
+    `[bridge] provision-existing-tenant disabled: ${(err as Error).message}`,
+  );
 }
 
 app.listen(PORT, () => {

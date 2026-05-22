@@ -44,3 +44,6 @@ temp/
 
 # Claude Code
 .claude/
+
+# Migration D2 — sorties générées (dumps legacy + snippets) : jamais commitées
+scripts/migration/out/

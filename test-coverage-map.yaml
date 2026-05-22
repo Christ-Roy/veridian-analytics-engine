@@ -142,6 +142,52 @@
     validateConfig() rejette bien les configs invalides — ce qui est
     exactement ce que index.ts fait au boot.
 
+# ─── Migration D2 (provision-existing-tenant + scripts de migration) ──────
+
+- sources:
+    - veridian-bridge/src/admin/provision-existing-tenant.ts
+  covered_by:
+    - veridian-bridge/tests/migration/provision-existing-tenant.test.ts
+  reason: |
+    Endpoint POST /api/admin/provision-existing-tenant (ticket D2). Adopte un
+    site legacy connu en créant le workspace staminads + Tenant/Site bridge,
+    en réutilisant le siteKey legacy. Idempotent : un Site déjà adopté renvoie
+    le mapping existant (created:false), aucun doublon.
+    Tests : helpers purs (toStaminadsWorkspaceId, buildTrackerSnippet),
+    logique métier provisionExistingTenant (création, idempotence 5x, Tenant
+    pré-existant sans Site), handler HTTP (201/200/400). FakePrisma in-memory
+    minimal — le test d'intégration réel (vrai Postgres) reste à porter par
+    l'agent T*. Fichier hors périmètre is_critical (pas hub/forms/gsc/push)
+    → check-integration-coverage.sh n'exige pas de *.integration.test.ts.
+
+- sources:
+    - scripts/migration/lib/mapping.ts
+    - scripts/migration/lib/clients.ts
+    - scripts/migration/lib/dual-tracking.ts
+    - scripts/migration/lib/cli.ts
+    - scripts/migration/lib/diff-alert.ts
+    - scripts/migration/lib/forms-stats.ts
+    - scripts/migration/lib/dump-io.ts
+    - scripts/migration/migrate-existing-tenants.ts
+    - scripts/migration/migrate-gsc-history.ts
+    - scripts/migration/migrate-forms-history.ts
+    - scripts/migration/migration-diff-alert.ts
+  covered_by:
+    - veridian-bridge/tests/migration/mapping.test.ts
+    - veridian-bridge/tests/migration/cli-and-snippets.test.ts
+    - veridian-bridge/tests/migration/diff-alert-and-stats.test.ts
+  reason: |
+    Scripts de migration des 5 clients prod (ticket D2). La logique PURE
+    (transformations legacy → bridge, parsing flags, génération snippets,
+    seuil d'alerting, recompte submissionsCount, lecture des dumps) vit dans
+    scripts/migration/lib/ et est testée unitairement par les 3 fichiers
+    veridian-bridge/tests/migration/*.test.ts (lancés par le pre-push + CI
+    bridge — glob 'tests/migration/' ajouté à package.json).
+    Les orchestrateurs (migrate-*.ts) sont du glue I/O : ils délèguent toute
+    la transformation à lib/ et sont typecheckés par le tsc bridge (include
+    ../scripts/migration/**). check-test-mapping.sh skip scripts/* — cette
+    entrée documente la couverture réelle.
+
 - sources:
     - veridian-bridge/tests/helpers/fake-staminads.ts
   covered_by:

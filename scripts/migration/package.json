@@ -1,0 +1,6 @@
+{
+  "name": "veridian-analytics-migration-d2",
+  "private": true,
+  "type": "module",
+  "description": "Scripts de migration des 5 clients prod (ticket D2). `type:module` scope ces fichiers en ESM — pas de dépendances propres, ils réutilisent veridian-bridge/node_modules (tsx + @prisma/client). Ne PAS lancer npm install ici."
+}

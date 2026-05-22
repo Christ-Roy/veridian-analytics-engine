@@ -1,0 +1,12 @@
+# systemd timer — déclenche l'alerte dual-tracking tous les jours à 08:00 UTC.
+# Installé par scripts/migration/cron/install-diff-alert-cron.sh.
+[Unit]
+Description=Veridian Analytics — timer alerte écart dual-tracking (migration D2)
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 UTC
+# Rattrape le run si la machine était éteinte à 08:00.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "node --import tsx --test --test-reporter=spec 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts'",
-    "test:ci": "node --import tsx --test --test-reporter=tap 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts'",
+    "test": "node --import tsx --test --test-reporter=spec 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts' 'tests/migration/!(*.integration).test.ts'",
+    "test:ci": "node --import tsx --test --test-reporter=tap 'tests/!(*.integration).test.ts' 'tests/hub/!(*.integration).test.ts' 'tests/integration/!(*.integration).test.ts' 'tests/forms/!(*.integration).test.ts' 'tests/push/!(*.integration).test.ts' 'tests/migration/!(*.integration).test.ts'",
     "test:integration": "node scripts/run-integration.mjs spec",
     "test:integration:ci": "node scripts/run-integration.mjs tap",
     "test:integration:local": "../scripts/run-integration-tests.sh",
