@@ -36,6 +36,10 @@ import { ApiKeysModule } from '../api-keys/api-keys.module';
   ],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, ApiKeyStrategy],
-  exports: [AuthService],
+  // JwtModule is re-exported so other feature modules (e.g. DemoModule, which
+  // mints anonymous tokens for the public demo via POST /api/demo.login) can
+  // inject JwtService without re-declaring the registerAsync factory and
+  // risking a divergent secret/expiry config.
+  exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

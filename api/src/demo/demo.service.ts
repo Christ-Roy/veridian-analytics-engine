@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { ClickHouseService } from '../database/clickhouse.service';
-import { generateId } from '../common/crypto';
+import { generateId, hashPassword } from '../common/crypto';
 import {
   generateEventsByDay,
   getCachedFilters,
@@ -17,9 +17,11 @@ import {
 } from '../workspaces/entities/workspace.entity';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 
-const DEMO_WORKSPACE_ID = 'demo-apple';
-const DEMO_WORKSPACE_NAME = 'Apple Demo';
-const DEMO_WEBSITE = 'https://www.apple.com';
+export const DEMO_WORKSPACE_ID = 'demo-apple';
+export const DEMO_WORKSPACE_NAME = 'Veridian Analytics Demo';
+export const DEMO_WEBSITE = 'https://www.apple.com';
+export const DEMO_USER_EMAIL = 'demo@veridian.site';
+export const DEMO_USER_NAME = 'Visiteur Démo';
 const SESSION_COUNT = 200_000;
 const DAYS_RANGE = 90;
 const BATCH_SIZE = 10_000;
@@ -76,6 +78,16 @@ export class DemoService {
 
     // Generate events day-by-day using streaming generator
     const endDate = new Date();
+
+    // Ensure the demo user exists BEFORE creating workspace, so they are
+    // recorded as the owner of the demo workspace (used for anonymous
+    // auto-login on the public demo instance).
+    await this.ensureDemoUser();
+
+    // Mark the instance as "set up" so the SPA does not redirect visitors to
+    // the /setup wizard. On a public demo there is no human admin to run
+    // setup.initialize — the demo seed IS the provisioning step.
+    await this.ensureSetupComplete();
 
     // Create new workspace with fixed ID (needs endDate for annotations)
     await this.createWorkspace(DEMO_WORKSPACE_ID, endDate);
@@ -231,32 +243,50 @@ export class DemoService {
   }
 
   /**
-   * Find the super_admin user and add them as owner of the workspace.
-   * This ensures demo workspaces are accessible via Team settings.
+   * Find an owner for the demo workspace.
+   *
+   * Priority:
+   * 1. The dedicated demo user `demo@veridian.site` (created by
+   *    `ensureDemoUser`). This is the user the public demo instance
+   *    auto-logs visitors in as, so they MUST be the owner of the demo
+   *    workspace for `workspaces.list` to return it.
+   * 2. Fallback: any active super_admin user (when running locally
+   *    without a dedicated demo user, e.g. dev seed).
    */
   private async addSuperAdminAsOwner(
     workspaceId: string,
     now: string,
   ): Promise<void> {
-    // Find super_admin user
-    const superAdmins = await this.clickhouse.querySystem<{ id: string }>(
-      `SELECT id FROM users FINAL WHERE is_super_admin = 1 AND status = 'active' LIMIT 1`,
+    // Try the dedicated demo user first
+    const demoUsers = await this.clickhouse.querySystem<{ id: string }>(
+      `SELECT id FROM users FINAL WHERE email = {email:String} AND status = 'active' LIMIT 1`,
+      { email: DEMO_USER_EMAIL },
     );
 
-    if (superAdmins.length === 0) {
+    let ownerId: string | null = demoUsers[0]?.id ?? null;
+    let ownerLabel = `demo user ${DEMO_USER_EMAIL}`;
+
+    if (!ownerId) {
+      // Fallback: super_admin
+      const superAdmins = await this.clickhouse.querySystem<{ id: string }>(
+        `SELECT id FROM users FINAL WHERE is_super_admin = 1 AND status = 'active' LIMIT 1`,
+      );
+      ownerId = superAdmins[0]?.id ?? null;
+      ownerLabel = `super_admin ${ownerId ?? '<none>'}`;
+    }
+
+    if (!ownerId) {
       this.logger.warn(
-        'No super_admin user found - demo workspace will have no owner',
+        'No demo user or super_admin found - demo workspace will have no owner',
       );
       return;
     }
-
-    const superAdminId = superAdmins[0].id;
 
     await this.clickhouse.insertSystem('workspace_memberships', [
       {
         id: generateId(),
         workspace_id: workspaceId,
-        user_id: superAdminId,
+        user_id: ownerId,
         role: 'owner',
         invited_by: null,
         joined_at: now,
@@ -265,9 +295,105 @@ export class DemoService {
       },
     ]);
 
-    this.logger.log(
-      `Added super_admin ${superAdminId} as owner of ${workspaceId}`,
+    this.logger.log(`Added ${ownerLabel} as owner of ${workspaceId}`);
+  }
+
+  /**
+   * Idempotently create the public demo user `demo@veridian.site`.
+   *
+   * This user is the identity that anonymous visitors of the public demo
+   * instance are auto-logged in as via `POST /api/demo.login`. The user has
+   * no super_admin flag (so the "New workspace" UI element is hidden) and
+   * a random untouchable password (login is only ever issued through
+   * `demo.login`, never through `auth.login`).
+   *
+   * Returns the user id.
+   */
+  async ensureDemoUser(): Promise<string> {
+    const existing = await this.clickhouse.querySystem<{ id: string }>(
+      `SELECT id FROM users FINAL WHERE email = {email:String} LIMIT 1`,
+      { email: DEMO_USER_EMAIL },
     );
+
+    if (existing.length > 0) {
+      return existing[0].id;
+    }
+
+    const id = generateId();
+    // Generate a random password the demo user cannot use to actually log in
+    // through /api/auth.login. The demo.login endpoint bypasses password
+    // verification entirely. We still hash a value so password_hash is not
+    // empty (defense in depth: even if demo.login were ever exposed in a
+    // non-demo build, no real password matches this hash).
+    const passwordHash = await hashPassword(randomUUID() + randomUUID());
+    const now = toClickHouseDateTime();
+
+    await this.clickhouse.insertSystem('users', [
+      {
+        id,
+        email: DEMO_USER_EMAIL,
+        password_hash: passwordHash,
+        name: DEMO_USER_NAME,
+        type: 'user',
+        status: 'active',
+        is_super_admin: 0,
+        last_login_at: null,
+        failed_login_attempts: 0,
+        locked_until: null,
+        password_changed_at: now,
+        deleted_at: null,
+        deleted_by: null,
+        created_at: now,
+        updated_at: now,
+      },
+    ]);
+
+    this.logger.log(`Created demo user ${DEMO_USER_EMAIL} (id=${id})`);
+    return id;
+  }
+
+  /**
+   * Lookup the demo user. Returns null if the user has not been seeded yet
+   * (caller should respond with 503 in that case so the frontend can poll).
+   */
+  async findDemoUser(): Promise<{
+    id: string;
+    email: string;
+    name: string;
+  } | null> {
+    const rows = await this.clickhouse.querySystem<{
+      id: string;
+      email: string;
+      name: string;
+    }>(
+      `SELECT id, email, name FROM users FINAL WHERE email = {email:String} AND status = 'active' LIMIT 1`,
+      { email: DEMO_USER_EMAIL },
+    );
+
+    return rows[0] ?? null;
+  }
+
+  /**
+   * Idempotently set the `setup_completed` system flag.
+   *
+   * The public demo instance has no human operator to walk through the
+   * /setup wizard. Without this flag, `SetupMiddleware` answers 503 on every
+   * /api/* call and the SPA bounces visitors to /setup. Since the demo seed
+   * provisions the workspace and demo user itself, it also owns marking
+   * setup as complete.
+   *
+   * `system_settings` is a ReplacingMergeTree keyed on `key`, so re-inserting
+   * the same row on every re-seed is safe (idempotent).
+   */
+  private async ensureSetupComplete(): Promise<void> {
+    await this.clickhouse.insertSystem('system_settings', [
+      {
+        key: 'setup_completed',
+        value: 'true',
+        updated_at: toClickHouseDateTime(),
+      },
+    ]);
+    this.logger.log('Marked setup_completed=true for demo instance');
   }
 
   private async insertEventsBatched(

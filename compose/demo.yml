@@ -1,0 +1,121 @@
+# ============================================================================
+# compose/demo.yml — Public demo instance (demo-analytics.veridian.site)
+# ============================================================================
+#
+# Self-contained stack for the PUBLIC Veridian Analytics demo. Unlike
+# base.yml + staging.yml, the demo deliberately ships ONLY:
+#   - clickhouse : a DEDICATED OLAP store (never shared with prod/staging —
+#                  the demo re-seeds destructively every night)
+#   - engine     : the NestJS console with IS_DEMO=true
+#
+# It does NOT ship the Veridian bridge nor postgres-bridge: the bridge is the
+# Hub-facing provisioning layer and has no business being public (ticket E1
+# §6). The demo only serves the read-only console + the public demo API.
+#
+# Deployment target: Dokploy prod (isolated compose) so the demo stays up
+# even if the dev-pub staging host is down.
+#
+# Standalone — used alone, NOT combined with base.yml:
+#   docker compose -f compose/demo.yml up -d
+#
+# Required env (Dokploy ENV panel, see docs/DEMO-PUBLIC.md):
+#   ENGINE_IMAGE_TAG     = staging-<sha7> or veridian-latest
+#   CLICKHOUSE_PASSWORD  = dedicated demo ClickHouse password
+#   ENCRYPTION_KEY       = 32+ chars, openssl rand -hex 32 (demo-only key)
+#   DEMO_SECRET          = 32-byte hex, openssl rand -hex 32
+#                          (~/credentials/.all-creds.env -> DEMO_SECRET_ANALYTICS)
+# ============================================================================
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: analytics-demo-clickhouse
+    pull_policy: always
+    restart: unless-stopped
+    environment:
+      TZ: UTC
+      CLICKHOUSE_DB: staminads_system
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?CLICKHOUSE_PASSWORD requis}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    volumes:
+      - clickhouse-demo-data:/var/lib/clickhouse
+      - ../clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro
+    networks:
+      - demo-internal
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    # Demo data is regenerated nightly by the re-seed cron — no backup needed.
+    mem_limit: 2g
+    cpus: 1
+
+  engine:
+    image: ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_IMAGE_TAG:-veridian-latest}
+    container_name: analytics-demo
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      TZ: UTC
+      PORT: "3000"
+      JWT_EXPIRES_IN: 7d
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY requis (32+ chars)}
+      APP_URL: https://demo-analytics.veridian.site
+      CORS_ALLOWED_ORIGINS: https://demo-analytics.veridian.site
+      CLICKHOUSE_HOST: http://clickhouse:8123
+      CLICKHOUSE_SYSTEM_DATABASE: staminads_system
+      CLICKHOUSE_DATABASE: staminads
+      CLICKHOUSE_USER: default
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      # Demo mode: blocks all write endpoints (DemoRestrictedGuard), enables
+      # the anonymous /api/demo.login auto-login and Veridian branding.
+      IS_DEMO: "true"
+      # Secret guarding POST /api/demo.generate + /api/demo.delete (re-seed).
+      DEMO_SECRET: ${DEMO_SECRET:?DEMO_SECRET requis (openssl rand -hex 32)}
+    networks:
+      - dokploy-network
+      - demo-internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    mem_limit: 2g
+    cpus: 1
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.analytics-demo.rule=Host(`demo-analytics.veridian.site`)
+      - traefik.http.routers.analytics-demo.entrypoints=websecure
+      - traefik.http.routers.analytics-demo.tls=true
+      - traefik.http.routers.analytics-demo.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-demo.loadbalancer.server.port=3000
+      # HTTP -> HTTPS redirect (defense in depth; Dokploy Traefik also does it).
+      - traefik.http.routers.analytics-demo-http.rule=Host(`demo-analytics.veridian.site`)
+      - traefik.http.routers.analytics-demo-http.entrypoints=web
+      - traefik.http.routers.analytics-demo-http.middlewares=analytics-demo-https
+      - traefik.http.middlewares.analytics-demo-https.redirectscheme.scheme=https
+      # Rate limit: 60 req/min/IP average, burst 120 (anti-scraping, ticket §6).
+      - traefik.http.routers.analytics-demo.middlewares=analytics-demo-ratelimit
+      - traefik.http.middlewares.analytics-demo-ratelimit.ratelimit.average=60
+      - traefik.http.middlewares.analytics-demo-ratelimit.ratelimit.period=1m
+      - traefik.http.middlewares.analytics-demo-ratelimit.ratelimit.burst=120
+
+networks:
+  # Dokploy's shared Traefik network — name it explicitly so the demo joins
+  # the same edge as the other Veridian prod composes.
+  dokploy-network:
+    external: true
+  demo-internal:
+    driver: bridge
+
+volumes:
+  clickhouse-demo-data:
+    name: analytics-demo-clickhouse-data

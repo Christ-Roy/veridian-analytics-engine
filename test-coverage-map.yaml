@@ -374,7 +374,21 @@
     - api/src/demo/fixtures/*.ts
   covered_by:
     - api/test/demo-mode.e2e-spec.ts
-  reason: Mode demo (génération de fake data).
+    - api/src/demo/demo.controller.spec.ts
+  reason: |
+    Mode demo (génération de fake data + public demo instance E1).
+    demo-mode.e2e-spec.ts couvre les endpoints publics (public-config,
+    health, demo.login) contre une vraie ClickHouse ; demo.controller.spec.ts
+    couvre la logique unitaire (mint JWT, 403/503).
+
+- sources:
+    - api/src/health/health.controller.ts
+  covered_by:
+    - api/src/health/health.controller.spec.ts
+  reason: |
+    Liveness probe /api/health (ticket E1). Endpoint trivial : un spec
+    unitaire valide le contrat 200/ok et la propagation d'erreur ClickHouse.
+    Aussi smoke-testé en CI etage 3 (curl /api/health).
 
 # ─── INFRA / COMPOSE / CI ──────────────────────────────────────────────
 

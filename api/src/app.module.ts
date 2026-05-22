@@ -18,6 +18,7 @@ import { DemoModule } from './demo/demo.module';
 import { EventsModule } from './events/events.module';
 import { ExportModule } from './export/export.module';
 import { FiltersModule } from './filters/filters.module';
+import { HealthModule } from './health/health.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { MailModule } from './mail/mail.module';
 import { MembersModule } from './members/members.module';
@@ -86,6 +87,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     FiltersModule,
     ToolsModule,
     DemoModule,
+    HealthModule,
     EventsModule,
     ExportModule,
     AnalyticsModule,

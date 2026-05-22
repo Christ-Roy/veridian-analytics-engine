@@ -25,7 +25,7 @@ export const Route = createFileRoute('/login')({
 
 function LoginPage() {
   const { message } = App.useApp()
-  const { login } = useAuth()
+  const { login, isDemo } = useAuth()
   const navigate = useNavigate()
   const [form] = Form.useForm()
   const { email, password, redirect: redirectTo } = Route.useSearch()
@@ -69,7 +69,11 @@ function LoginPage() {
       }}
     >
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-sm">
-        <img src="/logo.svg" alt="Staminads" className="h-8 mx-auto mb-8" />
+        <img
+          src={isDemo ? '/veridian-logo.svg' : '/logo.svg'}
+          alt={isDemo ? 'Veridian Analytics' : 'Staminads'}
+          className="h-9 mx-auto mb-8"
+        />
         <Form form={form} onFinish={onFinish} layout="vertical">
           <Form.Item
             name="email"

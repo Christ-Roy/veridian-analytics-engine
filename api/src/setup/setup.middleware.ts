@@ -19,6 +19,16 @@ export class SetupMiddleware implements NestMiddleware {
       return next();
     }
 
+    // Allow public runtime config + demo bootstrap endpoints.
+    // - /api/public-config: the SPA polls this on boot to detect demo mode;
+    //   it must answer even before the demo data is seeded.
+    // - /api/demo.login: the public demo auto-login. It has its own 503
+    //   handling when the demo data is not seeded yet, so it must reach the
+    //   controller instead of being short-circuited here.
+    if (req.path === '/api/public-config' || req.path === '/api/demo.login') {
+      return next();
+    }
+
     // Allow static files (console frontend) - anything not starting with /api
     if (!path.startsWith('/api')) {
       return next();

@@ -1,9 +1,13 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import { ConfigProvider, Result, Button } from 'antd'
 import type { RouterContext } from '../router'
+import { DemoBanner } from '../veridian/demo-banner'
+import { DemoFooter } from '../veridian/demo-footer'
 
-export const Route = createRootRouteWithContext<RouterContext>()({
-  component: () => (
+function RootLayout() {
+  // DemoBanner / DemoFooter render nothing unless IS_DEMO=true (gated on
+  // publicConfig from AuthContext), so the internal console is unaffected.
+  return (
     <ConfigProvider
       theme={{
         token: {
@@ -11,9 +15,19 @@ export const Route = createRootRouteWithContext<RouterContext>()({
         },
       }}
     >
-      <Outlet />
+      <div className="flex min-h-screen flex-col">
+        <DemoBanner />
+        <div className="flex-1">
+          <Outlet />
+        </div>
+        <DemoFooter />
+      </div>
     </ConfigProvider>
-  ),
+  )
+}
+
+export const Route = createRootRouteWithContext<RouterContext>()({
+  component: RootLayout,
   errorComponent: ({ error }) => (
     <ConfigProvider>
       <div className="min-h-screen flex items-center justify-center bg-gray-50">

@@ -410,4 +410,84 @@ describe('Demo Mode Restrictions', () => {
       expect(response.body.message).toBe('This feature is disabled in demo');
     });
   });
+
+  describe('Public demo endpoints', () => {
+    it('GET /api/public-config reports is_demo=true', async () => {
+      const response = await request(ctx.app.getHttpServer())
+        .get('/api/public-config')
+        .expect(200);
+
+      expect(response.body.is_demo).toBe(true);
+      expect(response.body.demo_workspace_id).toBe('demo-apple');
+      expect(response.body.contact_email).toContain('@veridian.site');
+    });
+
+    it('GET /api/public-config requires no auth', async () => {
+      // No Authorization header on purpose.
+      await request(ctx.app.getHttpServer())
+        .get('/api/public-config')
+        .expect(200);
+    });
+
+    it('GET /api/health returns 200 with status ok', async () => {
+      const response = await request(ctx.app.getHttpServer())
+        .get('/api/health')
+        .expect(200);
+
+      expect(response.body.status).toBe('ok');
+      expect(response.body.clickhouse).toBe('ok');
+      expect(typeof response.body.version).toBe('string');
+    });
+
+    it('POST /api/demo.login returns 503 when the demo user is not seeded', async () => {
+      // beforeEach truncates the users table, so no demo@veridian.site exists.
+      await request(ctx.app.getHttpServer())
+        .post('/api/demo.login')
+        .expect(503);
+    });
+
+    it('POST /api/demo.login mints a JWT once the demo user exists', async () => {
+      // Seed the demo user the way DemoService.ensureDemoUser would.
+      const demoUserId = 'demo-user-e2e';
+      await ctx.systemClient.insert({
+        table: 'users',
+        values: [
+          {
+            id: demoUserId,
+            email: 'demo@veridian.site',
+            password_hash: 'x'.repeat(60),
+            name: 'Visiteur Démo',
+            type: 'user',
+            status: 'active',
+            is_super_admin: 0,
+            last_login_at: null,
+            failed_login_attempts: 0,
+            locked_until: null,
+            password_changed_at: toClickHouseDateTime(),
+            deleted_at: null,
+            deleted_by: null,
+            created_at: toClickHouseDateTime(),
+            updated_at: toClickHouseDateTime(),
+          },
+        ],
+        format: 'JSONEachRow',
+      });
+      await waitForClickHouse();
+
+      const response = await request(ctx.app.getHttpServer())
+        .post('/api/demo.login')
+        .expect(200);
+
+      expect(response.body.access_token).toBeTruthy();
+      expect(response.body.user.email).toBe('demo@veridian.site');
+      expect(response.body.user.is_super_admin).toBe(false);
+
+      // The minted token must be accepted by the JWT-protected auth.me route.
+      const me = await request(ctx.app.getHttpServer())
+        .get('/api/auth.me')
+        .set('Authorization', `Bearer ${response.body.access_token}`)
+        .expect(200);
+      expect(me.body.email).toBe('demo@veridian.site');
+    });
+  });
 });

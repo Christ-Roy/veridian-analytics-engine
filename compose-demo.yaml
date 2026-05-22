@@ -1,3 +1,11 @@
+# ============================================================================
+# compose-demo.yaml — LOCAL demo (builds from source).
+#
+# For running the demo on your own machine: `docker compose -f compose-demo.yaml up`.
+# The PROD public demo (demo-analytics.veridian.site) uses compose/demo.yml,
+# which pulls a pre-built GHCR image and adds Traefik routing + rate-limiting.
+# See docs/DEMO-PUBLIC.md.
+# ============================================================================
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:latest

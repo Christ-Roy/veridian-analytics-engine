@@ -1,0 +1,16 @@
+# systemd service — one-shot nightly re-seed of the public demo.
+# Install on dev-pub: see scripts/demo/install-reseed-cron.sh
+[Unit]
+Description=Re-seed Veridian Analytics public demo (200k sessions / 90d)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/veridian/demo-reseed.env
+ExecStart=/opt/veridian/analytics-demo/reseed-demo.sh
+# The script is long (5-10 min); give it room before systemd kills it.
+TimeoutStartSec=1800
+# Log to the journal so `journalctl -u reseed-demo` shows the run result.
+StandardOutput=journal
+StandardError=journal

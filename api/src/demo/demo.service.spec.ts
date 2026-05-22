@@ -96,7 +96,7 @@ describe('DemoService', () => {
         expect.arrayContaining([
           expect.objectContaining({
             id: 'demo-apple',
-            name: 'Apple Demo',
+            name: 'Veridian Analytics Demo',
           }),
         ]),
       );
@@ -183,7 +183,7 @@ describe('DemoService', () => {
       const result = await service.generate();
 
       expect(result.workspace_id).toBe('demo-apple');
-      expect(result.workspace_name).toBe('Apple Demo');
+      expect(result.workspace_name).toBe('Veridian Analytics Demo');
       expect(result.events_count).toBe(20);
       expect(result.sessions_count).toBe(10);
       expect(result.generation_time_seconds).toBeGreaterThanOrEqual(0);

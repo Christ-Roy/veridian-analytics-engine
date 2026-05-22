@@ -10,7 +10,7 @@ export const Route = createFileRoute('/_authenticated/workspaces/')({
 })
 
 function WorkspacesPage() {
-  const { user } = useAuth()
+  const { user, isDemo } = useAuth()
   const { data: workspaces = [], isLoading } = useQuery(workspacesQueryOptions)
 
   return (
@@ -21,8 +21,14 @@ function WorkspacesPage() {
       }}
     >
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-sm">
-        <img src="/logo.svg" alt="Staminads" className="h-8 mx-auto mb-6" />
-        <h2 className="text-center text-gray-600 mb-6">Select a workspace</h2>
+        <img
+          src={isDemo ? '/veridian-logo.svg' : '/logo.svg'}
+          alt={isDemo ? 'Veridian Analytics' : 'Staminads'}
+          className="h-9 mx-auto mb-6"
+        />
+        <h2 className="text-center text-gray-600 mb-6">
+          {isDemo ? 'Ouvrir la démo' : 'Select a workspace'}
+        </h2>
 
         {isLoading ? (
           <div className="flex justify-center py-8">

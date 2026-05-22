@@ -1,0 +1,14 @@
+# systemd timer — fires reseed-demo.service daily at 03:00 UTC.
+# Install on dev-pub: see scripts/demo/install-reseed-cron.sh
+[Unit]
+Description=Daily 03:00 UTC re-seed of the Veridian Analytics public demo
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+# If dev-pub was off at 03:00, run as soon as it comes back up.
+Persistent=true
+# Small random spread to avoid a thundering herd with other 03:00 jobs.
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

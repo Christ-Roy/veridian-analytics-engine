@@ -1,0 +1,15 @@
+# Veridian Analytics — public demo (demo-analytics.veridian.site)
+#
+# The landing page is indexable so the demo is discoverable, but the
+# workspace dashboards expose generated/fictional dates we don't want
+# polluting search results. The internal/staging consoles are behind auth
+# and Tailscale respectively, so this file is harmless there.
+
+User-agent: *
+Allow: /$
+Disallow: /workspaces
+Disallow: /api/
+Disallow: /login
+Disallow: /setup
+
+Sitemap: https://demo-analytics.veridian.site/sitemap.xml
