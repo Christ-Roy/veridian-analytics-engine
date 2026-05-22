@@ -59,6 +59,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Login GHCR — REQUIS car nos images bridge/engine sont en visibility
+      # "private" par défaut. Sans ce login, l'action trivy-action ne peut
+      # pas pull l'image et échoue avec `UNAUTHORIZED: authentication
+      # required` (cf. incident prod-ci 2026-05-22, run 26315245895).
+      #
+      # GITHUB_TOKEN suffit côté lecture (permissions.packages = read posé
+      # plus haut).
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # exit-code piloté par `continue-on-error` de l'appelant :
       #  - warn-only → exit-code 0 (scan informatif, jamais de job rouge)
       #  - bloquant  → exit-code 1 (CVE CRITICAL/HIGH fait échouer le job)
