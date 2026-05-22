@@ -25,7 +25,18 @@ export class SetupMiddleware implements NestMiddleware {
     // - /api/demo.login: the public demo auto-login. It has its own 503
     //   handling when the demo data is not seeded yet, so it must reach the
     //   controller instead of being short-circuited here.
-    if (req.path === '/api/public-config' || req.path === '/api/demo.login') {
+    // - /api/demo.generate + /api/demo.delete: the demo seed/re-seed
+    //   endpoints. They MUST bypass this middleware — `demo.generate` is the
+    //   very call that completes setup (creates the demo user + workspace),
+    //   so blocking it on "setup not complete" is a chicken-and-egg deadlock.
+    //   Both stay protected by `DemoSecretGuard` (timing-safe `?secret=`),
+    //   which runs after this middleware, so bypassing setup is safe.
+    if (
+      req.path === '/api/public-config' ||
+      req.path === '/api/demo.login' ||
+      req.path === '/api/demo.generate' ||
+      req.path === '/api/demo.delete'
+    ) {
       return next();
     }
 

@@ -93,6 +93,34 @@ describe('Setup Middleware', () => {
         message: 'Initial setup has not been completed',
       });
     });
+
+    // Demo bootstrap endpoints MUST bypass the setup gate: demo.generate is
+    // the very call that completes setup on a fresh public demo instance.
+    // Blocking it on "setup not complete" deadlocks the demo (E1/U7).
+    it('does NOT block /api/demo.generate with 503 (setup deadlock guard)', async () => {
+      const response = await request(ctx.app.getHttpServer()).post(
+        '/api/demo.generate',
+      );
+
+      // Reaches the controller / DemoSecretGuard instead of the 503 gate.
+      expect(response.status).not.toBe(503);
+      expect(response.body).not.toEqual({
+        error: 'setup_required',
+        message: 'Initial setup has not been completed',
+      });
+    });
+
+    it('does NOT block /api/demo.delete with 503 (setup deadlock guard)', async () => {
+      const response = await request(ctx.app.getHttpServer()).post(
+        '/api/demo.delete',
+      );
+
+      expect(response.status).not.toBe(503);
+      expect(response.body).not.toEqual({
+        error: 'setup_required',
+        message: 'Initial setup has not been completed',
+      });
+    });
   });
 
   describe('when setup is complete', () => {
