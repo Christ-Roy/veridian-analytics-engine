@@ -49,6 +49,10 @@ jobs:
   trivy-fs:
     name: Trivy FS (vuln+config+secret)
     runs-on: ubuntu-latest
+    # continue-on-error au niveau JOB : un step ne peut pas référencer
+    # un input de workflow_call dans son `continue-on-error` (résolu trop
+    # tôt au parsing → "Unexpected value ''"). Au niveau job, c'est valide.
+    continue-on-error: ${{ inputs.continue-on-error }}
     permissions:
       contents: read
       security-events: write
@@ -57,7 +61,6 @@ jobs:
 
       - name: Run Trivy filesystem scan
         uses: aquasecurity/trivy-action@v0.36.0
-        continue-on-error: ${{ inputs.continue-on-error }}
         with:
           scan-type: 'fs'
           scan-ref: ${{ inputs.scan-path }}
