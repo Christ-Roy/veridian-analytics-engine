@@ -446,7 +446,11 @@ jobs:
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 18 min : `compose pull` de 4 images sur le dev-pub (7.6 Go RAM) + up
+    # des containers + smoke polling (jusqu'à 30×10s engine + 12×10s bridge)
+    # dépassait régulièrement l'ancien cap de 10 min → job tué pendant le
+    # smoke alors que le deploy lui-même était OK. Marge confortable ici.
+    timeout-minutes: 18
     environment:
       name: staging
       url: https://analytics-engine.staging.veridian.site
