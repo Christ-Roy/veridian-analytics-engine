@@ -94,6 +94,13 @@ jobs:
           # Postgres bridge (A4) : ${VAR:?} dans postgres-bridge
           BRIDGE_DB_USER: ci-bridge-user
           BRIDGE_DB_PASSWORD: ci-bridge-password
+          # HMAC Hub↔bridge : ${VAR:?} dans compose/base.yml.
+          HUB_HMAC_SECRET: ci-hub-hmac-secret-32-chars-minimum
+          # Clés VAPID Web Push (B2) : ${VAR:?} dans compose/base.yml.
+          # Placeholders — c'est un `config -q`, pas un run réel.
+          VAPID_PUBLIC_KEY: ci-vapid-public-key-placeholder
+          VAPID_PRIVATE_KEY: ci-vapid-private-key-placeholder
+          VAPID_SUBJECT: mailto:ci@veridian.site
         run: |
           docker compose -f compose/base.yml -f compose/staging.yml config -q
           echo "compose: ✓"
