@@ -559,6 +559,21 @@
     endpoint + navigate onComplete) couvert indirectement.
 
 - sources:
+    - console/src/veridian/pages/settings.tsx
+    - console/src/veridian/pages/settings-helpers.ts
+    - console/src/veridian/api.ts
+  covered_by:
+    - console/src/veridian/pages/__tests__/settings.test.tsx
+  reason: |
+    Page Settings Veridian self-service (ticket U8 — giga-sprint 2026-05-22).
+    5 sections : Compte, Site & tracking, GSC, VoIP, Notifications. Tests
+    Vitest + React Testing Library — loading/error/success, sections rendues,
+    siteKey copiable, GSC connecté/déconnecté, credentials VoIP masqués
+    (jamais en clair), formulaire d'ajout, toggles notifications déclenchant
+    PUT /settings. `api.ts` étendu (requestJson PUT/POST/DELETE + clients
+    settings/credentials) — couvert par ce test + dashboard.test.tsx.
+
+- sources:
     - console/public/sw.js
     - console/public/pwa-install.js
   covered_by:
@@ -618,6 +633,51 @@
       siteUrl) ; FK P2003.
     Suite SÉRIALISÉE (`--test-concurrency=1`) + fichiers auto-isolants
     (Tenant à id unique, assertions scopées) → déterministe.
+
+# ─── Settings + credentials self-service (U8) ──────────────────────────
+
+- sources:
+    - veridian-bridge/src/credentials/index.ts
+    - veridian-bridge/src/credentials/crypto.ts
+    - veridian-bridge/src/credentials/providers.ts
+    - veridian-bridge/src/credentials/store.ts
+    - veridian-bridge/src/settings/index.ts
+    - veridian-bridge/src/settings/store.ts
+    - veridian-bridge/src/settings/routes.ts
+  covered_by:
+    - veridian-bridge/tests/credentials-crypto.test.ts
+    - veridian-bridge/tests/credentials-providers.test.ts
+    - veridian-bridge/tests/credentials-store.test.ts
+    - veridian-bridge/tests/settings-store.test.ts
+    - veridian-bridge/tests/settings-routes.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/settings/settings-credentials.integration.test.ts
+  reason: |
+    Page Settings tenant + credentials self-service (ticket U8 — giga-sprint
+    2026-05-22). Le tenant gère SA config (GSC, VoIP, notifications) sans
+    passer par Robert.
+    - crypto.ts : chiffrement AES-256-GCM générique (même format que les
+      tokens GSC, clé partagée TOKEN_ENCRYPTION_KEY).
+    - providers.ts : registry VoIP (OVH Telephony, Telnyx) — validation Zod,
+      masquage des secrets, test de connexion contre l'API du provider.
+    - store.ts (credentials) : CRUD TenantCredential — chiffre avant write,
+      ne renvoie QUE des vues masquées (jamais de clear-text).
+    - store.ts (settings) : agrège la vue config tenant + upsert prefs.
+    - routes.ts : 6 endpoints HTTP admin Bearer (GET/PUT settings,
+      GET/POST credentials, POST .../test, DELETE credentials).
+
+    Tests UNITAIRES (covered_by) : 69 cas contre FakePrismaClient — crypto
+    round-trip + tamper, validation/masquage/testConnection des providers,
+    CRUD credentials, agrégation settings, routes Express (auth, 400/404,
+    non-fuite des secrets dans les réponses HTTP).
+
+    Tests d'INTÉGRATION RÉELS (integration_covered_by) : 1 fichier qui tape
+    un VRAI Postgres via `bootBridgeWithRealDB()`. Ce que les fakes ne
+    prouvent PAS : la migration `add_tenant_credentials_settings` s'applique
+    réellement ; le blob chiffré est écrit dans une vraie colonne JSONB et
+    aucun secret n'apparaît en clair (lecture SQL brute) ; contrainte
+    @@unique (tenantId, kind) → upsert pas doublon ; cascade FK (suppression
+    Tenant emporte TenantCredential + TenantSettings) ; upsert TenantSettings.
 
 - sources:
     - veridian-bridge/src/db/prisma.ts

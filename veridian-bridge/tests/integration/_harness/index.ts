@@ -73,6 +73,7 @@ import { createApp, type BridgeConfig } from "../../../src/app.js";
 import { registerGscRoutes } from "../../../src/gsc/routes.js";
 import { registerFormsRoutes } from "../../../src/forms/routes.js";
 import { registerPushRoutes } from "../../../src/push/routes.js";
+import { registerSettingsRoutes } from "../../../src/settings/routes.js";
 import { setPrismaClientForTests } from "../../../src/db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 import { PrismaTenantStore, ensureOwnerTable } from "./prisma-tenant-store.js";
@@ -321,6 +322,12 @@ export async function bootBridgeWithRealDB(
 
   registerPushRoutes(app, { prisma, requireAdmin });
 
+  registerSettingsRoutes(app, {
+    prisma,
+    requireAdmin,
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
   // 7. Listen sur port éphémère.
   const { url, closeServer } = await listen(app);
 
@@ -397,6 +404,8 @@ export async function bootBridgeWithRealStaminads(
  */
 const APP_TABLES = [
   "TenantOwner",
+  "TenantCredential",
+  "TenantSettings",
   "PushNotification",
   "PushSubscription",
   "LeadSession",

@@ -109,9 +109,16 @@ function adminKey(): string {
   return env?.VITE_VERIDIAN_ADMIN_KEY ?? '';
 }
 
-async function fetchJson<T>(
+type HttpMethod = 'GET' | 'PUT' | 'POST' | 'DELETE';
+
+async function requestJson<T>(
   endpoint: string,
-  opts: { requireAdmin?: boolean; signal?: AbortSignal } = {},
+  opts: {
+    method?: HttpMethod;
+    requireAdmin?: boolean;
+    signal?: AbortSignal;
+    body?: unknown;
+  } = {},
 ): Promise<T> {
   const url = `${bridgeBase()}${endpoint}`;
   const headers: Record<string, string> = {
@@ -121,12 +128,16 @@ async function fetchJson<T>(
     const key = adminKey();
     if (key) headers.Authorization = `Bearer ${key}`;
   }
+  if (opts.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
 
   const res = await fetch(url, {
-    method: 'GET',
+    method: opts.method ?? 'GET',
     headers,
     credentials: 'same-origin',
     signal: opts.signal,
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
   });
 
   if (!res.ok) {
@@ -145,7 +156,17 @@ async function fetchJson<T>(
     );
   }
 
+  // 204 No Content ou body vide → renvoie un objet vide typé.
+  if (res.status === 204) return {} as T;
   return (await res.json()) as T;
+}
+
+/** Conservé pour compat — wrapper GET sur `requestJson`. */
+async function fetchJson<T>(
+  endpoint: string,
+  opts: { requireAdmin?: boolean; signal?: AbortSignal } = {},
+): Promise<T> {
+  return requestJson<T>(endpoint, { method: 'GET', ...opts });
 }
 
 // ─── Endpoints ───────────────────────────────────────────────────────────
@@ -213,4 +234,125 @@ export async function fetchDashboard(
     fetchShadowMarketing(opts),
   ]);
   return { score, status, shadow };
+}
+
+// ─── Settings + credentials (U8) ──────────────────────────────────────────
+//
+// Miroir des handlers `veridian-bridge/src/settings/routes.ts`.
+// Les creds VoIP ne sont JAMAIS renvoyés en clair — `masked` ne contient que
+// des valeurs `••••1234`.
+
+/** Kinds de credential VoIP supportés (cf credentials/providers.ts). */
+export type CredentialKind = 'voip_ovh' | 'voip_telnyx';
+
+export interface CredentialView {
+  kind: CredentialKind;
+  label: string;
+  status: 'untested' | 'ok' | 'failed' | string;
+  masked: Record<string, string>;
+  lastSyncAt: string | null;
+  lastTestedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantSettingsResponse {
+  tenant: {
+    id: string;
+    workspaceId: string;
+    slug: string;
+    name: string;
+    plan: string;
+    status: string;
+  };
+  sites: Array<{
+    id: string;
+    domain: string;
+    name: string;
+    siteKey: string;
+    createdAt: string;
+  }>;
+  gsc: {
+    connected: boolean;
+    propertyUrl: string | null;
+    ownershipState: string | null;
+    lastSyncAt: string | null;
+  };
+  credentials: CredentialView[];
+  notifications: {
+    notifyNewLead: boolean;
+    notifyWeeklyReport: boolean;
+    notifyEmail: string | null;
+    pushAdminEnabled: boolean;
+  };
+  tracking: {
+    visitorIdEnabled: boolean;
+    cookieConsentEnabled: boolean;
+  };
+}
+
+/** Patch partiel — seuls les champs fournis sont écrits. */
+export interface SettingsUpdatePayload {
+  notifyNewLead?: boolean;
+  notifyWeeklyReport?: boolean;
+  notifyEmail?: string | null;
+  pushAdminEnabled?: boolean;
+  visitorIdEnabled?: boolean;
+  cookieConsentEnabled?: boolean;
+}
+
+export function fetchTenantSettings(
+  workspaceId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<TenantSettingsResponse> {
+  return requestJson<TenantSettingsResponse>(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/settings`,
+    { method: 'GET', requireAdmin: true, signal: opts.signal },
+  );
+}
+
+export function updateTenantSettings(
+  workspaceId: string,
+  patch: SettingsUpdatePayload,
+): Promise<TenantSettingsResponse> {
+  return requestJson<TenantSettingsResponse>(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/settings`,
+    { method: 'PUT', requireAdmin: true, body: patch },
+  );
+}
+
+export function saveCredential(
+  workspaceId: string,
+  kind: CredentialKind,
+  creds: Record<string, unknown>,
+): Promise<{ ok: true; credential: CredentialView }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/credentials`,
+    { method: 'POST', requireAdmin: true, body: { kind, creds } },
+  );
+}
+
+export function testCredential(
+  workspaceId: string,
+  kind: CredentialKind,
+): Promise<{ ok: boolean; message: string; status: string }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(
+      workspaceId,
+    )}/credentials/${encodeURIComponent(kind)}/test`,
+    { method: 'POST', requireAdmin: true },
+  );
+}
+
+export function deleteCredential(
+  workspaceId: string,
+  kind: CredentialKind,
+): Promise<{ ok: true; deleted: boolean }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(
+      workspaceId,
+    )}/credentials/${encodeURIComponent(kind)}`,
+    { method: 'DELETE', requireAdmin: true },
+  );
 }

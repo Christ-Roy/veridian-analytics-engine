@@ -55,9 +55,80 @@ model Tenant {
   sites             Site[]
   pushSubscriptions PushSubscription[]
   pushNotifications PushNotification[]
+  credentials       TenantCredential[]
+  settings          TenantSettings?
 
   @@index([status])
   @@index([hubTenantId])
+}
+
+// ─── TenantCredential (U8) ─────────────────────────────────────────────────
+//
+// Credentials self-service que le tenant saisit lui-même via la page
+// /settings de la console — provider VoIP (OVH Telephony, Telnyx, ...) pour
+// que le bridge pull les call logs (`sipCall` legacy) via un cron (ticket
+// B-VOIP séparé).
+//
+// `kind` identifie le type de credential : "voip_ovh" | "voip_telnyx" | ...
+// (extensible). Contrainte `@@unique([tenantId, kind])` : un seul credential
+// par couple (tenant, provider).
+//
+// `encryptedData` (Json) contient les creds chiffrés AES-256-GCM, MÊME format
+// que `GscProperty.oauthAccount` (cf src/credentials/crypto.ts) :
+//   { v: 1, iv: "<hex>", tag: "<hex>", ciphertext: "<hex>" }
+// Le clear-text déchiffré est un objet provider-specific :
+//   - voip_ovh    : { applicationKey, applicationSecret, consumerKey }
+//   - voip_telnyx : { apiKey }
+// JAMAIS de clear text en DB. L'API ne renvoie JAMAIS les creds déchiffrés —
+// uniquement une vue masquée (`••••1234`).
+//
+// `status`     : "untested" (saisi, pas encore testé) | "ok" | "failed"
+// `lastSyncAt` : dernier pull de logs VoIP réussi (rempli par le cron B-VOIP)
+
+model TenantCredential {
+  id            String    @id @default(cuid())
+  tenantId      String
+  kind          String    // 'voip_ovh' | 'voip_telnyx' | ...
+  encryptedData Json      // creds chiffrés AES-256-GCM
+  status        String    @default("untested") // untested | ok | failed
+  lastSyncAt    DateTime?
+  lastTestedAt  DateTime?
+  lastError     String?   // dernier message d'erreur de "test connexion"
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind])
+  @@index([tenantId])
+}
+
+// ─── TenantSettings (U8) ───────────────────────────────────────────────────
+//
+// Préférences self-service d'un Tenant éditées via la page /settings :
+// notifications email, préférences push admin, toggles tracking (visitor_id,
+// cookie consent). 1:1 avec Tenant (relation optionnelle — créée à la
+// première écriture via upsert).
+//
+// Le domaine / siteKey du site ne vivent PAS ici : ils sont sur `Site`.
+// Cette table ne porte QUE des préférences scalaires côté tenant.
+
+model TenantSettings {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  // Notifications
+  notifyNewLead       Boolean  @default(true)
+  notifyWeeklyReport  Boolean  @default(true)
+  notifyEmail         String?  // email destinataire des notifs (override compte)
+  pushAdminEnabled    Boolean  @default(true)
+  // Tracking
+  visitorIdEnabled    Boolean  @default(true)
+  cookieConsentEnabled Boolean @default(false)
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 // ─── GscProperty ──────────────────────────────────────────────────────────

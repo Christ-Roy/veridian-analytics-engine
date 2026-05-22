@@ -18,6 +18,11 @@ import {
   readVapidConfigFromEnv,
   PushConfigError,
 } from "./push/index.js";
+import { registerSettingsRoutes } from "./settings/index.js";
+import {
+  readEncryptionKeyFromEnv,
+  CredentialCryptoError,
+} from "./credentials/index.js";
 import { getPrisma } from "./db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 
@@ -191,6 +196,54 @@ try {
   } else {
     console.warn(
       `[bridge] Push init failed (continuing without): ${(err as Error).message}`,
+    );
+  }
+}
+
+// ─── Settings + credentials self-service (U8) — optional ────────────────────
+//
+// Page /settings de la console : config tenant + credentials VoIP chiffrés.
+// Nécessite Postgres (BRIDGE_DATABASE_URL) + clé de chiffrement
+// (TOKEN_ENCRYPTION_KEY, partagée avec GSC).
+try {
+  if (!process.env.BRIDGE_DATABASE_URL) {
+    throw new CredentialCryptoError(
+      "BRIDGE_DATABASE_URL missing — Settings feature disabled",
+    );
+  }
+  const encryptionKey = readEncryptionKeyFromEnv();
+  const prisma = getPrisma();
+
+  function requireAdminForSettings(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): void {
+    const auth = req.header("authorization");
+    if (!auth?.startsWith("Bearer ")) {
+      res.status(401).json({ error: "missing_bearer" });
+      return;
+    }
+    const token = auth.slice("Bearer ".length).trim();
+    if (token !== cfg.veridianAdminApiKey) {
+      res.status(403).json({ error: "invalid_admin_key" });
+      return;
+    }
+    next();
+  }
+
+  registerSettingsRoutes(app, {
+    prisma,
+    requireAdmin: requireAdminForSettings,
+    encryptionKey,
+  });
+  console.log("[bridge] Settings routes registered");
+} catch (err) {
+  if (err instanceof CredentialCryptoError) {
+    console.warn(`[bridge] Settings disabled: ${err.message}`);
+  } else {
+    console.warn(
+      `[bridge] Settings init failed (continuing without): ${(err as Error).message}`,
     );
   }
 }
