@@ -377,6 +377,7 @@ jobs:
           STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
+          BRIDGE_DB_PASSWORD: ${{ secrets.BRIDGE_DB_PASSWORD_STAGING }}
         run: |
           ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
             "cat > /opt/staging/analytics-engine/.env <<ENV
@@ -388,6 +389,9 @@ jobs:
           STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
           VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
           HUB_HMAC_SECRET=${HUB_HMAC_SECRET}
+          BRIDGE_DB_USER=bridge
+          BRIDGE_DB_PASSWORD=${BRIDGE_DB_PASSWORD}
+          BRIDGE_DB_NAME=veridian_bridge
           ENV
           chmod 600 /opt/staging/analytics-engine/.env"
 

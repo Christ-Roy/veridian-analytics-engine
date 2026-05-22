@@ -52,10 +52,6 @@ jobs:
   trivy:
     name: Trivy scan (CRIT/HIGH ${{ inputs.continue-on-error && 'warn' || 'bloquant' }})
     runs-on: ubuntu-latest
-    # continue-on-error au niveau JOB : un step ne peut pas référencer
-    # un input de workflow_call dans son `continue-on-error` (résolu trop
-    # tôt au parsing → "Unexpected value ''"). Au niveau job, c'est valide.
-    continue-on-error: ${{ inputs.continue-on-error }}
     permissions:
       contents: read
       security-events: write
@@ -63,12 +59,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # exit-code piloté par `continue-on-error` de l'appelant :
+      #  - warn-only → exit-code 0 (scan informatif, jamais de job rouge)
+      #  - bloquant  → exit-code 1 (CVE CRITICAL/HIGH fait échouer le job)
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ inputs.image-ref }}
           severity: ${{ inputs.severity }}
-          exit-code: '1'
+          exit-code: ${{ inputs.continue-on-error && '0' || '1' }}
           ignore-unfixed: ${{ inputs.ignore-unfixed }}
           format: 'table'
           vuln-type: 'os,library'
