@@ -530,12 +530,29 @@
     - veridian-bridge/tests/gsc-query-parsing.test.ts
     - veridian-bridge/tests/push/subscribe.test.ts
     - veridian-bridge/tests/push/send-notification.test.ts
+    - veridian-bridge/tests/integration/_harness/smoke.integration.test.ts
   reason: |
     Schema Prisma (Tenant, GscProperty, GscDaily, PushSubscription,
-    PushNotification). Toutes les contraintes (unique, default, types)
-    sont reflétées dans le FakePrismaClient in-memory utilisé par les
-    tests. `prisma migrate deploy` au boot du container valide le schéma
-    vs DB réelle en environnements live.
+    PushNotification). Les tests unitaires reflètent les contraintes dans
+    le FakePrismaClient in-memory. Le test d'INTÉGRATION smoke valide les
+    contraintes RÉELLES contre Postgres : @@unique → P2002, onDelete
+    Cascade, defaults. `prisma migrate deploy` au boot du harness valide
+    le schéma vs DB réelle.
+
+# ─── Harness tests d'intégration (T-INTEGRATION-TESTS) ─────────────────
+
+- sources:
+    - veridian-bridge/tests/integration/_harness/index.ts
+    - veridian-bridge/tests/integration/_harness/prisma-tenant-store.ts
+    - veridian-bridge/tests/integration/_harness/signed-fetch.ts
+  covered_by:
+    - veridian-bridge/tests/integration/_harness/smoke.integration.test.ts
+  reason: |
+    Socle des tests d'intégration : bootBridgeWithRealDB / resetDb /
+    seedTenant / seedSite / PrismaTenantStore / signedFetch. Le test
+    smoke.integration prouve que le harness boote un bridge contre un
+    vrai Postgres, applique les migrations et exerce les contraintes SQL.
+    Consommé par T2..T5 (hub / forms / gsc / push / analytics).
 
 # ─── Push Notifications (B2) ───────────────────────────────────────────
 

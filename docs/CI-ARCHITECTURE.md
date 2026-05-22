@@ -204,6 +204,7 @@ Pipeline complet avec deploy + smoke + rollback :
 | 1.c | upstream-sdk-tests (Vitest) | ✅ | ~5min |
 | 1.d | trivy-fs | ⚠ warn-only | ~3min |
 | 1.e | audit-bridge | ✅ | ~3min |
+| 1.f | integration-tests (bridge vs Postgres + ClickHouse réels) | ✅ | ~6min |
 | 2 | build (engine + bridge → GHCR) | ✅ | ~6min |
 | 3 | deploy-staging (SSH dev-pub + compose pull + up) | ✅ | ~3min |
 | 4 | e2e-staging-smoke (Playwright sur URL publique) | ✅ | ~5min |
@@ -269,6 +270,52 @@ sera consolidé dans `staging-deploy.yml:upstream-api-tests`.
 **NON modifié par nous** — workflow upstream staminads qui push l'image
 publique `pierreb/staminads:v*` sur Docker Hub. Plus utilisé côté Veridian
 (on utilise GHCR `christ-roy/veridian-analytics-engine`).
+
+## §3bis. Tests bridge : unitaires (fakes) vs intégration (réels)
+
+Le bridge a **deux niveaux** de tests, complémentaires — on ne supprime PAS
+les fakes, ils restent utiles comme suite rapide.
+
+| | Tests unitaires | Tests d'intégration |
+|---|---|---|
+| Fichiers | `tests/**/*.test.ts` | `tests/integration/**/*.integration.test.ts` |
+| Backing store | `FakePrismaClient` (in-memory) + `fake-staminads` | **vrai** Postgres 16 + ClickHouse 24.8 |
+| Script npm | `test:ci` (TAP) / `test` (spec) | `test:integration` |
+| Où ça tourne | pre-push Husky + étage 1 `quick-checks` | étage 1.f `integration-tests` (services GitHub Actions) |
+| En local | `npm run test:ci` (rien à monter) | `npm run test:integration:local` (gère `compose/test.yml`) |
+| Vitesse | ~9s / 222 tests | ~6min (boot services compris) |
+| Ce que ça prouve | logique métier, validation Zod, branchements | contraintes SQL `@@unique`, erreur `P2002`, cascade FK, `@db.Date`, transactions |
+
+**Pourquoi les deux** : un test `dedup-by-email` vert sur `FakePrismaClient`
+ne garantit RIEN sur le comportement Postgres réel — le fake simule l'unicité
+en JS, il peut diverger du vrai schéma. Les tests d'intégration ferment ce
+trou : « CI verte = testé contre de vrais services ».
+
+### Le harness `tests/integration/_harness/`
+
+Socle partagé (ticket T-INTEGRATION-TESTS). API consommée par les tests :
+
+- `bootBridgeWithRealDB(opts?)` — boote une instance Express du bridge
+  (TOUTES les routes : base + Hub HMAC + GSC + Forms + Push) connectée à un
+  vrai Postgres. Applique `prisma migrate deploy` pour de vrai. Retourne
+  `{ url, prisma, store, close }`.
+- `bootBridgeWithRealStaminads(opts?)` — idem + une staminads (réelle si
+  `STAMINADS_TEST_URL` fourni, sinon faux serveur HTTP). Pour les tests
+  score / tenant-status.
+- `resetDb(prisma)` — `TRUNCATE ... CASCADE` de toutes les tables app entre
+  les tests (isolation). À appeler en `beforeEach`.
+- `seedTenant(prisma, overrides?)` / `seedSite(prisma, tenantId, overrides?)`
+  — créent de vraies rows.
+- `signedFetch(url, method, path, body, opts?)` — requête HTTP signée HMAC
+  (overrides pour simuler replay / tampering).
+
+Coordonnées des services lues via `BRIDGE_TEST_DATABASE_URL` /
+`CLICKHOUSE_TEST_HOST` / `STAMINADS_TEST_URL`. Le harness force ensuite
+`BRIDGE_DATABASE_URL` à la valeur de test.
+
+Convention de nommage stricte : un test d'intégration **doit** finir en
+`.integration.test.ts` — sinon il serait happé par le glob `test:ci` du
+pre-push (rapide, sans Postgres) et planterait.
 
 ## §4. Tests E2E Playwright
 

@@ -8,6 +8,7 @@
 #   1.c upstream-sdk-tests     ~5min  Vitest unit SDK
 #   1.d trivy-fs               ~3min  scan filesystem (vuln+misconfig+secret)
 #   1.e audit-bridge           ~3min  npm audit --omit=dev --audit-level=high
+#   1.f integration-tests      ~6min  tests bridge contre Postgres+ClickHouse réels
 #   2.  build                  ~6min  build engine + bridge → GHCR + Trivy image (bridge bloquant)
 #   3.  deploy-staging         ~3min  SSH dev-pub + compose pull + up + smoke
 #   4.  e2e-staging-smoke      ~5min  Playwright contre URL staging publique
@@ -210,6 +211,74 @@ jobs:
       - name: Tests unitaires SDK (vitest)
         run: npm test
 
+  # ─── Étage 1.f : Tests d'INTÉGRATION bridge (Postgres + ClickHouse réels) ──
+  #
+  # Doublure des chemins critiques du bridge contre de VRAIS services (cf
+  # ticket T-INTEGRATION-TESTS). Les `*.test.ts` tournent contre des fakes
+  # in-memory (rapides, pre-push) ; les `*.integration.test.ts` tournent ICI
+  # contre un vrai Postgres 16 + ClickHouse 24.8 — seul moyen de valider les
+  # contraintes SQL, erreurs P2002, cascades FK, transactions.
+  #
+  # Bloquant. Placé après quick-checks, gate du build (cf `needs:` du job build).
+  # Le pattern `services:` ClickHouse est copié de l'étage 1.b upstream-api-tests.
+  integration-tests:
+    name: Étage 1.f — Tests intégration bridge (services réels)
+    needs: quick-checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16
+        ports:
+          - 5432:5432
+        env:
+          POSTGRES_DB: veridian_bridge_test
+          POSTGRES_USER: bridge_test
+          POSTGRES_PASSWORD: bridge_test_pwd
+        options: >-
+          --health-cmd "pg_isready -U bridge_test -d veridian_bridge_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.8
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_USER: default
+          CLICKHOUSE_PASSWORD: ""
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Coordonnées lues par le harness tests/integration/_harness/index.ts.
+      BRIDGE_TEST_DATABASE_URL: postgresql://bridge_test:bridge_test_pwd@localhost:5432/veridian_bridge_test
+      CLICKHOUSE_TEST_HOST: http://localhost:8123
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: veridian-bridge/package-lock.json
+      - name: Bridge — install
+        working-directory: veridian-bridge
+        run: npm ci --no-audit --no-fund
+      - name: Prisma — generate client + migrate deploy
+        working-directory: veridian-bridge
+        env:
+          BRIDGE_DATABASE_URL: postgresql://bridge_test:bridge_test_pwd@localhost:5432/veridian_bridge_test
+        run: |
+          npx prisma generate --schema=./prisma/schema.prisma
+          npx prisma migrate deploy --schema=./prisma/schema.prisma
+      - name: Tests d'intégration (Postgres + ClickHouse réels)
+        working-directory: veridian-bridge
+        run: npm run test:integration
+
   # ─── Étage 1.d : Trivy FS scan (warn-only, upstream noise) ───────
   trivy-fs:
     name: Étage 1.d — Trivy FS (warn-only)
@@ -238,7 +307,7 @@ jobs:
   # ─── Étage 2 : Build images ───────────────────────────────────────
   build:
     name: Étage 2 — Build images
-    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests, audit-bridge]
+    needs: [quick-checks, upstream-api-tests, upstream-sdk-tests, integration-tests, audit-bridge]
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -404,6 +473,7 @@ jobs:
             # down scopé au project 'analytics-engine-staging' avant le up :
             # dégage les containers du run précédent. Scopé staging — ne
             # touche pas analytics-engine-dev (project name distinct).
+            # Évite le conflit "container name already in use" sur orphelin.
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml down --remove-orphans || true
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml ps
