@@ -539,6 +539,11 @@
     - veridian-bridge/tests/gsc-oauth-flow.test.ts
     - veridian-bridge/tests/gsc-sync.test.ts
     - veridian-bridge/tests/integration/gsc-end-to-end.test.ts
+  integration_covered_by:
+    - veridian-bridge/tests/integration/gsc/oauth-flow.integration.test.ts
+    - veridian-bridge/tests/integration/gsc/sync.integration.test.ts
+    - veridian-bridge/tests/integration/gsc/query.integration.test.ts
+    - veridian-bridge/tests/integration/gsc/cascade.integration.test.ts
   reason: |
     Port de l'intégration GSC depuis veridian-analytics legacy.
     - oauth.ts : chiffrement AES-256-GCM, state HMAC, exchange/refresh tokens
@@ -546,8 +551,30 @@
     - query.ts : DSL dashboard (groupBy, filtres, totals, dashboardSummary)
     - routes.ts : 5 endpoints HTTP (oauth-begin, oauth-callback, sync,
       sync-all, /tenant/:workspaceId/gsc)
-    Tests : 4 fichiers — unitaires (oauth/sync/query) + 1 e2e Express full
-    flow avec FakePrismaClient + mock Google.
+
+    Tests UNITAIRES (covered_by) : 4 fichiers — oauth/sync/query contre
+    FakePrismaClient + 1 e2e Express full flow (mock Google).
+
+    Tests d'INTÉGRATION RÉELS (integration_covered_by — ticket T4) : 4
+    fichiers `*.integration.test.ts` qui tapent un VRAI Postgres via le
+    harness `bootBridgeWithRealDB()` (T1). Ce que les fakes ne pouvaient
+    PAS prouver :
+    - oauth-flow : les tokens OAuth sont RÉELLEMENT chiffrés AES-256-GCM
+      dans `GscProperty.oauthAccount` — lecture SQL brute qui vérifie
+      qu'aucun secret n'est en clair ; state HMAC falsifié rejeté avant
+      écriture ; upsert idempotent (vraie contrainte @@unique).
+    - sync : `syncProperty` upsert RÉELLEMENT en Postgres ; re-sync
+      idempotent garanti par la vraie contrainte @@unique sur les 7
+      dimensions (gscPropertyId,date,query,page,country,device,searchType) ;
+      backoff 429/5xx ; syncAllVerified ne traite que les verified.
+    - query : `queryProperty`/`dashboardSummary` calculent les agrégats
+      (SUM, GROUP BY, ORDER BY, ILIKE, position pondérée) par de VRAIES
+      requêtes SQL `$queryRawUnsafe`, pas par le ré-impl JS du fake.
+    - cascade : suppression Tenant → cascade FK réelle sur GscProperty
+      puis GscDaily ; isolation inter-tenants ; @@unique (tenantId,
+      siteUrl) ; FK P2003.
+    Suite SÉRIALISÉE (`--test-concurrency=1`) + fichiers auto-isolants
+    (Tenant à id unique, assertions scopées) → déterministe.
 
 - sources:
     - veridian-bridge/src/db/prisma.ts
