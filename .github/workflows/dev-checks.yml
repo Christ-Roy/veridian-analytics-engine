@@ -123,6 +123,9 @@ jobs:
           ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
           STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
           VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
+          # Postgres bridge (A4) : ces 2 vars sont en ${VAR:?} dans postgres-bridge
+          BRIDGE_DB_USER: ci-bridge-user
+          BRIDGE_DB_PASSWORD: ci-bridge-password
         run: docker compose -f compose/dev.yml config -q
 
   # ─── Étage D : Trivy FS scan (non bloquant sur dev) ──────────────
