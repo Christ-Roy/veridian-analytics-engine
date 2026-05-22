@@ -5,6 +5,24 @@ import type { DimensionData } from '../types/dashboard'
 const DEFAULT_METRICS = ['sessions', 'median_duration']
 
 /**
+ * Coerce a raw metric value into a number.
+ *
+ * ClickHouse sérialise les agrégats numériques en STRING dans le JSON de
+ * réponse (`count()` → "200000", etc.). Les anciens `(row[metric] as number)`
+ * étaient des assertions TS mensongères : aucune conversion runtime. Une
+ * valeur string atteignait alors `formatValue` → `formatNumber` → `.toFixed`
+ * et plantait le dashboard (`t.toFixed is not a function`).
+ *
+ * - null / undefined → undefined (préserve l'absence de donnée comparée)
+ * - valeur non numérique → 0 (fail-safe, pas de NaN propagé à l'UI)
+ */
+function toMetricNumber(raw: unknown): number | undefined {
+  if (raw === null || raw === undefined) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
  * Transforms an analytics API response to the standard DimensionData format.
  * Handles both comparison and non-comparison responses.
  *
@@ -40,11 +58,13 @@ export function transformToDimensionData(
         dimension_value: dimensionValue ?? '',
       }
 
-      // Dynamically extract each metric and its previous value
+      // Dynamically extract each metric and its previous value.
+      // Number coercion obligatoire : ClickHouse renvoie les agrégats en
+      // string (cf. toMetricNumber).
       for (const metric of metrics) {
-        result[metric] = (row[metric] as number) ?? 0
+        result[metric] = toMetricNumber(row[metric]) ?? 0
         if (prevRow) {
-          result[`prev_${metric}`] = prevRow[metric] as number | undefined
+          result[`prev_${metric}`] = toMetricNumber(prevRow[metric])
         }
       }
 
@@ -60,7 +80,7 @@ export function transformToDimensionData(
     }
 
     for (const metric of metrics) {
-      result[metric] = (row[metric] as number) ?? 0
+      result[metric] = toMetricNumber(row[metric]) ?? 0
     }
 
     return result
