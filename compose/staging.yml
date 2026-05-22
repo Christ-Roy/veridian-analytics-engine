@@ -22,12 +22,10 @@
 
 services:
   clickhouse:
-    container_name: analytics-engine-staging-clickhouse
     networks:
       - engine-internal
 
   engine:
-    container_name: analytics-engine-staging
     networks:
       - staging-edge
       - engine-internal
@@ -45,7 +43,6 @@ services:
       - veridian.staging.app=analytics-engine
 
   bridge:
-    container_name: analytics-engine-staging-bridge
     networks:
       - staging-edge
       - engine-internal

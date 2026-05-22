@@ -401,6 +401,10 @@ jobs:
             set -e
             cd /opt/staging/analytics-engine
             docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
+            # down scopé au project 'analytics-engine-staging' avant le up :
+            # dégage les containers du run précédent. Scopé staging — ne
+            # touche pas analytics-engine-dev (project name distinct).
+            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml down --remove-orphans || true
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml ps
           DEPLOY
