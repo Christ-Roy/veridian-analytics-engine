@@ -89,19 +89,17 @@ services:
       start_period: 60s
     mem_limit: 2g
     cpus: 1
+    # Traefik labels aligned on the Dokploy prod convention (cf.
+    # analytics-prod compose): network dokploy-network, websecure entrypoint,
+    # letsencrypt resolver. Dokploy's Traefik already redirects HTTP->HTTPS
+    # globally, so no extra http router is needed.
     labels:
       - traefik.enable=true
       - traefik.docker.network=dokploy-network
       - traefik.http.routers.analytics-demo.rule=Host(`demo-analytics.veridian.site`)
       - traefik.http.routers.analytics-demo.entrypoints=websecure
-      - traefik.http.routers.analytics-demo.tls=true
       - traefik.http.routers.analytics-demo.tls.certresolver=letsencrypt
       - traefik.http.services.analytics-demo.loadbalancer.server.port=3000
-      # HTTP -> HTTPS redirect (defense in depth; Dokploy Traefik also does it).
-      - traefik.http.routers.analytics-demo-http.rule=Host(`demo-analytics.veridian.site`)
-      - traefik.http.routers.analytics-demo-http.entrypoints=web
-      - traefik.http.routers.analytics-demo-http.middlewares=analytics-demo-https
-      - traefik.http.middlewares.analytics-demo-https.redirectscheme.scheme=https
       # Rate limit: 60 req/min/IP average, burst 120 (anti-scraping, ticket §6).
       - traefik.http.routers.analytics-demo.middlewares=analytics-demo-ratelimit
       - traefik.http.middlewares.analytics-demo-ratelimit.ratelimit.average=60
