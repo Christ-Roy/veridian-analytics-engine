@@ -29,6 +29,13 @@ services:
     networks:
       - engine-internal
 
+  # postgres-bridge DOIT être sur engine-internal : le bridge le résout par
+  # le nom `postgres-bridge` au boot (Prisma migrate). Sans ça → P1001
+  # "Can't reach database server" et le bridge crashloop.
+  postgres-bridge:
+    networks:
+      - engine-internal
+
   engine:
     networks:
       - staging-edge
