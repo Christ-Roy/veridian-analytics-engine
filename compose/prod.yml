@@ -1,0 +1,77 @@
+# ============================================================================
+# compose/prod.yml — Override prod
+# ============================================================================
+#
+# URL : analytics-engine.app.veridian.site         (console staminads, port 3000)
+# URL : analytics-engine-bridge.app.veridian.site  (bridge Veridian, port 3002)
+#
+# Trigger : push sur branche `main` du repo Christ-Roy/veridian-analytics-engine
+# Réseau external : dokploy-network (Traefik Dokploy sur prod-pub)
+#
+# Combiné avec base.yml par Dokploy GitOps :
+#   docker compose -f compose/base.yml -f compose/prod.yml up -d
+#
+# Variables d'env attendues (gérées par Dokploy compose env) :
+#   ENGINE_IMAGE_TAG          = prod-<sha7> ou prod-latest
+#   BRIDGE_IMAGE_TAG          = prod-<sha7> ou prod-latest
+#   CLICKHOUSE_PASSWORD       = mot de passe ClickHouse prod
+#   ENCRYPTION_KEY            = 32+ chars (openssl rand -hex 32)
+#   STAMINADS_ADMIN_PASSWORD  = mot de passe admin console staminads
+#   VERIDIAN_ADMIN_API_KEY    = clé API utilisée par Hub pour appeler le bridge
+#   BRIDGE_DB_USER / BRIDGE_DB_PASSWORD = creds Postgres bridge
+#   TOKEN_ENCRYPTION_KEY      = chiffrement tokens GSC/VoIP (AES-256-GCM)
+#   HUB_HMAC_SECRET           = HMAC secret pour endpoints Hub
+#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT = web-push
+# ============================================================================
+
+services:
+  clickhouse:
+    networks:
+      - engine-internal
+
+  postgres-bridge:
+    networks:
+      - engine-internal
+
+  engine:
+    networks:
+      - dokploy-network
+      - engine-internal
+    environment:
+      APP_URL: https://analytics-engine.app.veridian.site
+      CORS_ALLOWED_ORIGINS: https://analytics-engine.app.veridian.site,https://analytics-engine-bridge.app.veridian.site,https://app.veridian.site
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.analytics-engine-prod.rule=Host(`analytics-engine.app.veridian.site`)
+      - traefik.http.routers.analytics-engine-prod.entrypoints=websecure
+      - traefik.http.routers.analytics-engine-prod.tls=true
+      - traefik.http.routers.analytics-engine-prod.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-engine-prod.loadbalancer.server.port=3000
+      - veridian.prod.app=analytics-engine
+
+  bridge:
+    networks:
+      - dokploy-network
+      - engine-internal
+    environment:
+      PUBLIC_STAMINADS_URL: https://analytics-engine.app.veridian.site
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.analytics-bridge-prod.rule=Host(`analytics-engine-bridge.app.veridian.site`)
+      - traefik.http.routers.analytics-bridge-prod.entrypoints=websecure
+      - traefik.http.routers.analytics-bridge-prod.tls=true
+      - traefik.http.routers.analytics-bridge-prod.tls.certresolver=letsencrypt
+      - traefik.http.services.analytics-bridge-prod.loadbalancer.server.port=3002
+      - veridian.prod.app=analytics-engine
+
+networks:
+  dokploy-network:
+    external: true
+  engine-internal:
+    driver: bridge
+
+volumes:
+  clickhouse-data:
+    name: analytics-engine-prod-clickhouse-data
