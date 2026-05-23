@@ -5,26 +5,60 @@
 
 ## Vue d'ensemble
 
-15 dossiers de tests prévus dans `tests/e2e/` (cf ticket
-`todo/sprint-2026-05-22-mega/E2E-TEST-BATTERY.md`). Phase 1+2 livrés :
+15 dossiers de tests prévus dans `tests/e2e/`. Phase 1+2 livrés + Phase A/B/C
+(anti-régression bugs P0 + flows métier + UI dashboard) livré 2026-05-23 :
 
 | Dossier | Statut | Couverture |
 |---|---|---|
 | `01-smoke/` | ✅ Livré | healthcheck, routes reachable, SSL cert, security headers, console JS clean |
-| `02-tracker-to-dashboard/` | ⏳ Phase 3 | — |
-| `03-forms-leads/` | ⏳ Phase 3 | — |
-| `04-push-pwa/` | ⏳ Phase 4 | — |
-| `05-gsc-oauth/` | ⏳ Phase 4 | — |
+| `02-bugs-regression/` | ✅ Livré (2026-05-23) | 9 specs anti-régression bugs bug-hunter (BUG-01/02/03/04/05/06/08/09/10/11/12/13/20/21) |
+| `02-tracker-to-dashboard/` | ✅ Livré (2026-05-23) | `/api/track` accepts payload + bridge score/status endpoint shape |
+| `03-forms-leads/` | ✅ Livré (2026-05-23) | `/api/ingest/form` validation + CORS + happy path gated |
+| `04-push-pwa/` | ⏳ Phase D | — |
+| `05-gsc-oauth/` | ⏳ Phase D | — |
 | `06-hub-contract/` | ✅ Livré | HMAC rejection (5 scenarios) + HMAC valid provision (staging uniquement) |
-| `07-settings-credentials/` | ⏳ Phase 4 | — |
-| `08-voip-calls/` | ⏳ Phase 4 | — |
-| `09-dashboard-ui/` | ⏳ Phase 3 | — |
-| `10-onboarding-wizard/` | ⏳ Phase 4 | — |
+| `07-settings-credentials/` | ⏳ Phase D | — |
+| `08-voip-calls/` | ⏳ Phase D | — |
+| `09-dashboard-ui/` | ✅ Livré (2026-05-23) | dashboard sections render + mobile responsive |
+| `10-onboarding-wizard/` | ⏳ Phase D | — |
 | `11-demo-public/` | ✅ Livré | accessible, banner CTA, restricted guards, re-seed (demo-staging only) |
-| `12-auth-flow/` | ⏳ Phase 4 | — |
-| `13-cross-app/` | ⏳ Phase 4 | — |
-| `14-perf-regression/` | ⏳ Phase 4 | squelette workflow OK |
-| `15-chaos/` | ⏳ Phase 4 | — |
+| `12-auth-flow/` | ⏳ Phase D | — |
+| `13-cross-app/` | ⏳ Phase D | — |
+| `14-perf-regression/` | ⏳ Phase D | squelette workflow OK |
+| `15-chaos/` | ⏳ Phase D | — |
+
+### Tags & grep
+
+- `@critical` : flows métier + bugs P0 — bloquant pour smoke staging/prod
+- `@bug-XX` : anti-régression d'un bug identifié (chaque test mappé sur 1+ bug)
+- `@mobile` : grep `chromium-mobile` project
+- `@webkit` : grep `webkit-desktop` project
+
+### Auto-création d'issues GitHub
+
+Le script `scripts/ci/e2e-report-to-issues.mjs` parse `test-results/results.json`
+(Playwright JSON reporter, activé en CI dans `playwright.config.ts`) et :
+
+1. Pour chaque test rouge `@critical` ou `@bug-XX` : crée une issue GitHub
+   avec titre `E2E regression: <test name>`, label `e2e-regression` + `p0/p1`
+   + cible. Idempotent — pas de doublon.
+2. Pour chaque test précédemment rouge qui repasse vert : ferme l'issue avec
+   commentaire "Fixed by CI run #XXX".
+
+Câblé dans les 3 workflows E2E (`always()` step). Les agents qui veulent
+prendre du travail filtrent les issues avec label `e2e-regression`.
+
+### Secrets GitHub requis pour le full nightly
+
+- `E2E_BRIDGE_ADMIN_TOKEN_STAGING` — token admin Bearer pour `/api/admin/tenant/*` du bridge
+- `E2E_BRIDGE_TEST_WORKSPACE_ID_STAGING` — workspace de test connu côté bridge
+- `E2E_TEST_WORKSPACE_ID_STAGING` — workspace UI dashboard pour pages render checks
+- `E2E_ADMIN_EMAIL_STAGING` / `E2E_ADMIN_PASSWORD_STAGING` — login admin staging (futurs tests auth)
+- `E2E_TEST_SITE_KEY_STAGING` — siteKey valide pour happy-path ingest form
+- `HUB_HMAC_SECRET_ANALYTICS_STAGING` — déjà existant pour 06-hub-contract
+- `DEMO_SECRET_ANALYTICS_STAGING` — déjà existant pour 11-demo-public re-seed
+
+Si manquants → les tests concernés `test.skip()` proprement (jamais d'erreur).
 
 ## Workflows CI
 

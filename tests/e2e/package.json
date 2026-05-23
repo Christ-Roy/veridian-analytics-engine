@@ -9,8 +9,16 @@
     "test:smoke": "playwright test 01-smoke/",
     "test:hub-contract": "playwright test 06-hub-contract/",
     "test:demo": "playwright test 11-demo-public/",
+    "test:bugs": "playwright test 02-bugs-regression/",
+    "test:tracker": "playwright test 02-tracker-to-dashboard/",
+    "test:forms": "playwright test 03-forms-leads/",
+    "test:dashboard-ui": "playwright test 09-dashboard-ui/",
+    "test:critical": "playwright test --grep @critical",
     "test:phase1": "playwright test 01-smoke/",
     "test:phase2": "playwright test 06-hub-contract/ 11-demo-public/",
+    "test:phaseA": "playwright test 02-bugs-regression/",
+    "test:phaseB": "playwright test 02-tracker-to-dashboard/ 03-forms-leads/",
+    "test:phaseC": "playwright test 09-dashboard-ui/ 11-demo-public/",
     "report": "playwright show-report"
   },
   "devDependencies": {

@@ -59,32 +59,33 @@ jobs:
           npx playwright install --with-deps chromium
 
       # ─── Prod targets ──────────────────────────────────────────────
-      - name: Smoke 01 (prod)
+      - name: Smoke 01 + bugs P0 regression 02 (prod)
         env:
           TARGET: prod
         run: |
-          npx playwright test 01-smoke/ \
-            --project=chromium-desktop \
-            --reporter=list
+          npx playwright test \
+            01-smoke/ \
+            02-bugs-regression/ \
+            --project=chromium-desktop
 
       - name: HMAC rejection 06 (prod)
         env:
           TARGET: prod
         run: |
           npx playwright test 06-hub-contract/hmac-rejection.spec.ts \
-            --project=chromium-desktop \
-            --reporter=list
+            --project=chromium-desktop
 
       # ─── Demo prod ──────────────────────────────────────────────────
-      - name: Smoke 01 (demo-prod)
+      - name: Smoke 01 + bugs P0 regression 02 (demo-prod)
         env:
           TARGET: demo-prod
         run: |
-          npx playwright test 01-smoke/ \
-            --project=chromium-desktop \
-            --reporter=list
+          npx playwright test \
+            01-smoke/ \
+            02-bugs-regression/ \
+            --project=chromium-desktop
 
-      - name: Demo public 11 (demo-prod) — read-only
+      - name: Demo public 11 + dashboard UI 09 (demo-prod) — read-only
         env:
           TARGET: demo-prod
         run: |
@@ -93,8 +94,9 @@ jobs:
             11-demo-public/demo-accessible.spec.ts \
             11-demo-public/demo-banner-cta.spec.ts \
             11-demo-public/demo-restricted-guards.spec.ts \
-            --project=chromium-desktop \
-            --reporter=list
+            11-demo-public/demo-workspace-pages-not-blank.spec.ts \
+            09-dashboard-ui/dashboard-sections-render.spec.ts \
+            --project=chromium-desktop
 
       - name: Upload Playwright report on failure
         if: failure()
@@ -106,7 +108,25 @@ jobs:
             tests/e2e/test-results/
           retention-days: 30
 
-      - name: Open issue + Telegram-style flag on prod fail
+      - name: Auto-create/close GitHub issues for tagged tests (@critical/@bug-XX)
+        if: always() && github.event_name != 'workflow_dispatch'
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json — skipping issue auto-create"
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target prod || true
+
+      - name: Open umbrella issue on prod fail
         if: failure() && github.event_name != 'workflow_dispatch'
         uses: actions/github-script@v7
         with:
@@ -119,6 +139,7 @@ jobs:
               body: `**SMOKE PROD A ÉCHOUÉ — investigation immédiate requise.**\n\n` +
                     `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n` +
                     `SHA: ${context.sha}\n\n` +
+                    `Voir les issues détaillées avec label \`e2e-regression\` pour les tests rouges spécifiques.\n\n` +
                     `Étapes :\n` +
                     `1. Vérifier l'artifact \`playwright-report-smoke-prod\`\n` +
                     `2. Lancer un rollback prod si le issue est confirmé\n` +

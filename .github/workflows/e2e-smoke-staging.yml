@@ -53,11 +53,15 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      - name: Run smoke 01 + HMAC rejection 06
+      - name: Run smoke 01 + HMAC rejection 06 + bugs P0 anti-regression 02
+        # CI reporter from playwright.config.ts emits list+html+junit+json
+        # (results.json consumed by e2e-report-to-issues.mjs below).
         run: |
-          npx playwright test 01-smoke/ 06-hub-contract/hmac-rejection.spec.ts \
-            --project=chromium-desktop \
-            --reporter=list
+          npx playwright test \
+            01-smoke/ \
+            06-hub-contract/hmac-rejection.spec.ts \
+            02-bugs-regression/ \
+            --project=chromium-desktop
 
       - name: Upload Playwright report on failure
         if: failure()
@@ -69,7 +73,30 @@ jobs:
             tests/e2e/test-results/
           retention-days: 14
 
-      - name: Open issue if smoke fail
+      - name: Auto-create/close GitHub issues for tagged tests (@critical/@bug-XX)
+        if: always() && github.event_name != 'workflow_dispatch'
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          # JSON reporter writes to test-results/results.json by default when
+          # --reporter=json. We point to tests/e2e/test-results/results.json
+          # (Playwright outputDir from playwright.config.ts).
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json at $REPORT — skipping issue auto-create"
+            ls -la tests/e2e/test-results/ || true
+            ls -la tests/e2e/playwright-report/ || true
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target staging || true
+
+      - name: Open umbrella issue if smoke fail
         if: failure() && github.event_name != 'workflow_dispatch'
         uses: actions/github-script@v7
         with:
@@ -90,6 +117,7 @@ jobs:
                 body: `Smoke E2E staging a échoué.\n\n` +
                       `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n` +
                       `SHA: ${context.sha}\n\n` +
+                      `Voir les issues détaillées avec label \`e2e-regression\` pour les tests rouges spécifiques.\n` +
                       `À investiguer en priorité — rollback potentiel nécessaire.`,
               });
             }
