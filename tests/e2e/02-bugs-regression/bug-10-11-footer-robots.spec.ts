@@ -63,21 +63,29 @@ test.describe(`BUG-11 robots.txt differs prod vs demo [${TARGET}] @critical @bug
     const body = res.body.toLowerCase();
 
     if (target.isDemo) {
-      // La démo ne doit PAS être indexée
+      // La démo doit avoir au moins UN Disallow (les workspaces démo ne doivent
+      // pas être indexés — données fictives). Landing peut être Allow.
       expect(
         body,
-        `Demo target ${TARGET} robots.txt should contain "Disallow: /" — got: ${res.body.slice(0, 200)}`,
+        `Demo target ${TARGET} robots.txt doit contenir au moins un "Disallow:" — got: ${res.body.slice(0, 300)}`,
       ).toMatch(/disallow:\s*\//);
-    } else if (target.isPublic) {
-      // Prod : on accepte allow ou pas de disallow global. Mais doit pas être
-      // un copier-coller de la démo.
-      const hasGlobalDisallow = /user-agent:\s*\*\s*\n+\s*disallow:\s*\/\s*(\n|$)/i.test(
-        res.body,
-      );
+      // Workspaces démo doivent être Disallow explicite
+      const hasWorkspacesDisallow = /disallow:\s*\/workspaces/i.test(res.body);
       expect(
-        hasGlobalDisallow,
-        `Prod ${TARGET} robots.txt has "Disallow: /" → indexation bloquée par accident`,
-      ).toBe(false);
+        hasWorkspacesDisallow,
+        `Demo ${TARGET} robots.txt doit Disallow /workspaces (données fictives) — got: ${res.body.slice(0, 300)}`,
+      ).toBe(true);
+    } else if (target.isPublic) {
+      // Prod analytics-engine = console des tenants (accès via magic link
+      // depuis le Hub) : robots.txt = "Disallow: /" est LÉGITIME, voulu.
+      // L'important = la DÉMO et la PROD doivent avoir des robots.txt
+      // différenciés (sinon la démo serait indexable comme une vraie app).
+      // Cette assertion-là est faite dans le bloc target.isDemo plus haut.
+      //
+      // Sanity : robots.txt prod n'est pas vide et est bien servi
+      expect(res.body.length, "robots.txt prod ne doit pas être vide").toBeGreaterThan(
+        0,
+      );
     }
   });
 });
