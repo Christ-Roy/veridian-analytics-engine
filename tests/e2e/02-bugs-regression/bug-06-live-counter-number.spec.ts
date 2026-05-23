@@ -13,6 +13,7 @@
 
 import { test, expect } from "@playwright/test";
 import { getTarget, type TargetName } from "../helpers/targets";
+import { loginDemo } from "../helpers/login";
 
 const TARGET = (process.env.TARGET ?? "demo-prod") as TargetName;
 const target = getTarget(TARGET);
@@ -26,6 +27,12 @@ test.describe(`BUG-06 live counter is normal number [${TARGET}] @critical @bug-0
     !WORKSPACE_ID,
     `Skipped: no WORKSPACE_ID for target ${TARGET}.`,
   );
+
+  test.beforeEach(async ({ page }) => {
+    if (target.isDemo) {
+      await loginDemo(page, target);
+    }
+  });
 
   test("'/live' affiche un compteur de visiteurs normal (1-5 chiffres)", async ({
     page,

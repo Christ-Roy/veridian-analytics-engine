@@ -11,6 +11,7 @@
 
 import { test, expect } from "@playwright/test";
 import { getTarget, type TargetName } from "../helpers/targets";
+import { loginDemo } from "../helpers/login";
 
 const TARGET = (process.env.TARGET ?? "demo-prod") as TargetName;
 const target = getTarget(TARGET);
@@ -19,6 +20,10 @@ const DEMO_WS = "demo-apple";
 
 test.describe(`BUG-12 demo account page gated [${TARGET}] @critical @bug-12`, () => {
   test.skip(!target.isDemo, "Demo only");
+
+  test.beforeEach(async ({ page }) => {
+    await loginDemo(page, target);
+  });
 
   test("`/account` rend le panneau démo (testid account-demo-blocked)", async ({
     page,
@@ -73,6 +78,10 @@ test.describe(`BUG-12 demo account page gated [${TARGET}] @critical @bug-12`, ()
 
 test.describe(`BUG-21 demo logout button hidden [${TARGET}] @critical @bug-21`, () => {
   test.skip(!target.isDemo, "Demo only");
+
+  test.beforeEach(async ({ page }) => {
+    await loginDemo(page, target);
+  });
 
   test("aucun lien/button 'Logout' visible côté navigation principale", async ({
     page,

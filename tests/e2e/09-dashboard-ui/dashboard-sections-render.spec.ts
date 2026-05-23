@@ -15,6 +15,7 @@
 
 import { test, expect } from "@playwright/test";
 import { getTarget, type TargetName } from "../helpers/targets";
+import { loginDemo } from "../helpers/login";
 
 const TARGET = (process.env.TARGET ?? "demo-prod") as TargetName;
 const target = getTarget(TARGET);
@@ -27,6 +28,9 @@ test.describe(`Dashboard UI sections [${TARGET}] @critical`, () => {
   test.skip(!WORKSPACE_ID, `No WORKSPACE_ID for ${TARGET}`);
 
   test.beforeEach(async ({ page }) => {
+    if (target.isDemo) {
+      await loginDemo(page, target);
+    }
     await page.goto(`${target.consoleUrl}/workspaces/${WORKSPACE_ID}/veridian`, {
       waitUntil: "domcontentloaded",
       timeout: 30_000,

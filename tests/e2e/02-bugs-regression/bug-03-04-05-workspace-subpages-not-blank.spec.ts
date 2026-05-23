@@ -17,6 +17,7 @@
 
 import { test, expect } from "@playwright/test";
 import { getTarget, type TargetName } from "../helpers/targets";
+import { loginDemo } from "../helpers/login";
 
 const TARGET = (process.env.TARGET ?? "demo-prod") as TargetName;
 const target = getTarget(TARGET);
@@ -47,6 +48,12 @@ test.describe(`BUG-03/04/05 workspace subpages content [${TARGET}] @critical`, (
     !WORKSPACE_ID,
     `Skipped: no WORKSPACE_ID for target ${TARGET}. Set E2E_TEST_WORKSPACE_ID for staging/prod.`,
   );
+
+  test.beforeEach(async ({ page }) => {
+    if (target.isDemo) {
+      await loginDemo(page, target);
+    }
+  });
 
   for (const sp of SUBPAGES) {
     test(`${sp.bug}: /workspaces/${WORKSPACE_ID}${sp.path} rend > ${sp.minChars} chars utiles`, async ({

@@ -12,6 +12,7 @@
 
 import { test, expect } from "@playwright/test";
 import { getTarget, type TargetName } from "../helpers/targets";
+import { loginDemo } from "../helpers/login";
 
 const TARGET = (process.env.TARGET ?? "demo-prod") as TargetName;
 const target = getTarget(TARGET);
@@ -22,6 +23,12 @@ const WORKSPACE_ID = target.isDemo
 
 test.describe(`Dashboard mobile responsive [${TARGET}] @mobile @critical`, () => {
   test.skip(!WORKSPACE_ID, `No WORKSPACE_ID for ${TARGET}`);
+
+  test.beforeEach(async ({ page }) => {
+    if (target.isDemo) {
+      await loginDemo(page, target);
+    }
+  });
 
   test("pas de scroll horizontal sur viewport mobile", async ({ page }) => {
     await page.goto(`${target.consoleUrl}/workspaces/${WORKSPACE_ID}/veridian`, {
