@@ -219,10 +219,9 @@ function WorkspaceLayout() {
                   { to: '/workspaces/$workspaceId/explore', label: 'Explore' },
                   { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
                   { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
-                  { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
-                  { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                   { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
-                  { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
+                  { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
+                  { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                   { to: '/workspaces/$workspaceId/settings', label: 'Settings' },
                 ].map(({ to, label, exact }) => {
                   const resolvedPath = to.replace('$workspaceId', workspaceId)
@@ -474,10 +473,9 @@ function WorkspaceLayout() {
                     { to: '/workspaces/$workspaceId/explore', label: 'Explore' },
                     { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
                     { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
-                    { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
-                    { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                     { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
-                    { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
+                    { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
+                    { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                   ].map(({ to, label, exact }) => {
                     const resolvedPath = to.replace('$workspaceId', workspaceId)
                     const isActive = exact

@@ -9,10 +9,10 @@ import {
   Bell,
   ArrowUpRight,
 } from 'lucide-react';
-import { Card, CardContent } from './ui/card';
-import type { ServiceKey, ShadowIconKey } from './types';
-import { SHADOW_MARKETING, buildMailto } from './types';
-import { cn } from './utils';
+import { Card, CardContent } from '../ui/card';
+import type { ServiceKey, ShadowIconKey } from '../types';
+import { SHADOW_MARKETING, buildMailto } from '../types';
+import { cn } from '../utils';
 
 /**
  * ShadowMarketingBlock : bloc "shadow" affiché pour un service non actif chez

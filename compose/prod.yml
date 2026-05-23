@@ -21,7 +21,7 @@
 #   BRIDGE_DB_USER / BRIDGE_DB_PASSWORD = creds Postgres bridge
 #   TOKEN_ENCRYPTION_KEY      = chiffrement tokens GSC/VoIP (AES-256-GCM)
 #   HUB_HMAC_SECRET           = HMAC secret pour endpoints Hub
-#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT = web-push
+#   (VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT — ARCHIVED 2026-05-23)
 # ============================================================================
 
 services:

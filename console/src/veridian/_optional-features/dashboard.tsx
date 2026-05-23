@@ -8,8 +8,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
-import { ServiceScoreBlock, type ServiceMetric } from '../service-score-block';
-import { ShadowMarketingBlock } from '../shadow-marketing-block';
+import { ServiceScoreBlock, type ServiceMetric } from './service-score-block';
+import { ShadowMarketingBlock } from './shadow-marketing-block';
 import { ImpersonationBanner } from '../impersonation-banner';
 import { KNOWN_SERVICES, type ServiceKey } from '../types';
 import { cn, formatNumber } from '../utils';
@@ -22,10 +22,10 @@ import {
 import { FormsTabStub } from './dashboard-tabs/forms-tab';
 import { GscTabStub } from './dashboard-tabs/gsc-tab';
 import { PushTabStub } from './dashboard-tabs/push-tab';
-import { CallsTab } from './dashboard-tabs/calls-tab';
+import { CallsTab } from '../pages/dashboard-tabs/calls-tab';
 import { useContext } from 'react';
 import { AuthContext } from '../../lib/AuthContext';
-import { VeridianDemoComingSoon } from '../demo-coming-soon';
+import { VeridianDemoComingSoon } from './demo-coming-soon';
 import '../theme.css';
 
 /**

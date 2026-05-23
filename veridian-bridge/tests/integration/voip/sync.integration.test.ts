@@ -37,7 +37,6 @@ import assert from "node:assert/strict";
 import {
   bootBridgeWithRealDB,
   seedTenant,
-  seedSite,
   TEST_ENCRYPTION_KEY,
   TEST_ADMIN_KEY,
   type BridgeHarness,
@@ -46,10 +45,8 @@ import { saveCredential } from "../../../src/credentials/store.js";
 import {
   syncCallLogs,
   syncAllCallLogs,
-  resolveVisitorIds,
   listCalls,
   loadVoipCredentials,
-  type NormalizedCall,
 } from "../../../src/voip/index.js";
 
 let h: BridgeHarness;
@@ -74,16 +71,6 @@ function mkTenant(slugHint = "voip") {
     slug: `${slugHint}-${tag}`,
     hubTenantId: `hub_${tag}`,
     apiKey: `sk_${tag}`,
-  });
-}
-
-/** Seed un Site avec un siteKey unique cross-process. */
-function mkSite(tenantId: string) {
-  localSeed += 1;
-  const tag = `${RUN_NONCE}-${localSeed}`;
-  return seedSite(h.prisma, tenantId, {
-    siteKey: `sk_site_${tag}`,
-    domain: `site-${tag}.veridian.site`,
   });
 }
 
@@ -360,114 +347,13 @@ test("syncCallLogs : tenant inconnu → VoipApiError 404", async () => {
   );
 });
 
-// ─── 3. Matching visitorId ──────────────────────────────────────────────────
-
-test("resolveVisitorIds : un appel inbound dont le numéro == Lead.phone → matché", async () => {
-  const t = await mkTenant();
-  const site = await mkSite(t.id);
-  // Lead avec téléphone + une LeadSession avec visitorId.
-  const lead = await h.prisma.lead.create({
-    data: {
-      siteId: site.id,
-      email: `lead-${RUN_NONCE}@example.com`,
-      phone: "+33611111111",
-    },
-  });
-  await h.prisma.leadSession.create({
-    data: { leadId: lead.id, visitorId: `vid_${RUN_NONCE}` },
-  });
-
-  const calls: NormalizedCall[] = [
-    {
-      externalId: "call_match",
-      direction: "inbound",
-      fromNumber: "0611111111", // format différent mais même numéro
-      toNumber: "+33972000000",
-      durationSec: 60,
-      status: "answered",
-      recordingUrl: null,
-      startedAt: FIXED_NOW,
-    },
-    {
-      externalId: "call_nomatch",
-      direction: "inbound",
-      fromNumber: "+33699999999",
-      toNumber: "+33972000000",
-      durationSec: 30,
-      status: "answered",
-      recordingUrl: null,
-      startedAt: FIXED_NOW,
-    },
-  ];
-
-  const matched = await resolveVisitorIds(h.prisma, t.id, calls);
-  assert.equal(matched.get("call_match"), `vid_${RUN_NONCE}`);
-  assert.equal(matched.has("call_nomatch"), false);
-});
-
-test("resolveVisitorIds : un appel OUTBOUND n'est jamais matché", async () => {
-  const t = await mkTenant();
-  const site = await mkSite(t.id);
-  const lead = await h.prisma.lead.create({
-    data: { siteId: site.id, phone: "+33611111111" },
-  });
-  await h.prisma.leadSession.create({
-    data: { leadId: lead.id, visitorId: `vid_out_${RUN_NONCE}` },
-  });
-
-  const calls: NormalizedCall[] = [
-    {
-      externalId: "outbound_call",
-      direction: "outbound",
-      fromNumber: "+33972000000",
-      toNumber: "+33611111111",
-      durationSec: 60,
-      status: "answered",
-      recordingUrl: null,
-      startedAt: FIXED_NOW,
-    },
-  ];
-  const matched = await resolveVisitorIds(h.prisma, t.id, calls);
-  assert.equal(matched.size, 0, "un outbound ne se matche pas");
-});
-
-test("syncCallLogs : l'appel inbound matché écrit le visitorId en DB", async () => {
-  const t = await mkTenant();
-  const site = await mkSite(t.id);
-  const lead = await h.prisma.lead.create({
-    data: { siteId: site.id, phone: "+33622334455" },
-  });
-  await h.prisma.leadSession.create({
-    data: { leadId: lead.id, visitorId: `vid_synced_${RUN_NONCE}` },
-  });
-  await seedTelnyxCred(t.id);
-
-  await syncCallLogs(h.prisma, t.id, {
-    encryptionKey: TEST_ENCRYPTION_KEY,
-    fetchImpl: mockTelnyx([
-      telnyxCdr({
-        id: `inbound_${RUN_NONCE}`,
-        direction: "inbound",
-        from: "+33622334455",
-      }),
-    ]),
-    now: () => FIXED_NOW,
-  });
-
-  const call = await h.prisma.sipCall.findUnique({
-    where: {
-      provider_externalId: {
-        provider: "telnyx",
-        externalId: `inbound_${RUN_NONCE}`,
-      },
-    },
-  });
-  assert.equal(
-    call?.visitorId,
-    `vid_synced_${RUN_NONCE}`,
-    "l'appel est relié à la session web du visiteur",
-  );
-});
+// ─── 3. Matching visitorId — REMOVED 2026-05-23 ─────────────────────────────
+//
+// Les tests de matching `phone → visitorId` via la table Lead ont été retirés
+// avec le module Forms (cleanup scope Robert). `resolveVisitorIds` est
+// maintenant un no-op (cf src/voip/match.ts) — tous les appels sont
+// enregistrés sans visitorId. Si on rebranche le tel: tracking côté tracker
+// directement, on remettra des tests ici.
 
 // ─── 4. syncAllCallLogs ─────────────────────────────────────────────────────
 

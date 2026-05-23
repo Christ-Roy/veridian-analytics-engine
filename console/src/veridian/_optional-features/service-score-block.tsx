@@ -9,10 +9,10 @@ import {
   Bell,
   CheckCircle2,
 } from 'lucide-react';
-import { Card, CardContent } from './ui/card';
-import { Sparkline } from './sparkline';
-import type { ServiceKey } from './types';
-import { cn, formatNumber, formatPercent } from './utils';
+import { Card, CardContent } from '../ui/card';
+import { Sparkline } from '../sparkline';
+import type { ServiceKey } from '../types';
+import { cn, formatNumber, formatPercent } from '../utils';
 
 /**
  * ServiceScoreBlock : carte "active" affichant une metric et sa tendance

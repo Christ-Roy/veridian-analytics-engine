@@ -10,10 +10,10 @@ import {
   ArrowUpRight,
   RefreshCw,
 } from 'lucide-react';
-import { Card, CardContent } from './ui/card';
-import type { ServiceKey, ShadowIconKey } from './types';
-import { SHADOW_MARKETING, buildMailto } from './types';
-import { cn } from './utils';
+import { Card, CardContent } from '../ui/card';
+import type { ServiceKey, ShadowIconKey } from '../types';
+import { SHADOW_MARKETING, buildMailto } from '../types';
+import { cn } from '../utils';
 
 /**
  * LockedServicePage : écran plein affiché sur les pages dont le service est

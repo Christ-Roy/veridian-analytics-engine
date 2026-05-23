@@ -71,8 +71,8 @@ import { PrismaClient } from "@prisma/client";
 
 import { createApp, type BridgeConfig } from "../../../src/app.js";
 import { registerGscRoutes } from "../../../src/gsc/routes.js";
-import { registerFormsRoutes } from "../../../src/forms/routes.js";
-import { registerPushRoutes } from "../../../src/push/routes.js";
+// registerFormsRoutes — REMOVED 2026-05-23 (scope change Robert)
+// registerPushRoutes — ARCHIVED 2026-05-23 (veridian-bridge/_archive/push/)
 import { registerSettingsRoutes } from "../../../src/settings/routes.js";
 import { registerVoipRoutes } from "../../../src/voip/routes.js";
 import { setPrismaClientForTests } from "../../../src/db/prisma.js";
@@ -315,13 +315,7 @@ export async function bootBridgeWithRealDB(
     adminApiKey: TEST_ADMIN_KEY,
   });
 
-  registerFormsRoutes(app, {
-    prisma,
-    requireAdmin,
-    staminadsUrl: opts.staminadsUrl ?? "http://127.0.0.1:9",
-  });
-
-  registerPushRoutes(app, { prisma, requireAdmin });
+  // Forms / Push routes — débranchées 2026-05-23 (cleanup scope).
 
   registerSettingsRoutes(app, {
     prisma,
@@ -417,10 +411,8 @@ const APP_TABLES = [
   "SipCall",
   "PushNotification",
   "PushSubscription",
-  "LeadSession",
-  "FormSubmission",
-  "FormSchema",
-  "Lead",
+  // LeadSession / FormSubmission / FormSchema / Lead — supprimées 2026-05-23
+  // (migration 20260523000000_drop_forms_leads, scope change Robert).
   "Site",
   "GscDaily",
   "GscProperty",

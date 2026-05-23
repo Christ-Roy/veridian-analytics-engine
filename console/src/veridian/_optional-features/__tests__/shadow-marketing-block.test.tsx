@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ShadowMarketingBlock } from '../shadow-marketing-block';
-import { SHADOW_MARKETING } from '../types';
+import { SHADOW_MARKETING } from '../../types';
 
 describe('ShadowMarketingBlock', () => {
   it('renders title and CTA label from SHADOW_MARKETING table', () => {

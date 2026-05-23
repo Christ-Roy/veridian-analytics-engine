@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { AuthContext, type AuthState } from '../../lib/AuthContext'
-import type { PublicConfig } from '../../lib/demo-config'
-import { VeridianDashboardPage } from '../pages/dashboard'
+import { AuthContext, type AuthState } from '../../../lib/AuthContext'
+import type { PublicConfig } from '../../../lib/demo-config'
+import { VeridianDashboardPage } from '../dashboard'
 import { VeridianDemoComingSoon } from '../demo-coming-soon'
 
 function makeAuth(publicConfig: PublicConfig | null): AuthState {
