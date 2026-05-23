@@ -1,7 +1,11 @@
 /**
  * Types et constantes pour la feature Google Search Console (GSC) intégrée
- * dans la console staminads en tant que sous-route native (cf
- * `console/src/routes/_authenticated/workspaces/$workspaceId/search-console.tsx`).
+ * dans la console staminads via l'onglet Settings « Search Console » (cf
+ * `console/src/veridian/settings-panels/search-console-panel.tsx`).
+ *
+ * Refonte 2026-05-23 (refactor/ui-native-pure) : la sous-route dédiée
+ * `/search-console` a été supprimée — GSC vit désormais inline dans
+ * Settings, avec connexion OAuth + KPIs + chart + data-table.
  *
  * Port direct du legacy `veridian-analytics/components/gsc/types.ts`, sans
  * dépendances Next.js — utilisable depuis Vite/React.

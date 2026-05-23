@@ -46,17 +46,23 @@ test.describe(`VoIP API endpoints [${TARGET}] @voip`, () => {
   });
 });
 
-test.describe(`VoIP calls tab UI [${TARGET}] @voip`, () => {
+test.describe(`VoIP settings panel UI [${TARGET}] @voip`, () => {
   test.skip(
     !target.isDemo && !target.isPublic,
     "UI test need accessible target",
   );
 
-  test("/calls tab loads (demo : empty state)", async ({ page }) => {
-    const res = await page.goto(`${target.consoleUrl}/calls`, {
-      waitUntil: "domcontentloaded",
-      timeout: 30_000,
-    });
+  test("Settings → onglet VoIP charge (demo : empty state)", async ({ page }) => {
+    // VoIP n'est plus une page dédiée — c'est un onglet dans Settings native.
+    // Refonte 2026-05-23 (refactor/ui-native-pure) : la sous-route
+    // `/calls` a été supprimée au profit de `settings?section=voip`.
+    const res = await page.goto(
+      `${target.consoleUrl}/settings?section=voip`,
+      {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      },
+    );
     expect(res?.status() ?? 0).toBeLessThan(500);
     const html = await page.content();
     // Pas de stack trace

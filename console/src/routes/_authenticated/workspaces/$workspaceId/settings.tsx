@@ -3,6 +3,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { App, Form, Input, InputNumber, Button, Select, Table, Tag, Modal, Avatar, Spin, Tooltip, Switch } from 'antd'
 import { SearchOutlined, EditOutlined, LoadingOutlined, PlusOutlined, InfoCircleOutlined } from '@ant-design/icons'
+import { PhoneCall, Search as SearchIcon } from 'lucide-react'
 import { api } from '../../../../lib/api'
 import { workspaceQueryOptions } from '../../../../lib/queries'
 import { IntegrationsSettings } from '../../../../components/settings/IntegrationsSettings'
@@ -12,10 +13,12 @@ import { CodeSnippet } from '../../../../components/setup/CodeSnippet'
 import { SmtpPage } from '../../../../pages/settings/smtp'
 import { ApiKeysPage } from '../../../../pages/settings/api-keys'
 import { VeridianSettingsPage } from '../../../../veridian/pages/settings'
+import { VoIPSettingsPanel } from '../../../../veridian/settings-panels/voip-panel'
+import { SearchConsoleSettingsPanel } from '../../../../veridian/settings-panels/search-console-panel'
 import { z } from 'zod'
 
 const settingsSearchSchema = z.object({
-  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'veridian', 'danger']).optional().default('workspace'),
+  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'veridian', 'voip', 'search-console', 'danger']).optional().default('workspace'),
 })
 
 export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/settings')({
@@ -56,9 +59,16 @@ const currencyOptions = [
   { value: 'BRL', label: 'BRL - Real brésilien' },
 ]
 
-type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'veridian' | 'danger'
+type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'veridian' | 'voip' | 'search-console' | 'danger'
 
-const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] = [
+type MenuItem = {
+  key: SettingsSection
+  label: string
+  ownerOnly?: boolean
+  icon?: React.ComponentType<{ size?: number; className?: string }>
+}
+
+const menuItems: MenuItem[] = [
   { key: 'workspace', label: 'Espace de travail' },
   { key: 'dimensions', label: 'Dimensions personnalisées' },
   { key: 'team', label: 'Équipe' },
@@ -68,6 +78,8 @@ const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] 
   { key: 'privacy', label: 'Confidentialité' },
   { key: 'sdk', label: 'Installer le SDK' },
   { key: 'veridian', label: 'Veridian' },
+  { key: 'voip', label: 'Téléphonie / VoIP', icon: PhoneCall },
+  { key: 'search-console', label: 'Search Console', icon: SearchIcon },
   { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
 ]
 
@@ -681,17 +693,19 @@ window.StaminadsConfig = {
               .filter((item) => !item.ownerOnly || isOwner)
               .map((item) => {
                 const isActive = section === item.key
+                const Icon = item.icon
                 return (
                   <button
                     key={item.key}
                     onClick={() => setActiveSection(item.key)}
-                    className={`w-full px-3 py-2 rounded-md text-left text-sm font-medium transition-colors ${
+                    className={`w-full px-3 py-2 rounded-md text-left text-sm font-medium transition-colors flex items-center gap-2 ${
                       isActive
                         ? 'bg-[var(--primary)] text-white'
                         : 'text-gray-600 hover:bg-gray-100'
                     }`}
                   >
-                    {item.label}
+                    {Icon && <Icon size={14} className="shrink-0" />}
+                    <span>{item.label}</span>
                   </button>
                 )
               })}
@@ -714,6 +728,15 @@ window.StaminadsConfig = {
               accountEmail={currentUser?.email}
               accountSettingsUrl={`/workspaces/${workspaceId}/account`}
               embedded
+            />
+          )}
+          {section === 'voip' && (
+            <VoIPSettingsPanel workspaceId={workspaceId} />
+          )}
+          {section === 'search-console' && (
+            <SearchConsoleSettingsPanel
+              workspaceId={workspaceId}
+              siteDomain={workspace.website || undefined}
             />
           )}
           {section === 'danger' && isOwner && dangerContent}
