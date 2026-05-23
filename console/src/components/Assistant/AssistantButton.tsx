@@ -7,7 +7,7 @@ export function AssistantButton() {
   const { isOpen, setIsOpen } = useAssistantContext()
 
   return (
-    <Tooltip title={isOpen ? 'Close assistant' : 'Ask AI to create a report'} placement="left">
+    <Tooltip title={isOpen ? "Fermer l'assistant" : "Demander à l'IA de créer un rapport"} placement="left">
       <FloatButton
         icon={isOpen ? <CloseOutlined /> : <Sparkles size={22} color="white" />}
         type="primary"

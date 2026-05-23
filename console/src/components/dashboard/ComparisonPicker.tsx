@@ -8,8 +8,8 @@ interface ComparisonPickerProps {
 }
 
 const COMPARISON_OPTIONS: { value: ComparisonMode; label: string }[] = [
-  { value: 'previous_period', label: 'Previous period' },
-  { value: 'previous_year', label: 'Previous year' },
+  { value: 'previous_period', label: 'Période précédente' },
+  { value: 'previous_year', label: 'Année précédente' },
 ]
 
 export function ComparisonPicker({ value, onChange, size }: ComparisonPickerProps) {

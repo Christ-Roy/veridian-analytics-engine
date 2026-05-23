@@ -42,7 +42,7 @@ export function MetricChart({
   if (currentData.length === 0) {
     return (
       <div className="flex items-center justify-center" style={{ height }}>
-        <Empty description="No data available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        <Empty description="Aucune donnée disponible" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       </div>
     )
   }

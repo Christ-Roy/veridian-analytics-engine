@@ -160,12 +160,12 @@ export function FilterFormModal({
         footer={
           <div className="flex justify-between">
             <Button onClick={handleTest} icon={<ExperimentOutlined />}>
-              Test
+              Tester
             </Button>
             <Space>
-              <Button onClick={onClose}>Cancel</Button>
+              <Button onClick={onClose}>Annuler</Button>
               <Button type="primary" onClick={handleSubmit} loading={isPending}>
-                {isEditing ? 'Save' : 'Create'}
+                {isEditing ? 'Enregistrer' : 'Créer'}
               </Button>
             </Space>
           </div>
@@ -175,18 +175,18 @@ export function FilterFormModal({
           <div className="grid grid-cols-3 gap-4">
             <Form.Item
               name="name"
-              label="Name"
-              rules={[{ required: true, message: 'Name is required' }]}
+              label="Nom"
+              rules={[{ required: true, message: 'Le nom est obligatoire' }]}
               className="col-span-2"
             >
-              <Input placeholder="e.g., Set Channel for Google Ads" />
+              <Input placeholder="ex : Définir le canal pour Google Ads" />
             </Form.Item>
 
             <Form.Item
               name="priority"
-              label="Priority"
-              tooltip="Higher priority filters are evaluated first (0-1000)"
-              rules={[{ required: true, message: 'Priority is required' }]}
+              label="Priorité"
+              tooltip="Les filtres de priorité plus élevée sont évalués en premier (0-1000)"
+              rules={[{ required: true, message: 'La priorité est obligatoire' }]}
             >
               <InputNumber min={0} max={1000} className="w-full" />
             </Form.Item>
@@ -197,12 +197,12 @@ export function FilterFormModal({
               <Select
                 mode="tags"
                 options={tagOptions}
-                placeholder="Add tags..."
+                placeholder="Ajouter des tags…"
                 tokenSeparators={[',']}
               />
             </Form.Item>
 
-            <Form.Item name="enabled" label="Enabled" valuePropName="checked">
+            <Form.Item name="enabled" label="Activé" valuePropName="checked">
               <Switch />
             </Form.Item>
           </div>
@@ -212,15 +212,15 @@ export function FilterFormModal({
             label="Conditions"
             validateTrigger={[]}
             rules={[
-              { required: true, message: 'At least one condition is required' },
+              { required: true, message: 'Au moins une condition est requise' },
               {
                 validator: (_, conditions: FilterCondition[]) => {
                   if (!conditions || conditions.length === 0) {
-                    return Promise.reject('At least one condition is required')
+                    return Promise.reject('Au moins une condition est requise')
                   }
                   for (const condition of conditions) {
                     if (!condition.value?.trim()) {
-                      return Promise.reject('All conditions must have a value')
+                      return Promise.reject('Toutes les conditions doivent avoir une valeur')
                     }
                   }
                   return Promise.resolve()
@@ -236,18 +236,18 @@ export function FilterFormModal({
 
           <Form.Item
             name="operations"
-            label="Operations"
+            label="Opérations"
             validateTrigger={[]}
             rules={[
-              { required: true, message: 'At least one operation is required' },
+              { required: true, message: 'Au moins une opération est requise' },
               {
                 validator: (_, operations: FilterOperation[]) => {
                   if (!operations || operations.length === 0) {
-                    return Promise.reject('At least one operation is required')
+                    return Promise.reject('Au moins une opération est requise')
                   }
                   for (const op of operations) {
                     if ((op.action === 'set_value' || op.action === 'set_default_value') && !op.value?.trim()) {
-                      return Promise.reject(`Value is required for ${op.action} action`)
+                      return Promise.reject(`Une valeur est requise pour l'action ${op.action}`)
                     }
                   }
                   return Promise.resolve()

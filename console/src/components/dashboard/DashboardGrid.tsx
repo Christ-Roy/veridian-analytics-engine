@@ -228,15 +228,15 @@ export function DashboardGrid({
   const pagesTabConfig: DimensionTabConfig[] = [
     {
       key: 'landing',
-      label: 'Landing pages',
+      label: 'Pages d\'entrée',
       dimensionLabel: 'Page',
       dimension: 'landing_path',
       metrics: ['sessions', 'median_duration', 'bounce_rate']
     },
     {
       key: 'exits',
-      label: 'Exits',
-      dimensionLabel: 'Exit page',
+      label: 'Sorties',
+      dimensionLabel: 'Page de sortie',
       dimension: 'exit_path',
       metrics: ['sessions', 'median_duration']
     }
@@ -245,20 +245,20 @@ export function DashboardGrid({
   const sourcesTabConfig: DimensionTabConfig[] = [
     {
       key: 'referrers',
-      label: 'Referrers',
-      dimensionLabel: 'Referrer domain',
+      label: 'Référents',
+      dimensionLabel: 'Domaine référent',
       dimension: 'referrer_domain'
     },
     {
       key: 'channels',
-      label: 'Channels',
-      dimensionLabel: 'Channel',
+      label: 'Canaux',
+      dimensionLabel: 'Canal',
       dimension: 'channel'
     },
     {
       key: 'channel_groups',
-      label: 'Channel groups',
-      dimensionLabel: 'Channel group',
+      label: 'Groupes de canaux',
+      dimensionLabel: 'Groupe de canaux',
       dimension: 'channel_group'
     }
   ]
@@ -266,7 +266,7 @@ export function DashboardGrid({
   const campaignsTabConfig: DimensionTabConfig[] = [
     {
       key: 'campaign',
-      label: 'Campaigns',
+      label: 'Campagnes',
       dimensionLabel: 'utm_campaign',
       dimension: 'utm_campaign',
       filters: [{ dimension: 'utm_campaign', operator: 'isNotEmpty' }]
@@ -280,21 +280,21 @@ export function DashboardGrid({
     },
     {
       key: 'medium',
-      label: 'Mediums',
+      label: 'Supports',
       dimensionLabel: 'utm_medium',
       dimension: 'utm_medium',
       filters: [{ dimension: 'utm_medium', operator: 'isNotEmpty' }]
     },
     {
       key: 'content',
-      label: 'Contents',
+      label: 'Contenus',
       dimensionLabel: 'utm_content',
       dimension: 'utm_content',
       filters: [{ dimension: 'utm_content', operator: 'isNotEmpty' }]
     },
     {
       key: 'term',
-      label: 'Terms',
+      label: 'Mots-clés',
       dimensionLabel: 'utm_term',
       dimension: 'utm_term',
       filters: [{ dimension: 'utm_term', operator: 'isNotEmpty' }]
@@ -304,31 +304,31 @@ export function DashboardGrid({
   const countriesTabConfig: DimensionTabConfig[] = [
     {
       key: 'map',
-      label: 'Map',
-      dimensionLabel: 'Country',
+      label: 'Carte',
+      dimensionLabel: 'Pays',
       dimension: 'country',
       type: 'country_map',
       limit: 100
     },
     {
       key: 'list',
-      label: 'List',
-      dimensionLabel: 'Country',
+      label: 'Liste',
+      dimensionLabel: 'Pays',
       dimension: 'country'
     }
   ]
 
   const devicesTabConfig: DimensionTabConfig[] = [
-    { key: 'devices', label: 'Devices', dimensionLabel: 'Device', dimension: 'device' },
-    { key: 'browsers', label: 'Browsers', dimensionLabel: 'Browser', dimension: 'browser' },
+    { key: 'devices', label: 'Appareils', dimensionLabel: 'Appareil', dimension: 'device' },
+    { key: 'browsers', label: 'Navigateurs', dimensionLabel: 'Navigateur', dimension: 'browser' },
     { key: 'os', label: 'OS', dimensionLabel: 'OS', dimension: 'os' }
   ]
 
   const goalsTabConfig: DimensionTabConfig[] = [
     {
       key: 'goals',
-      label: 'Goals',
-      dimensionLabel: 'Goal',
+      label: 'Objectifs',
+      dimensionLabel: 'Objectif',
       dimension: 'goal_name',
       table: 'goals',
       metrics: ['goals', 'sum_goal_value'],
@@ -337,8 +337,8 @@ export function DashboardGrid({
   ]
 
   const goalsColumns: ColumnConfig[] = [
-    { key: 'goals', label: 'Count', format: 'number' },
-    { key: 'sum_goal_value', label: 'Value', format: 'currency', currency: workspaceCurrency }
+    { key: 'goals', label: 'Nombre', format: 'number' },
+    { key: 'sum_goal_value', label: 'Valeur', format: 'currency', currency: workspaceCurrency }
   ]
 
   // Mapping from tab key to dimension for click-to-filter
@@ -393,8 +393,8 @@ export function DashboardGrid({
   if (isError) {
     return (
       <Alert
-        message="Error loading dashboard data"
-        description={error instanceof Error ? error.message : 'An unexpected error occurred'}
+        message="Erreur lors du chargement des données du tableau de bord"
+        description={error instanceof Error ? error.message : "Une erreur inattendue s'est produite"}
         type="error"
         showIcon
       />
@@ -452,12 +452,12 @@ export function DashboardGrid({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <DimensionTableWidget
-            title="Top Pages"
+            title="Pages les plus consultées"
             tabs={pagesTabConfig}
             onRowClick={handleRowClick}
           />
           <DimensionTableWidget
-            title="Top Sources"
+            title="Sources principales"
             tabs={sourcesTabConfig}
             iconPrefix={(value, tabKey) =>
               tabKey === 'referrers' && value ? (
@@ -477,33 +477,33 @@ export function DashboardGrid({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <DimensionTableWidget
-            title="Top Campaigns"
+            title="Campagnes principales"
             tabs={campaignsTabConfig}
-            emptyText="No campaign data"
+            emptyText="Aucune donnée de campagne"
             onRowClick={handleRowClick}
           />
           <DimensionTableWidget
-            title="Countries"
+            title="Pays"
             tabs={countriesTabConfig}
             iconPrefix={(value, tabKey) =>
               tabKey === 'list' && value ? <span className={`fi fi-${value.toLowerCase()} shrink-0 relative`} /> : null
             }
-            emptyText="No country data"
+            emptyText="Aucune donnée de pays"
             onRowClick={handleRowClick}
           />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <TrafficHeatmapWidget
-            title="Traffic by Day and Hour"
+            title="Trafic par jour et heure"
             data={heatmapData}
             loading={heatmapFetching && !heatmapResponse}
             timescoreReference={timescoreReference}
-            emptyText="No traffic data"
+            emptyText="Aucune donnée de trafic"
             onCellClick={handleHeatmapCellClick}
           />
           <DimensionTableWidget
-            title="Devices"
+            title="Appareils"
             tabs={devicesTabConfig}
             iconPrefix={getDeviceIcon}
             onRowClick={handleRowClick}
@@ -512,11 +512,11 @@ export function DashboardGrid({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <DimensionTableWidget
-            title="Goals"
-            infoTooltip="Track goal conversions and their total value"
+            title="Objectifs"
+            infoTooltip="Suivez les conversions de vos objectifs et leur valeur totale"
             tabs={goalsTabConfig}
             columns={goalsColumns}
-            emptyText="No goals data"
+            emptyText="Aucune donnée d'objectif"
             onRowClick={handleRowClick}
           />
         </div>

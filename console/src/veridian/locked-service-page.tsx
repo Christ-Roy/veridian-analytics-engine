@@ -37,13 +37,13 @@ const ICON_MAP: Record<ShadowIconKey, React.ComponentType<{ className?: string }
 };
 
 const LOCKED_TITLE: Record<ServiceKey, string> = {
-  pageviews: 'Tracking site verrouille',
-  forms: 'Suivi des formulaires verrouille',
-  calls: 'Appels telephoniques verrouilles',
-  gsc: 'Google Search Console verrouille',
-  ads: 'Suivi Google Ads verrouille',
-  pagespeed: 'Monitoring PageSpeed verrouille',
-  push: 'Notifications push verroullees',
+  pageviews: 'Tracking site verrouillé',
+  forms: 'Suivi des formulaires verrouillé',
+  calls: 'Appels téléphoniques verrouillés',
+  gsc: 'Google Search Console verrouillé',
+  ads: 'Suivi Google Ads verrouillé',
+  pagespeed: 'Monitoring PageSpeed verrouillé',
+  push: 'Notifications push verrouillées',
 };
 
 export function LockedServicePage({
@@ -111,8 +111,8 @@ export function LockedServicePage({
           <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/10 px-4 py-2 text-[11px] text-muted-foreground/70">
             <RefreshCw className="h-3 w-3" />
             <span>
-              Des que ce service sera active, cette page s&apos;ouvrira
-              automatiquement au prochain reload.
+              Dès que ce service sera activé, cette page s&apos;ouvrira
+              automatiquement au prochain rechargement.
             </span>
           </div>
         </CardContent>

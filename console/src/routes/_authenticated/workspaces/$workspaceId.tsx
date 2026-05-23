@@ -121,13 +121,13 @@ function WorkspaceLayout() {
   }
 
   const settingsMenuItems = [
-    { key: 'workspace', label: 'Workspace' },
-    { key: 'dimensions', label: 'Custom Dimensions' },
-    { key: 'team', label: 'Team' },
-    { key: 'integrations', label: 'Integrations' },
+    { key: 'workspace', label: 'Espace de travail' },
+    { key: 'dimensions', label: 'Dimensions personnalisées' },
+    { key: 'team', label: 'Équipe' },
+    { key: 'integrations', label: 'Intégrations' },
     { key: 'smtp', label: 'Email (SMTP)' },
-    { key: 'api-keys', label: 'API Keys' },
-    { key: 'sdk', label: 'Install SDK' },
+    { key: 'api-keys', label: 'Clés API' },
+    { key: 'sdk', label: 'Installer le SDK' },
   ] as const
 
   const closeMobileMenu = () => {
@@ -185,7 +185,7 @@ function WorkspaceLayout() {
                   label: (
                     <div className="flex items-center gap-2 text-[var(--primary)]">
                       <PlusOutlined />
-                      <span>New workspace</span>
+                      <span>Nouvel espace de travail</span>
                     </div>
                   ),
                 }] : []),
@@ -214,13 +214,13 @@ function WorkspaceLayout() {
                 <div className="h-5 w-px bg-gray-200" />
                 <nav className="flex gap-1 pl-2">
                 {[
-                  { to: '/workspaces/$workspaceId', label: 'Dashboard', exact: true },
-                  { to: '/workspaces/$workspaceId/explore', label: 'Explore' },
-                  { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
-                  { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
+                  { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
+                  { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
+                  { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
+                  { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
                   { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                   { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
-                  { to: '/workspaces/$workspaceId/settings', label: 'Settings' },
+                  { to: '/workspaces/$workspaceId/settings', label: 'Paramètres' },
                 ].map(({ to, label, exact }) => {
                   const resolvedPath = to.replace('$workspaceId', workspaceId)
                   const isActive = exact
@@ -264,7 +264,7 @@ function WorkspaceLayout() {
             {isWorkspaceActive && (
               <>
                 <SyncStatusIcon workspaceId={workspaceId} />
-                <Tooltip title={`Timezone: ${timezone}`} placement="left">
+                <Tooltip title={`Fuseau horaire : ${timezone}`} placement="left">
                   <Popover
                     open={timezonePopoverOpen}
                     onOpenChange={setTimezonePopoverOpen}
@@ -278,7 +278,7 @@ function WorkspaceLayout() {
                         onChange={(value) => {
                           setTimezone(value)
                           setTimezonePopoverOpen(false)
-                          message.success(`Timezone set to ${value}`)
+                          message.success(`Fuseau horaire défini sur ${value}`)
                         }}
                         variant="filled"
                         className="w-48"
@@ -321,7 +321,7 @@ function WorkspaceLayout() {
                     icon: <ExclamationCircleOutlined />,
                     label: (
                       <a href={BRAND.issuesUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
-                        Report an issue
+                        Signaler un problème
                         <ExternalLink size={12} className="text-gray-400" />
                       </a>
                     ),
@@ -349,14 +349,14 @@ function WorkspaceLayout() {
                     {
                       key: 'account',
                       icon: <UserOutlined />,
-                      label: 'Account',
+                      label: 'Compte',
                       onClick: () => navigate({ to: '/workspaces/$workspaceId/account', params: { workspaceId } }),
                     },
                     { type: 'divider' },
                     {
                       key: 'logout',
                       icon: <LogoutOutlined />,
-                      label: 'Logout',
+                      label: 'Déconnexion',
                       onClick: handleLogout,
                     },
                   ],
@@ -434,7 +434,7 @@ function WorkspaceLayout() {
                   label: (
                     <div className="flex items-center gap-2 text-[var(--primary)]">
                       <PlusOutlined />
-                      <span>New workspace</span>
+                      <span>Nouvel espace de travail</span>
                     </div>
                   ),
                 }] : []),
@@ -466,10 +466,10 @@ function WorkspaceLayout() {
               {mobileMenuLevel === 'main' ? (
                 <>
                   {[
-                    { to: '/workspaces/$workspaceId', label: 'Dashboard', exact: true },
-                    { to: '/workspaces/$workspaceId/explore', label: 'Explore' },
-                    { to: '/workspaces/$workspaceId/goals', label: 'Goals' },
-                    { to: '/workspaces/$workspaceId/filters', label: 'Filters' },
+                    { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
+                    { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
+                    { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
+                    { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
                     { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                     { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
                   ].map(({ to, label, exact }) => {
@@ -501,7 +501,7 @@ function WorkspaceLayout() {
                         : 'text-gray-700 hover:bg-gray-50'
                     }`}
                   >
-                    Settings
+                    Paramètres
                     <RightOutlined className="text-gray-400" />
                   </button>
                 </>
@@ -512,7 +512,7 @@ function WorkspaceLayout() {
                     className="flex items-center gap-2 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full text-left border-b border-gray-200"
                   >
                     <LeftOutlined />
-                    Back
+                    Retour
                   </button>
                   {settingsMenuItems.map((item) => (
                     <Link
@@ -537,12 +537,12 @@ function WorkspaceLayout() {
           {/* Timezone Picker */}
           {isWorkspaceActive && (
             <div className="p-4">
-              <div className="text-xs text-gray-500 mb-2">Timezone</div>
+              <div className="text-xs text-gray-500 mb-2">Fuseau horaire</div>
               <Select
                 value={timezone}
                 onChange={(value) => {
                   setTimezone(value)
-                  message.success(`Timezone set to ${value}`)
+                  message.success(`Fuseau horaire défini sur ${value}`)
                 }}
                 variant="filled"
                 className="w-full"
@@ -575,7 +575,7 @@ function WorkspaceLayout() {
               className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
             >
               <ExclamationCircleOutlined />
-              <span className="flex-1">Report an issue</span>
+              <span className="flex-1">Signaler un problème</span>
               <ExternalLink size={12} className="text-gray-400" />
             </a>
             <div className="px-4 py-2 text-xs text-gray-400">
@@ -596,7 +596,7 @@ function WorkspaceLayout() {
                 className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
               >
                 <UserOutlined />
-                Account
+                Compte
               </Link>
 
               {/* Logout */}
@@ -608,7 +608,7 @@ function WorkspaceLayout() {
                 className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full text-left"
               >
                 <LogoutOutlined />
-                Logout
+                Déconnexion
               </button>
             </>
           )}

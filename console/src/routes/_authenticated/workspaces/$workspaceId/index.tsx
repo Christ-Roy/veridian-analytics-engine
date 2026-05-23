@@ -71,7 +71,7 @@ function Dashboard() {
       <SdkVersionWarning workspaceId={workspaceId} timezone={workspace.timezone} />
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-light text-gray-800">Dashboard</h1>
+          <h1 className="text-2xl font-light text-gray-800">Tableau de bord</h1>
           <LiveButton workspaceId={workspaceId} workspaceTimezone={workspace.timezone} />
         </div>
         <DashboardFilters

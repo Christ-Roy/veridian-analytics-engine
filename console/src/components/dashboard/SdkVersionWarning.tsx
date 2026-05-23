@@ -62,11 +62,11 @@ export function SdkVersionWarning({ workspaceId, timezone }: SdkVersionWarningPr
       message={
         <div className="flex items-center justify-between">
           <span>
-            Outdated SDK detected ({versions[0]} → {currentVersion})
+            SDK obsolète détecté ({versions[0]} → {currentVersion})
           </span>
           <Link to="/workspaces/$workspaceId/settings" params={{ workspaceId }} search={{ section: 'sdk' }}>
             <Button type="link" size="small" className="p-0">
-              Update SDK
+              Mettre à jour le SDK
             </Button>
           </Link>
         </div>

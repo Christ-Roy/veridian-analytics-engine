@@ -22,7 +22,7 @@ function UnsubscribePage() {
   useEffect(() => {
     if (!token) {
       setLoading(false)
-      setError('Invalid unsubscribe link')
+      setError('Lien de désinscription invalide')
       return
     }
 
@@ -31,7 +31,7 @@ function UnsubscribePage() {
         await api.subscriptions.unsubscribe(token!)
         setSuccess(true)
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unsubscribe failed')
+        setError(err instanceof Error ? err.message : 'Échec de la désinscription')
       } finally {
         setLoading(false)
       }
@@ -53,17 +53,17 @@ function UnsubscribePage() {
         {loading ? (
           <div className="text-center py-8">
             <Spin size="large" />
-            <p className="mt-4 text-gray-500">Processing your request...</p>
+            <p className="mt-4 text-gray-500">Traitement de votre demande…</p>
           </div>
         ) : success ? (
           <Result
             status="success"
-            title="Successfully Unsubscribed"
-            subTitle="You will no longer receive this email report."
+            title="Désinscription réussie"
+            subTitle="Vous ne recevrez plus ce rapport email."
             extra={[
               <Link to="/login" key="login">
                 <Button type="primary">
-                  Sign in to manage subscriptions
+                  Se connecter pour gérer les abonnements
                 </Button>
               </Link>,
             ]}
@@ -71,12 +71,12 @@ function UnsubscribePage() {
         ) : (
           <Result
             status="error"
-            title="Unsubscribe Failed"
-            subTitle={error || 'The unsubscribe link may be invalid or expired.'}
+            title="Échec de la désinscription"
+            subTitle={error || 'Le lien de désinscription est peut-être invalide ou expiré.'}
             extra={[
               <Link to="/login" key="login">
                 <Button type="primary">
-                  Sign in to manage subscriptions
+                  Se connecter pour gérer les abonnements
                 </Button>
               </Link>,
             ]}

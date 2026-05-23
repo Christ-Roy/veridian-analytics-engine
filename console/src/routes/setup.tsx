@@ -47,7 +47,7 @@ function SetupPage() {
 
       if (!res.ok) {
         const error = await res.json()
-        message.error(error.message || 'Failed to create admin account')
+        message.error(error.message || 'Échec de la création du compte administrateur')
         return
       }
 
@@ -65,12 +65,12 @@ function SetupPage() {
         })
       )
 
-      message.success('Admin account created successfully')
+      message.success('Compte administrateur créé avec succès')
 
       // Reload page to pick up new auth state
       window.location.href = '/'
     } catch {
-      message.error('Failed to create admin account')
+      message.error('Échec de la création du compte administrateur')
     }
   }
 
@@ -84,22 +84,22 @@ function SetupPage() {
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-sm">
         <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-8 mx-auto mb-4" />
         <h1 className="text-xl font-semibold text-center text-gray-800 mb-2">
-          Welcome to Veridian Analytics
+          Bienvenue sur Veridian Analytics
         </h1>
         <p className="text-sm text-gray-500 text-center mb-6">
-          Create your admin account to get started
+          Créez votre compte administrateur pour démarrer
         </p>
         <Form form={form} onFinish={onFinish} layout="vertical">
           <Form.Item
             name="name"
-            rules={[{ required: true, message: 'Name is required' }]}
+            rules={[{ required: true, message: 'Le nom est obligatoire' }]}
           >
-            <Input placeholder="Your name" size="large" />
+            <Input placeholder="Votre nom" size="large" />
           </Form.Item>
           <Form.Item
             name="email"
             rules={[
-              { required: true, type: 'email', message: 'Valid email required' },
+              { required: true, type: 'email', message: 'Email valide requis' },
             ]}
           >
             <Input placeholder="Email" size="large" />
@@ -107,32 +107,32 @@ function SetupPage() {
           <Form.Item
             name="password"
             rules={[
-              { required: true, message: 'Password required' },
-              { min: 8, message: 'Password must be at least 8 characters' },
+              { required: true, message: 'Mot de passe requis' },
+              { min: 8, message: 'Le mot de passe doit faire au moins 8 caractères' },
             ]}
           >
-            <Input.Password placeholder="Password" size="large" />
+            <Input.Password placeholder="Mot de passe" size="large" />
           </Form.Item>
           <Form.Item
             name="confirmPassword"
             dependencies={['password']}
             rules={[
-              { required: true, message: 'Please confirm your password' },
+              { required: true, message: 'Veuillez confirmer votre mot de passe' },
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   if (!value || getFieldValue('password') === value) {
                     return Promise.resolve()
                   }
-                  return Promise.reject(new Error('Passwords do not match'))
+                  return Promise.reject(new Error('Les mots de passe ne correspondent pas'))
                 },
               }),
             ]}
           >
-            <Input.Password placeholder="Confirm password" size="large" />
+            <Input.Password placeholder="Confirmer le mot de passe" size="large" />
           </Form.Item>
           <Form.Item className="mb-0">
             <Button type="primary" htmlType="submit" block size="large">
-              Create Admin Account
+              Créer le compte administrateur
             </Button>
           </Form.Item>
         </Form>

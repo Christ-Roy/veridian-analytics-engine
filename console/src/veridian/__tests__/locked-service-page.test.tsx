@@ -6,7 +6,7 @@ describe('LockedServicePage', () => {
   it('renders locked title for the service', () => {
     render(<LockedServicePage service="calls" siteDomain="tramtech.fr" />);
     expect(screen.getByTestId('locked-title')).toHaveTextContent(
-      'Appels telephoniques verrouilles',
+      'Appels téléphoniques verrouillés',
     );
   });
 

@@ -33,12 +33,12 @@ function NewWorkspaceForm() {
     mutationFn: api.workspaces.create,
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] })
-      message.success('Workspace created')
+      message.success('Espace de travail créé')
       // Veridian onboarding (sprint UI-WELCOME-NATIVE, 2026-05-22) : nouveau
       // workspace → wizard `welcome` (au lieu de `install-sdk` staminads upstream).
       navigate({ to: '/workspaces/$workspaceId/welcome', params: { workspaceId: data.id } })
     },
-    onError: () => message.error('Failed to create workspace'),
+    onError: () => message.error('Échec de la création de l\'espace de travail'),
   })
 
   const onFinish = (values: { id: string; name: string; website: string; logo_url?: string }) => {
@@ -52,7 +52,7 @@ function NewWorkspaceForm() {
   const detectLogo = async (url?: string) => {
     const website = url || form.getFieldValue('website')
     if (!website) {
-      message.warning('Please enter a website URL first')
+      message.warning('Veuillez d\'abord saisir l\'URL du site')
       return
     }
 
@@ -61,12 +61,12 @@ function NewWorkspaceForm() {
       const meta = await api.tools.websiteMeta(website)
       if (meta.logo_url) {
         form.setFieldValue('logo_url', meta.logo_url)
-        message.success('Logo detected')
+        message.success('Logo détecté')
       } else {
-        message.info('No logo found for this website')
+        message.info('Aucun logo trouvé pour ce site')
       }
     } catch {
-      message.error('Failed to detect logo')
+      message.error('Échec de la détection du logo')
     } finally {
       setDetectingLogo(false)
     }
@@ -106,46 +106,46 @@ function NewWorkspaceForm() {
     <div className="flex-1 flex items-center justify-center p-6">
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-md">
         <h2 className="text-2xl font-light text-center mb-8 text-gray-800">
-          New Workspace
+          Nouvel espace de travail
         </h2>
 
         <Form form={form} layout="vertical" onFinish={onFinish} onValuesChange={onValuesChange}>
           <Form.Item
             name="name"
-            label="Name"
-            rules={[{ required: true, message: 'Name is required' }]}
+            label="Nom"
+            rules={[{ required: true, message: 'Le nom est obligatoire' }]}
           >
-            <Input placeholder="My Website" />
+            <Input placeholder="Mon site" />
           </Form.Item>
 
           <Form.Item
             name="id"
-            label="ID"
+            label="Identifiant"
             rules={[
-              { required: true, message: 'ID is required' },
-              { pattern: /^[a-z][a-z0-9_]*$/, message: 'Must start with a letter and contain only lowercase letters, numbers, and underscores' },
+              { required: true, message: 'L\'identifiant est obligatoire' },
+              { pattern: /^[a-z][a-z0-9_]*$/, message: 'Doit commencer par une lettre et ne contenir que des lettres minuscules, chiffres et underscores' },
             ]}
           >
-            <Input placeholder="my_website" />
+            <Input placeholder="mon_site" />
           </Form.Item>
 
           <Form.Item
             name="website"
-            label="Website"
+            label="Site web"
             rules={[
-              { required: true, message: 'Website is required' },
-              { type: 'url', message: 'Must be a valid URL' }
+              { required: true, message: 'Le site est obligatoire' },
+              { type: 'url', message: 'L\'URL doit être valide' }
             ]}
           >
-            <Input placeholder="https://example.com" />
+            <Input placeholder="https://exemple.fr" />
           </Form.Item>
 
           <Form.Item
             name="logo_url"
-            label="Logo URL"
+            label="URL du logo"
           >
             <Input
-              placeholder="https://example.com/logo.png"
+              placeholder="https://exemple.fr/logo.png"
               suffix={
                 <Button
                   type="link"
@@ -155,7 +155,7 @@ function NewWorkspaceForm() {
                   onClick={() => detectLogo()}
                   className="!p-0 !h-auto"
                 >
-                  Detect
+                  Détecter
                 </Button>
               }
               prefix={
@@ -173,7 +173,7 @@ function NewWorkspaceForm() {
               loading={mutation.isPending}
               block
             >
-              Create Workspace
+              Créer l'espace de travail
             </Button>
           </Form.Item>
         </Form>

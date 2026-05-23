@@ -149,7 +149,7 @@ export function CountryMapView({
   if (data.length === 0) {
     return (
       <Empty
-        description="No country data"
+        description="Aucune donnée de pays"
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         className="py-8"
       />

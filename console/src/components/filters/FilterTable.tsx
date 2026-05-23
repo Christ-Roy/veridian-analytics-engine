@@ -79,7 +79,7 @@ function MobileFilterCard({
         <div className="mt-4 pt-4 border-t border-gray-100 space-y-4">
           {/* Priority */}
           <div className="text-sm">
-            <span className="text-gray-500">Priority:</span>
+            <span className="text-gray-500">Priorité :</span>
             <span className="font-medium ml-1">{filter.priority}</span>
           </div>
 
@@ -87,7 +87,7 @@ function MobileFilterCard({
           <div>
             <div className="text-xs text-gray-400 uppercase font-medium mb-2">Conditions</div>
             {filter.conditions.length === 0 ? (
-              <span className="text-gray-400 italic text-sm">(always matches)</span>
+              <span className="text-gray-400 italic text-sm">(correspond toujours)</span>
             ) : (
               <div className="space-y-2">
                 {filter.conditions.map((c, i) => (
@@ -103,7 +103,7 @@ function MobileFilterCard({
 
           {/* Operations */}
           <div>
-            <div className="text-xs text-gray-400 uppercase font-medium mb-2">Operations</div>
+            <div className="text-xs text-gray-400 uppercase font-medium mb-2">Opérations</div>
             <div className="space-y-2">
               {filter.operations.map((op, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-1 text-sm">
@@ -111,9 +111,9 @@ function MobileFilterCard({
                     {getDimensionLabel(op.dimension, customDimensionLabels)}
                   </Tag>
                   <Tag bordered={false} color="orange">
-                    {op.action === 'set_value' && 'set to'}
-                    {op.action === 'unset_value' && 'unset'}
-                    {op.action === 'set_default_value' && 'default to'}
+                    {op.action === 'set_value' && 'défini à'}
+                    {op.action === 'unset_value' && 'effacé'}
+                    {op.action === 'set_default_value' && 'par défaut à'}
                   </Tag>
                   {op.action !== 'unset_value' && op.value && <Tag>{op.value}</Tag>}
                 </div>
@@ -123,13 +123,13 @@ function MobileFilterCard({
 
           {/* Actions */}
           <div className="flex gap-2 pt-2">
-            <Popconfirm title="Delete this filter?" onConfirm={onDelete} okText="Delete">
+            <Popconfirm title="Supprimer ce filtre ?" onConfirm={onDelete} okText="Supprimer" cancelText="Annuler">
               <Button block size="small" icon={<DeleteOutlined />}>
-                Delete
+                Supprimer
               </Button>
             </Popconfirm>
             <Button block size="small" icon={<EditOutlined />} onClick={onEdit}>
-              Edit
+              Modifier
             </Button>
           </div>
         </div>
@@ -189,7 +189,7 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
 
   const columns: ColumnsType<FilterWithStaleness> = [
     {
-      title: 'Priority',
+      title: 'Priorité',
       dataIndex: 'priority',
       key: 'priority',
       width: 80,
@@ -198,7 +198,7 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
       ),
     },
     {
-      title: 'Name',
+      title: 'Nom',
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record) => (
@@ -212,7 +212,7 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
       key: 'conditions',
       render: (_, record) => {
         if (record.conditions.length === 0) {
-          return <span className="text-gray-400 italic">(always matches)</span>
+          return <span className="text-gray-400 italic">(correspond toujours)</span>
         }
         const visibleConditions = record.conditions.slice(0, 2)
         const hiddenConditions = record.conditions.slice(2)
@@ -241,7 +241,7 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
                 }
               >
                 <span className="text-gray-400 text-xs cursor-pointer hover:text-gray-600">
-                  +{hiddenCount} more
+                  +{hiddenCount} de plus
                 </span>
               </Popover>
             )}
@@ -250,7 +250,7 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
       },
     },
     {
-      title: 'Operations',
+      title: 'Opérations',
       key: 'operations',
       render: (_, record) => (
         <div className="flex flex-col gap-1">
@@ -262,9 +262,9 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
                 </Tag>
               </Tooltip>
               <Tag bordered={false} color="orange">
-                {op.action === 'set_value' && 'set to'}
-                {op.action === 'unset_value' && 'unset'}
-                {op.action === 'set_default_value' && 'default to'}
+                {op.action === 'set_value' && 'défini à'}
+                {op.action === 'unset_value' && 'effacé'}
+                {op.action === 'set_default_value' && 'par défaut à'}
               </Tag>
               {op.action !== 'unset_value' && op.value && <Tag>{op.value}</Tag>}
             </div>
@@ -285,17 +285,17 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
       ),
     },
     {
-      title: 'Status',
+      title: 'Statut',
       key: 'status',
       width: 80,
       render: (_, record) => (
         <Popconfirm
-          title={record.enabled ? 'Disable this filter?' : 'Enable this filter?'}
+          title={record.enabled ? 'Désactiver ce filtre ?' : 'Activer ce filtre ?'}
           onConfirm={() =>
             updateMutation.mutate({ id: record.id, enabled: !record.enabled })
           }
-          okText="Yes"
-          cancelText="No"
+          okText="Oui"
+          cancelText="Non"
         >
           <Switch checked={record.enabled} size="small" />
         </Popconfirm>
@@ -312,9 +312,10 @@ export function FilterTable({ workspaceId, filters, onEdit, searchText = '', cus
           className="opacity-0 transition-opacity [.ant-table-row:hover_&]:opacity-100"
         >
           <Popconfirm
-            title="Delete this filter?"
+            title="Supprimer ce filtre ?"
             onConfirm={() => deleteMutation.mutate(record.id)}
-            okText="Delete"
+            okText="Supprimer"
+            cancelText="Annuler"
           >
             <Button type="text" size="small" icon={<DeleteOutlined />} />
           </Popconfirm>

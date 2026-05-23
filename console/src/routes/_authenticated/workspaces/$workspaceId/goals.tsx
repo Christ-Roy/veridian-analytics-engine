@@ -329,7 +329,7 @@ function Goals() {
   return (
     <div className="p-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <h1 className="text-2xl font-semibold">Goals</h1>
+        <h1 className="text-2xl font-semibold">Objectifs</h1>
         <div className="flex items-center gap-2">
           <DateRangePicker
             period={period as DatePreset}
@@ -351,7 +351,7 @@ function Goals() {
         </div>
       ) : goalsData.length === 0 ? (
         <Empty
-          description="No goals tracked yet"
+          description="Aucun objectif suivi pour le moment"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           className="py-12"
         />

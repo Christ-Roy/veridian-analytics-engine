@@ -25,9 +25,9 @@ export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/ac
 })
 
 const menuItems: { key: AccountSection; label: string }[] = [
-  { key: 'profile', label: 'Profile' },
-  { key: 'password', label: 'Change Password' },
-  { key: 'email', label: 'Change Email' },
+  { key: 'profile', label: 'Profil' },
+  { key: 'password', label: 'Changer le mot de passe' },
+  { key: 'email', label: 'Changer l\'email' },
   { key: 'notifications', label: 'Notifications' },
 ]
 
@@ -73,10 +73,10 @@ function AccountPage() {
     mutationFn: api.auth.updateProfile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user'] })
-      message.success('Profile updated')
+      message.success('Profil mis à jour')
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to update profile')
+      message.error(error.message || 'Échec de la mise à jour du profil')
     },
   })
 
@@ -90,18 +90,18 @@ function AccountPage() {
     mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
       api.auth.changePassword(currentPassword, newPassword),
     onSuccess: () => {
-      message.success('Password changed. Please log in again.')
+      message.success('Mot de passe modifié. Veuillez vous reconnecter.')
       logout()
       navigate({ to: '/login' })
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to change password')
+      message.error(error.message || 'Échec du changement de mot de passe')
     },
   })
 
   const onPasswordSubmit = (values: { currentPassword: string; newPassword: string; confirmPassword: string }) => {
     if (values.newPassword !== values.confirmPassword) {
-      message.error('New passwords do not match')
+      message.error('Les nouveaux mots de passe ne correspondent pas')
       return
     }
     changePasswordMutation.mutate({
@@ -116,11 +116,11 @@ function AccountPage() {
     mutationFn: api.auth.updateProfile,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user'] })
-      message.success('Email updated')
+      message.success('Email mis à jour')
       emailForm.resetFields(['newEmail'])
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to update email')
+      message.error(error.message || 'Échec de la mise à jour de l\'email')
     },
   })
 
@@ -132,7 +132,7 @@ function AccountPage() {
   const pauseSubscription = useMutation({
     mutationFn: (id: string) => api.subscriptions.pause(workspaceId, id),
     onSuccess: () => {
-      message.success('Subscription paused')
+      message.success('Abonnement mis en pause')
       refetchSubscriptions()
     },
     onError: (error: Error) => message.error(error.message),
@@ -141,7 +141,7 @@ function AccountPage() {
   const resumeSubscription = useMutation({
     mutationFn: (id: string) => api.subscriptions.resume(workspaceId, id),
     onSuccess: () => {
-      message.success('Subscription resumed')
+      message.success('Abonnement réactivé')
       refetchSubscriptions()
     },
     onError: (error: Error) => message.error(error.message),
@@ -150,7 +150,7 @@ function AccountPage() {
   const deleteSubscription = useMutation({
     mutationFn: (id: string) => api.subscriptions.delete(workspaceId, id),
     onSuccess: () => {
-      message.success('Subscription deleted')
+      message.success('Abonnement supprimé')
       refetchSubscriptions()
     },
     onError: (error: Error) => message.error(error.message),
@@ -159,7 +159,7 @@ function AccountPage() {
   const sendNowSubscription = useMutation({
     mutationFn: (id: string) => api.subscriptions.sendNow(workspaceId, id),
     onSuccess: () => {
-      message.success('Report sent!')
+      message.success('Rapport envoyé !')
       refetchSubscriptions()
     },
     onError: (error: Error) => message.error(error.message),
@@ -175,10 +175,10 @@ function AccountPage() {
       >
         <Form.Item
           name="name"
-          label="Name"
-          rules={[{ required: true, message: 'Name is required' }]}
+          label="Nom"
+          rules={[{ required: true, message: 'Le nom est obligatoire' }]}
         >
-          <Input placeholder="Your name" />
+          <Input placeholder="Votre nom" />
         </Form.Item>
         <Form.Item className="mb-0">
           <Button
@@ -186,7 +186,7 @@ function AccountPage() {
             htmlType="submit"
             loading={updateProfileMutation.isPending}
           >
-            Save
+            Enregistrer
           </Button>
         </Form.Item>
       </Form>
@@ -203,37 +203,37 @@ function AccountPage() {
       >
         <Form.Item
           name="currentPassword"
-          label="Current Password"
-          rules={[{ required: true, message: 'Current password is required' }]}
+          label="Mot de passe actuel"
+          rules={[{ required: true, message: 'Le mot de passe actuel est obligatoire' }]}
         >
-          <Input.Password placeholder="Enter current password" />
+          <Input.Password placeholder="Entrez le mot de passe actuel" />
         </Form.Item>
         <Form.Item
           name="newPassword"
-          label="New Password"
+          label="Nouveau mot de passe"
           rules={[
-            { required: true, message: 'New password is required' },
-            { min: 8, message: 'Password must be at least 8 characters' },
+            { required: true, message: 'Le nouveau mot de passe est obligatoire' },
+            { min: 8, message: 'Le mot de passe doit faire au moins 8 caractères' },
           ]}
         >
-          <Input.Password placeholder="Enter new password" />
+          <Input.Password placeholder="Entrez le nouveau mot de passe" />
         </Form.Item>
         <Form.Item
           name="confirmPassword"
-          label="Confirm New Password"
+          label="Confirmer le nouveau mot de passe"
           rules={[
-            { required: true, message: 'Please confirm your new password' },
+            { required: true, message: 'Veuillez confirmer votre nouveau mot de passe' },
             ({ getFieldValue }) => ({
               validator(_, value) {
                 if (!value || getFieldValue('newPassword') === value) {
                   return Promise.resolve()
                 }
-                return Promise.reject(new Error('Passwords do not match'))
+                return Promise.reject(new Error('Les mots de passe ne correspondent pas'))
               },
             }),
           ]}
         >
-          <Input.Password placeholder="Confirm new password" />
+          <Input.Password placeholder="Confirmez le nouveau mot de passe" />
         </Form.Item>
         <Form.Item className="mb-0">
           <Button
@@ -241,7 +241,7 @@ function AccountPage() {
             htmlType="submit"
             loading={changePasswordMutation.isPending}
           >
-            Change Password
+            Changer le mot de passe
           </Button>
         </Form.Item>
       </Form>
@@ -256,18 +256,18 @@ function AccountPage() {
         layout="vertical"
         onFinish={onEmailSubmit}
       >
-        <Form.Item label="Current Email">
+        <Form.Item label="Email actuel">
           <Input value={user?.email || ''} disabled />
         </Form.Item>
         <Form.Item
           name="newEmail"
-          label="New Email"
+          label="Nouvel email"
           rules={[
-            { required: true, message: 'New email is required' },
-            { type: 'email', message: 'Please enter a valid email' },
+            { required: true, message: 'Le nouvel email est obligatoire' },
+            { type: 'email', message: 'Veuillez entrer un email valide' },
           ]}
         >
-          <Input placeholder="Enter new email" />
+          <Input placeholder="Entrez le nouvel email" />
         </Form.Item>
         <Form.Item className="mb-0">
           <Button
@@ -275,7 +275,7 @@ function AccountPage() {
             htmlType="submit"
             loading={updateEmailMutation.isPending}
           >
-            Update Email
+            Mettre à jour l'email
           </Button>
         </Form.Item>
       </Form>
@@ -285,35 +285,47 @@ function AccountPage() {
   // Notifications section content
   const subscriptionColumns = [
     {
-      title: 'Name',
+      title: 'Nom',
       dataIndex: 'name',
       key: 'name',
     },
     {
-      title: 'Frequency',
+      title: 'Fréquence',
       dataIndex: 'frequency',
       key: 'frequency',
-      render: (frequency: string) => (
-        <span className="capitalize">{frequency}</span>
-      ),
+      render: (frequency: string) => {
+        const labels: Record<string, string> = {
+          daily: 'quotidienne',
+          weekly: 'hebdomadaire',
+          monthly: 'mensuelle',
+        }
+        return <span className="capitalize">{labels[frequency] ?? frequency}</span>
+      },
     },
     {
-      title: 'Status',
+      title: 'Statut',
       dataIndex: 'status',
       key: 'status',
-      render: (status: string) => (
-        <Tag color={status === 'active' ? 'green' : status === 'paused' ? 'orange' : 'red'}>
-          {status}
-        </Tag>
-      ),
+      render: (status: string) => {
+        const labels: Record<string, string> = {
+          active: 'actif',
+          paused: 'en pause',
+          failed: 'échec',
+        }
+        return (
+          <Tag color={status === 'active' ? 'green' : status === 'paused' ? 'orange' : 'red'}>
+            {labels[status] ?? status}
+          </Tag>
+        )
+      },
     },
     {
-      title: 'Last Sent',
+      title: 'Dernier envoi',
       dataIndex: 'last_sent_at',
       key: 'last_sent_at',
       render: (date: string | undefined, record: Subscription) => {
         if (!date || record.last_send_status === 'pending') {
-          return <span className="text-gray-400">Never</span>
+          return <span className="text-gray-400">Jamais</span>
         }
         if (record.last_send_status === 'failed') {
           return (
@@ -326,7 +338,7 @@ function AccountPage() {
       },
     },
     {
-      title: 'Next Send',
+      title: 'Prochain envoi',
       dataIndex: 'next_send_at',
       key: 'next_send_at',
       render: (date: string | undefined) => {
@@ -342,13 +354,13 @@ function AccountPage() {
         <div className="flex gap-1 items-center justify-end">
           {record.status === 'active' ? (
             <Popconfirm
-              title="Pause subscription?"
-              description="You will stop receiving email reports."
+              title="Mettre l'abonnement en pause ?"
+              description="Vous ne recevrez plus de rapports par email."
               onConfirm={() => pauseSubscription.mutate(record.id)}
-              okText="Pause"
-              cancelText="Cancel"
+              okText="Mettre en pause"
+              cancelText="Annuler"
             >
-              <Tooltip title="Pause">
+              <Tooltip title="Mettre en pause">
                 <Button
                   type="text"
                   size="small"
@@ -359,13 +371,13 @@ function AccountPage() {
             </Popconfirm>
           ) : record.status === 'paused' ? (
             <Popconfirm
-              title="Resume subscription?"
-              description="You will start receiving email reports again."
+              title="Réactiver l'abonnement ?"
+              description="Vous recevrez à nouveau les rapports par email."
               onConfirm={() => resumeSubscription.mutate(record.id)}
-              okText="Resume"
-              cancelText="Cancel"
+              okText="Réactiver"
+              cancelText="Annuler"
             >
-              <Tooltip title="Resume">
+              <Tooltip title="Réactiver">
                 <Button
                   type="text"
                   size="small"
@@ -375,7 +387,7 @@ function AccountPage() {
               </Tooltip>
             </Popconfirm>
           ) : null}
-          <Tooltip title="Edit">
+          <Tooltip title="Modifier">
             <Button
               type="text"
               size="small"
@@ -384,13 +396,13 @@ function AccountPage() {
             />
           </Tooltip>
           <Popconfirm
-            title="Delete subscription?"
-            description="This action cannot be undone."
+            title="Supprimer l'abonnement ?"
+            description="Cette action est irréversible."
             onConfirm={() => deleteSubscription.mutate(record.id)}
-            okText="Delete"
-            cancelText="Cancel"
+            okText="Supprimer"
+            cancelText="Annuler"
           >
-            <Tooltip title="Delete">
+            <Tooltip title="Supprimer">
               <Button
                 type="text"
                 size="small"
@@ -400,11 +412,11 @@ function AccountPage() {
             </Tooltip>
           </Popconfirm>
           <Popconfirm
-            title="Send report now?"
-            description="This will send the report immediately to your email."
+            title="Envoyer le rapport maintenant ?"
+            description="Ceci enverra le rapport immédiatement sur votre email."
             onConfirm={() => sendNowSubscription.mutate(record.id)}
-            okText="Send"
-            cancelText="Cancel"
+            okText="Envoyer"
+            cancelText="Annuler"
           >
             <Button
               size="small"
@@ -412,7 +424,7 @@ function AccountPage() {
               ghost
               loading={sendNowSubscription.isPending}
             >
-              Send Now
+              Envoyer maintenant
             </Button>
           </Popconfirm>
         </div>
@@ -423,20 +435,20 @@ function AccountPage() {
   const notificationsContent = (
     <div>
       <div className="mb-4">
-        <h2 className="text-lg font-medium">Email Subscriptions</h2>
+        <h2 className="text-lg font-medium">Abonnements email</h2>
         <p className="text-sm text-gray-500">
-          Manage your periodic email reports. Create new subscriptions from the Dashboard using the bell icon.
+          Gérez vos rapports email périodiques. Créez de nouveaux abonnements depuis le tableau de bord via l'icône cloche.
         </p>
       </div>
       {subscriptionsLoading ? (
-        <div className="text-center py-8 text-gray-500">Loading...</div>
+        <div className="text-center py-8 text-gray-500">Chargement…</div>
       ) : !subscriptions || subscriptions.length === 0 ? (
         <Empty
-          description="No subscriptions yet"
+          description="Aucun abonnement pour le moment"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         >
           <p className="text-sm text-gray-500">
-            Go to the Dashboard and click the bell icon to create your first subscription.
+            Rendez-vous sur le tableau de bord et cliquez sur l'icône cloche pour créer votre premier abonnement.
           </p>
         </Empty>
       ) : (
@@ -506,7 +518,7 @@ function AccountPage() {
 
   return (
     <div className="flex-1 p-6">
-      <h1 className="hidden md:block text-2xl font-light text-gray-800 mb-6">My Account</h1>
+      <h1 className="hidden md:block text-2xl font-light text-gray-800 mb-6">Mon compte</h1>
 
       <div className="flex gap-6">
         {/* Sidebar Menu */}

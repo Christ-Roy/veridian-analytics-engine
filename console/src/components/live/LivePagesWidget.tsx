@@ -18,7 +18,7 @@ export function LivePagesWidget({ data, loading, workspaceId }: LivePagesWidgetP
     return (
       <div className="rounded-md overflow-hidden bg-white">
         <div className="px-4 pt-4 pb-4">
-          <h3 className="text-base font-semibold text-gray-900">Top Pages</h3>
+          <h3 className="text-base font-semibold text-gray-900">Pages les plus consultées</h3>
         </div>
         <div className="flex items-center justify-center py-12">
           <Spin />
@@ -30,12 +30,12 @@ export function LivePagesWidget({ data, loading, workspaceId }: LivePagesWidgetP
   return (
     <div className="rounded-md overflow-hidden bg-white">
       <div className="px-4 pt-4 pb-4">
-        <h3 className="text-base font-semibold text-gray-900">Top Pages</h3>
+        <h3 className="text-base font-semibold text-gray-900">Pages les plus consultées</h3>
       </div>
 
       {data.length === 0 ? (
         <Empty
-          description="No page views"
+          description="Aucune page vue"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           className="py-8"
         />

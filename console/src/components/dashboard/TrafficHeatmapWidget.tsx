@@ -98,7 +98,7 @@ export function TrafficHeatmapWidget({
   data,
   loading,
   timescoreReference = 60,
-  emptyText = 'No data available',
+  emptyText = 'Aucune donnée disponible',
   onCellClick,
   tabs = DEFAULT_TABS,
 }: TrafficHeatmapWidgetProps) {

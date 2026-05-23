@@ -18,7 +18,7 @@ export function LiveCampaignsWidget({ data, loading }: LiveCampaignsWidgetProps)
     return (
       <div className="rounded-md overflow-hidden bg-white">
         <div className="px-4 pt-4 pb-4">
-          <h3 className="text-base font-semibold text-gray-900">Campaigns</h3>
+          <h3 className="text-base font-semibold text-gray-900">Campagnes</h3>
         </div>
         <div className="flex items-center justify-center py-12">
           <Spin />
@@ -30,12 +30,12 @@ export function LiveCampaignsWidget({ data, loading }: LiveCampaignsWidgetProps)
   return (
     <div className="rounded-md overflow-hidden bg-white">
       <div className="px-4 pt-4 pb-4">
-        <h3 className="text-base font-semibold text-gray-900">Campaigns</h3>
+        <h3 className="text-base font-semibold text-gray-900">Campagnes</h3>
       </div>
 
       {data.length === 0 ? (
         <Empty
-          description="No campaign data"
+          description="Aucune donnée de campagne"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           className="py-8"
         />
@@ -43,7 +43,7 @@ export function LiveCampaignsWidget({ data, loading }: LiveCampaignsWidgetProps)
         <div className="flex flex-col">
           {data.map((row, index) => {
             const percent = (row.sessions / maxValue) * 100
-            const displayCampaign = row.utm_campaign || '(none)'
+            const displayCampaign = row.utm_campaign || '(aucune)'
 
             return (
               <div

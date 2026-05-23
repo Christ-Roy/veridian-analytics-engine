@@ -8,7 +8,7 @@ interface CSVExportButtonProps {
 
 export function CSVExportButton({ onClick, disabled }: CSVExportButtonProps) {
   return (
-    <Tooltip title="Export to CSV">
+    <Tooltip title="Exporter en CSV">
       <Button
         type="text"
         icon={<Download size={16} />}

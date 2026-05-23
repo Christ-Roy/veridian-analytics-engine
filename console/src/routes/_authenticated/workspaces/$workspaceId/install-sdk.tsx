@@ -82,11 +82,11 @@ window.StaminadsConfig = {
   return (
     <div className="flex-1 p-6">
       <div className="max-w-2xl mx-auto">
-        <h1 className="text-2xl font-light text-gray-800 mb-2">Install the SDK</h1>
+        <h1 className="text-2xl font-light text-gray-800 mb-2">Installer le SDK</h1>
         <p className="text-gray-500 mb-8">
-          Add this code snippet to your website's{' '}
-          <code className="bg-gray-100 px-1 rounded">&lt;head&gt;</code> or{' '}
-          <code className="bg-gray-100 px-1 rounded">&lt;body&gt;</code> tag.
+          Ajoutez ce snippet de code dans la balise{' '}
+          <code className="bg-gray-100 px-1 rounded">&lt;head&gt;</code> ou{' '}
+          <code className="bg-gray-100 px-1 rounded">&lt;body&gt;</code> de votre site.
         </p>
 
         <CodeSnippet code={sdkSnippet} />
@@ -96,17 +96,17 @@ window.StaminadsConfig = {
             <Alert
               type="success"
               icon={<CheckCircleFilled />}
-              title="Event detected!"
-              description="Your SDK is working correctly. You can now continue to your dashboard."
+              title="Événement détecté !"
+              description="Votre SDK fonctionne correctement. Vous pouvez désormais accéder à votre tableau de bord."
               showIcon
             />
           ) : (
             <div className="flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
               <Spin indicator={<LoadingOutlined style={{ fontSize: 20 }} spin />} />
               <div>
-                <div className="font-medium text-blue-900">Waiting for first event...</div>
+                <div className="font-medium text-blue-900">En attente du premier événement…</div>
                 <div className="text-sm text-blue-700">
-                  Install the SDK on your website and we'll detect it automatically.
+                  Installez le SDK sur votre site, nous le détecterons automatiquement.
                 </div>
               </div>
             </div>
@@ -116,11 +116,11 @@ window.StaminadsConfig = {
         <div className="mt-8 flex justify-end">
           {eventDetected ? (
             <Button type="primary" size="large" onClick={handleContinue}>
-              Continue to Dashboard
+              Accéder au tableau de bord
             </Button>
           ) : (
             <Button type="link" onClick={handleSkip} loading={skipping}>
-              or skip for now →
+              ou passer cette étape →
             </Button>
           )}
         </div>

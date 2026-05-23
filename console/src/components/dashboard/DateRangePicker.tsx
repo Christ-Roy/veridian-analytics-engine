@@ -152,14 +152,15 @@ export function DateRangePicker({
       </Dropdown>
 
       <Modal
-        title="Select Custom Date Range"
+        title="Sélectionner une plage de dates personnalisée"
         open={customModalOpen}
         onCancel={() => {
           setCustomModalOpen(false)
           setPendingRange(null)
         }}
         onOk={handleCustomRangeOk}
-        okText="Apply"
+        okText="Appliquer"
+        cancelText="Annuler"
         okButtonProps={{ disabled: !pendingRange }}
       >
         <div className="py-4">
@@ -171,7 +172,7 @@ export function DateRangePicker({
             format="D MMM YYYY"
           />
           <p className="text-gray-500 text-sm mt-2">
-            Maximum range is 2 years. End date cannot be in the future.
+            Plage maximale : 2 ans. La date de fin ne peut pas être dans le futur.
           </p>
         </div>
       </Modal>

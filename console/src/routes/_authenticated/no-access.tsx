@@ -23,11 +23,11 @@ function NoAccessPage() {
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-md text-center">
         <Result
           status="403"
-          title="No Workspace Access"
-          subTitle="You don't have access to any workspaces. Please contact your administrator to be invited to a workspace."
+          title="Aucun accès à un espace de travail"
+          subTitle="Vous n'avez accès à aucun espace de travail. Contactez votre administrateur pour être invité."
           extra={
             <Button type="primary" onClick={handleLogout}>
-              Sign Out
+              Se déconnecter
             </Button>
           }
         />

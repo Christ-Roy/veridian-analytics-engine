@@ -72,7 +72,7 @@ export function BreakdownDrawer({
         <div className="flex items-center gap-2">
           <span className="font-medium">{displayValue}</span>
           <span className="text-gray-400">-</span>
-          <span className="text-gray-500 font-normal">Breakdown</span>
+          <span className="text-gray-500 font-normal">Décomposition</span>
         </div>
       }
       placement="right"
@@ -84,9 +84,9 @@ export function BreakdownDrawer({
       {/* Filter Summary */}
       <div className="mb-4 p-3 bg-gray-50 rounded-lg">
         <div className="text-sm text-gray-600 mb-2">
-          <span className="font-medium">Filters:</span>{' '}
+          <span className="font-medium">Filtres :</span>{' '}
           {parentFilters.length === 0 ? (
-            <span className="text-gray-400">None</span>
+            <span className="text-gray-400">Aucun</span>
           ) : (
             <Space size={[4, 4]} wrap>
               {parentFilters.map((f, i) => (
@@ -99,7 +99,7 @@ export function BreakdownDrawer({
           )}
         </div>
         <div className="text-sm text-gray-600">
-          <span className="font-medium">Breaking down by:</span>{' '}
+          <span className="font-medium">Décomposé par :</span>{' '}
           <Space size={[4, 4]} wrap>
             {breakdownDimensions.map((d) => (
               <Tag key={d} color="blue" className="m-0">

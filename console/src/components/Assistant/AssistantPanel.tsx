@@ -22,10 +22,10 @@ import type { ExploreConfigOutput, AssistantConversation, TimelineBlock, ToolCal
 dayjs.extend(relativeTime)
 
 const QUICK_PROMPTS = [
-  'Show me UTM campaigns by device for last week',
-  'Landing pages with bounce rate over 50%',
-  'Compare channels this month vs last month',
-  'Traffic by day of week and hour',
+  'Montre-moi les campagnes UTM par appareil de la semaine dernière',
+  "Pages d'entrée avec un taux de rebond supérieur à 50 %",
+  'Compare les canaux ce mois-ci vs le mois dernier',
+  'Trafic par jour de la semaine et heure',
 ]
 
 // Hook to detect mobile viewport
@@ -224,9 +224,9 @@ function HistoryView() {
       }
     })
 
-    if (todayConvs.length > 0) groups.push({ label: 'Today', conversations: todayConvs })
-    if (yesterdayConvs.length > 0) groups.push({ label: 'Yesterday', conversations: yesterdayConvs })
-    if (olderConvs.length > 0) groups.push({ label: 'Older', conversations: olderConvs })
+    if (todayConvs.length > 0) groups.push({ label: "Aujourd'hui", conversations: todayConvs })
+    if (yesterdayConvs.length > 0) groups.push({ label: 'Hier', conversations: yesterdayConvs })
+    if (olderConvs.length > 0) groups.push({ label: 'Plus ancien', conversations: olderConvs })
 
     return groups
   }, [conversations])
@@ -235,11 +235,11 @@ function HistoryView() {
     return (
       <div className="flex-1 flex items-center justify-center p-4">
         <Empty
-          description="No conversations yet"
+          description="Aucune conversation pour le moment"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         >
           <Button type="primary" icon={<PlusOutlined />} onClick={newConversation}>
-            Start a Conversation
+            Démarrer une conversation
           </Button>
         </Empty>
       </div>
@@ -377,7 +377,7 @@ export function AssistantPanel() {
           onClick={() => setView('history')}
         />
         <span className="truncate max-w-40">
-          {activeConversation?.title || 'New Chat'}
+          {activeConversation?.title || 'Nouvelle discussion'}
         </span>
       </div>
     ) : (
@@ -395,13 +395,13 @@ export function AssistantPanel() {
   const extra =
     view === 'chat' ? (
       messages.length > 0 ? (
-        <Button type="link" size="small" onClick={clearMessages} aria-label="Reset conversation">
-          Reset
+        <Button type="link" size="small" onClick={clearMessages} aria-label="Réinitialiser la conversation">
+          Réinitialiser
         </Button>
       ) : null
     ) : (
       <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleNewConversation}>
-        New
+        Nouvelle
       </Button>
     )
 
@@ -413,11 +413,11 @@ export function AssistantPanel() {
         className="flex-1 overflow-y-auto p-4 space-y-3"
         role="log"
         aria-live="polite"
-        aria-label="Assistant conversation"
+        aria-label="Conversation avec l'assistant"
       >
         {messages.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500 mb-4">Ask me to create a report!</p>
+            <p className="text-gray-500 mb-4">Demandez-moi de créer un rapport !</p>
             <div className="flex flex-wrap gap-x-3 gap-y-4 justify-center">
               {QUICK_PROMPTS.map((prompt, i) => (
                 <div
@@ -487,7 +487,7 @@ export function AssistantPanel() {
       {/* Status indicator */}
       {status === 'connecting' && (
         <div className="flex items-center gap-2 px-4 py-2 text-gray-500 text-sm">
-          <Spin size="small" /> Connecting...
+          <Spin size="small" /> Connexion…
         </div>
       )}
 
@@ -498,11 +498,11 @@ export function AssistantPanel() {
             ref={inputRef}
             value={inputValue}
             onChange={setInputValue}
-            placeholder="Describe the report you want..."
+            placeholder="Décrivez le rapport que vous souhaitez…"
             onSubmit={handleSend}
             loading={isStreaming}
             disabled={isStreaming}
-            aria-label="Chat input"
+            aria-label="Saisie de la conversation"
           />
         </div>
         {usage.costUsd > 0 && (

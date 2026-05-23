@@ -226,7 +226,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
       return (
         <Select
           mode={['in', 'notIn'].includes(selectedOperator) ? 'multiple' : undefined}
-          placeholder="Select device"
+          placeholder="Sélectionner un appareil"
           popupMatchSelectWidth={false}
         >
           {Object.entries(DeviceType).map(([key, label]) => (
@@ -243,7 +243,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
       return (
         <Select
           mode={['in', 'notIn'].includes(selectedOperator) ? 'multiple' : undefined}
-          placeholder="Select browser"
+          placeholder="Sélectionner un navigateur"
           showSearch
           popupMatchSelectWidth={false}
         >
@@ -261,7 +261,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
       return (
         <Select
           mode={['in', 'notIn'].includes(selectedOperator) ? 'multiple' : undefined}
-          placeholder="Select OS"
+          placeholder="Sélectionner un OS"
           showSearch
           popupMatchSelectWidth={false}
         >
@@ -277,7 +277,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
     // Day of week select
     if (selectedDimension.name === 'day_of_week' && ['equals', 'notEquals'].includes(selectedOperator)) {
       return (
-        <Select placeholder="Select day of week">
+        <Select placeholder="Sélectionner un jour de la semaine">
           {Object.entries(DaysOfWeek).map(([key, day]) => (
             <Select.Option key={key} value={parseInt(key)}>
               {day}
@@ -290,9 +290,9 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
     // Boolean select for is_direct, is_weekend
     if (selectedDimension.type === 'boolean') {
       return (
-        <Select placeholder="Select value">
-          <Select.Option value={1}>True</Select.Option>
-          <Select.Option value={0}>False</Select.Option>
+        <Select placeholder="Sélectionner une valeur">
+          <Select.Option value={1}>Vrai</Select.Option>
+          <Select.Option value={0}>Faux</Select.Option>
         </Select>
       )
     }
@@ -311,11 +311,11 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
           </div>
         )
       }
-      return <Input type="number" placeholder="Enter number" />
+      return <Input type="number" placeholder="Saisir un nombre" />
     }
 
     // Default text input
-    return <Input placeholder="Enter value" />
+    return <Input placeholder="Saisir une valeur" />
   }
 
   const usedDimensions = value.map((filter) => filter.dimension)
@@ -405,7 +405,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
         </div>
       )
     }
-    return <Input type="number" placeholder="Enter value" suffix={selectedMetric.unit} />
+    return <Input type="number" placeholder="Saisir une valeur" suffix={selectedMetric.unit} />
   }
 
   const popoverContent = (
@@ -417,11 +417,11 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             className="mb-4 flex items-center text-blue-600 hover:text-blue-800 focus:outline-none"
           >
             <LeftOutlined className="mr-1" />
-            Back
+            Retour
           </button>
           <div className="text-sm font-medium mb-2">{getDimensionLabel(selectedDimension.name, customDimensionLabels)}</div>
           <Form form={form} layout="vertical" onFinish={handleApplyFilter}>
-            <Form.Item name="operator" label="Operator" rules={[{ required: true }]}>
+            <Form.Item name="operator" label="Opérateur" rules={[{ required: true }]}>
               <div className="flex flex-wrap gap-2">
                 {getOperatorsForType(selectedDimension.type).map((op) => (
                   <button
@@ -442,15 +442,15 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             {!operatorsWithoutValue.includes(selectedOperator as FilterOperator) && (
               <Form.Item
                 name="values"
-                label="Value"
-                rules={[{ required: true, message: 'Value is required' }]}
+                label="Valeur"
+                rules={[{ required: true, message: 'La valeur est obligatoire' }]}
               >
                 {renderValueInput()}
               </Form.Item>
             )}
             <Form.Item>
               <Button type="primary" block htmlType="submit">
-                Apply Filter
+                Appliquer le filtre
               </Button>
             </Form.Item>
           </Form>
@@ -462,11 +462,11 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             className="mb-4 flex items-center text-blue-600 hover:text-blue-800 focus:outline-none"
           >
             <LeftOutlined className="mr-1" />
-            Back
+            Retour
           </button>
           <div className="text-sm font-medium mb-2">{selectedMetric.label}</div>
           <Form form={form} layout="vertical" onFinish={handleApplyFilter}>
-            <Form.Item name="operator" label="Operator" rules={[{ required: true }]}>
+            <Form.Item name="operator" label="Opérateur" rules={[{ required: true }]}>
               <div className="flex flex-wrap gap-2">
                 {METRIC_OPERATORS.map((op) => (
                   <button
@@ -486,14 +486,14 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             </Form.Item>
             <Form.Item
               name="values"
-              label="Value"
-              rules={[{ required: true, message: 'Value is required' }]}
+              label="Valeur"
+              rules={[{ required: true, message: 'La valeur est obligatoire' }]}
             >
               {renderMetricValueInput()}
             </Form.Item>
             <Form.Item>
               <Button type="primary" block htmlType="submit">
-                Apply Filter
+                Appliquer le filtre
               </Button>
             </Form.Item>
           </Form>
@@ -501,7 +501,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
       ) : (
         <>
           <Input
-            placeholder="Search"
+            placeholder="Rechercher"
             prefix={<SearchOutlined />}
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
@@ -512,7 +512,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             {Object.entries(filteredByCategory).map(([category, dims]) => (
               <div key={category} className="mb-2">
                 <div className="text-[10px] font-semibold text-[var(--primary)] uppercase px-3 py-1">
-                  {category === 'Custom' ? 'Custom Dimensions' : category}
+                  {category === 'Custom' ? 'Dimensions personnalisées' : category}
                 </div>
                 {dims.map((dimension) => {
                   const examples = getDimensionExamples(dimension.name)
@@ -545,7 +545,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             {metricFiltersEnabled && filteredMetrics.length > 0 && (
               <div className="mb-2">
                 <div className="text-[10px] font-semibold text-[var(--primary)] uppercase px-3 py-1">
-                  Metrics
+                  Métriques
                 </div>
                 {filteredMetrics.map((metric) => (
                   <Tooltip
@@ -565,7 +565,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             )}
 
             {Object.keys(filteredByCategory).length === 0 && (!metricFiltersEnabled || filteredMetrics.length === 0) && (
-              <div className="text-gray-400 text-sm px-3 py-2">No results found</div>
+              <div className="text-gray-400 text-sm px-3 py-2">Aucun résultat trouvé</div>
             )}
           </div>
         </>
@@ -594,7 +594,7 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
           onClick={() => setIsPopoverVisible(true)}
           icon={<PlusCircleOutlined />}
         >
-          Add filter
+          Ajouter un filtre
         </Button>
       </Popover>
 
