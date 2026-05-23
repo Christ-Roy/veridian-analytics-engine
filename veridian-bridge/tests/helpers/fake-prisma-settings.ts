@@ -1,13 +1,17 @@
 /**
  * FakePrismaClient extension pour les models Settings/Credentials (U8).
  *
- * Étend `FakePrismaClientWithForms` (qui a déjà tenant/site/gscProperty) avec
+ * Étend `FakePrismaClientWithSites` (qui a tenant/site/gscProperty) avec
  * les models propres à U8 : `tenantCredential`, `tenantSettings`, et un
- * `site.findMany` (le fake forms n'expose que `site.findUnique/create`).
+ * `site.findMany` (le parent n'expose que `site.findUnique/create`).
  *
- * Pattern identique à fake-prisma-forms.ts : duck-typed PrismaClient, cast
- * `as unknown as PrismaClient` côté tests. On implémente UNIQUEMENT ce qui
- * est appelé par `src/settings/*` et `src/credentials/*`.
+ * Note 2026-05-23 : on hérite désormais de `FakePrismaClientWithSites` au
+ * lieu de l'ancien `FakePrismaClientWithForms` (module Forms retiré, cf
+ * cleanup-veridian-scope).
+ *
+ * Pattern : duck-typed PrismaClient, cast `as unknown as PrismaClient` côté
+ * tests. On implémente UNIQUEMENT ce qui est appelé par `src/settings/*` et
+ * `src/credentials/*`.
  *
  * ⚠️ Ces fakes ne prouvent RIEN sur le vrai Postgres (contraintes @@unique,
  * cascade FK) — c'est le rôle des `*.integration.test.ts`. Ici on valide la
@@ -15,7 +19,10 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { FakePrismaClientWithForms, type FakeSite } from "./fake-prisma-forms.js";
+import {
+  FakePrismaClientWithSites,
+  type FakeSite,
+} from "./fake-prisma-with-sites.js";
 
 export interface FakeTenantCredential {
   id: string;
@@ -43,13 +50,13 @@ export interface FakeTenantSettings {
   updatedAt: Date;
 }
 
-export class FakePrismaClientWithSettings extends FakePrismaClientWithForms {
+export class FakePrismaClientWithSettings extends FakePrismaClientWithSites {
   tenantCredentials: FakeTenantCredential[] = [];
   tenantSettingsRows: FakeTenantSettings[] = [];
 
   constructor() {
     super();
-    // `site.findMany` n'existe pas dans fake-prisma-forms — on l'ajoute.
+    // `site.findMany` n'existe pas dans le parent — on l'ajoute ici.
     const sites = this.sites;
     (this.site as Record<string, unknown>).findMany = async (args?: {
       where?: { tenantId?: string };

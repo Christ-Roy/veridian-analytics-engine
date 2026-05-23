@@ -54,57 +54,8 @@ export interface LegacyGscDaily {
   position: number;
 }
 
-export interface LegacyFormSchema {
-  id: string;
-  siteId: string;
-  formName: string;
-  fields: unknown;
-}
-
-export interface LegacyFormSubmission {
-  id: string;
-  siteId: string;
-  formName: string;
-  path: string | null;
-  payload: unknown;
-  email: string | null;
-  phone: string | null;
-  sessionId: string | null;
-  leadId: string | null;
-  createdAt: Date | string;
-}
-
-export interface LegacyLead {
-  id: string;
-  tenantId: string;
-  siteId: string;
-  email: string | null;
-  phone: string | null;
-  name: string | null;
-  firstSeenAt: Date | string;
-  lastSeenAt: Date | string;
-}
-
-export interface LegacyLeadSession {
-  id: string;
-  leadId: string;
-  sessionId: string;
-  siteId: string;
-  firstSeenAt: Date | string;
-  lastSeenAt: Date | string;
-  pageviewCount: number;
-}
-
-export interface LegacyPushSubscription {
-  id: string;
-  tenantId: string;
-  siteId: string | null;
-  endpoint: string;
-  p256dh: string;
-  auth: string;
-  userAgent: string | null;
-  createdAt: Date | string;
-}
+// LegacyFormSchema / LegacyFormSubmission / LegacyLead / LeadSession /
+// PushSubscription — types retirés 2026-05-23 (scope change cleanup).
 
 // ─── Types des rows BRIDGE (shape Prisma `create`) ──────────────────────────
 
@@ -132,57 +83,8 @@ export interface BridgeGscDailyCreate {
   ctr: number;
 }
 
-export interface BridgeFormSchemaCreate {
-  id: string;
-  siteId: string;
-  formSlug: string;
-  name: string;
-  fields: unknown;
-}
-
-export interface BridgeFormSubmissionCreate {
-  id: string;
-  siteId: string;
-  formSchemaId: string | null;
-  formSlug: string;
-  data: unknown;
-  pageUrl: string | null;
-  visitorId: string | null;
-  sessionId: string | null;
-  leadId: string | null;
-  createdAt: Date;
-}
-
-export interface BridgeLeadCreate {
-  id: string;
-  siteId: string;
-  email: string | null;
-  phone: string | null;
-  name: string | null;
-  firstSeenAt: Date;
-  lastSeenAt: Date;
-}
-
-export interface BridgeLeadSessionCreate {
-  id: string;
-  leadId: string;
-  visitorId: string | null;
-  sessionId: string | null;
-  startedAt: Date;
-  endedAt: Date | null;
-  pageviewCount: number;
-}
-
-export interface BridgePushSubscriptionCreate {
-  id: string;
-  tenantId: string;
-  siteId: string | null;
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-  userAgent: string | null;
-  visitorId: string | null;
-  createdAt: Date;
-}
+// BridgeFormSchemaCreate / FormSubmission / Lead / LeadSession /
+// PushSubscription — types retirés 2026-05-23 (scope change cleanup).
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -254,110 +156,10 @@ export function mapGscDaily(
   };
 }
 
-/** FormSchema legacy → bridge. `formName` → `formSlug` + `name`. */
-export function mapFormSchema(
-  legacy: LegacyFormSchema,
-  bridgeSiteId: string,
-): BridgeFormSchemaCreate {
-  return {
-    id: legacy.id,
-    siteId: bridgeSiteId,
-    formSlug: legacy.formName,
-    name: legacy.formName,
-    fields: legacy.fields ?? [],
-  };
-}
-
-/**
- * FormSubmission legacy → bridge. `formName` → `formSlug`, `payload` → `data`,
- * `path` → `pageUrl`. Le `leadId` est ré-écrit avec l'id du LEAD BRIDGE
- * (legacy.leadId conservé tel quel par `mapLead`, donc identité 1:1).
- */
-export function mapFormSubmission(
-  legacy: LegacyFormSubmission,
-  bridgeSiteId: string,
-  bridgeFormSchemaId: string | null,
-): BridgeFormSubmissionCreate {
-  return {
-    id: legacy.id,
-    siteId: bridgeSiteId,
-    formSchemaId: bridgeFormSchemaId,
-    formSlug: legacy.formName,
-    data: legacy.payload ?? {},
-    pageUrl: legacy.path,
-    // Le tracker legacy n'a pas de visitor_id stable ; on ne porte que le
-    // sessionId. Le visitor_id staminads démarre à J0 sur les nouveaux events.
-    visitorId: null,
-    sessionId: legacy.sessionId,
-    leadId: legacy.leadId,
-    createdAt: toDate(legacy.createdAt),
-  };
-}
-
-/**
- * Lead legacy → bridge. Le bridge n'a pas de `tenantId` sur Lead (scope par
- * `siteId`). `submissionsCount` n'existe pas côté legacy → recalculé par le
- * script à partir du nombre de FormSubmission portées, défaut 1.
- */
-export function mapLead(
-  legacy: LegacyLead,
-  bridgeSiteId: string,
-): BridgeLeadCreate {
-  return {
-    id: legacy.id,
-    siteId: bridgeSiteId,
-    email: legacy.email,
-    phone: legacy.phone,
-    name: legacy.name,
-    firstSeenAt: toDate(legacy.firstSeenAt),
-    lastSeenAt: toDate(legacy.lastSeenAt),
-  };
-}
-
-/**
- * LeadSession legacy → bridge. Legacy `sessionId` est requis ; bridge le
- * stocke comme `sessionId` ET on le réutilise comme `visitorId` faute de
- * mieux (le tracker legacy n'avait pas de visitor_id distinct). C'est cohérent
- * avec la sémantique : 1 session legacy = 1 visiteur identifiable.
- */
-export function mapLeadSession(
-  legacy: LegacyLeadSession,
-): BridgeLeadSessionCreate {
-  return {
-    id: legacy.id,
-    leadId: legacy.leadId,
-    // Pas de visitor_id legacy : on retombe sur le sessionId comme clé visiteur.
-    visitorId: legacy.sessionId,
-    sessionId: legacy.sessionId,
-    startedAt: toDate(legacy.firstSeenAt),
-    endedAt: toDate(legacy.lastSeenAt),
-    pageviewCount: legacy.pageviewCount ?? 1,
-  };
-}
-
-/**
- * PushSubscription legacy → bridge. Legacy stocke `p256dh`/`auth` à plat ;
- * le bridge les groupe dans un JSON `keys`. L'`endpoint` est conservé tel
- * quel — c'est la clé unique globale, et les clés VAPID DOIVENT être
- * identiques entre legacy et bridge (cf. .env.example B2) pour que les
- * abonnements restent valides après migration.
- */
-export function mapPushSubscription(
-  legacy: LegacyPushSubscription,
-  bridgeTenantId: string,
-  bridgeSiteId: string | null,
-): BridgePushSubscriptionCreate {
-  return {
-    id: legacy.id,
-    tenantId: bridgeTenantId,
-    siteId: bridgeSiteId,
-    endpoint: legacy.endpoint,
-    keys: { p256dh: legacy.p256dh, auth: legacy.auth },
-    userAgent: legacy.userAgent,
-    visitorId: null,
-    createdAt: toDate(legacy.createdAt),
-  };
-}
+// mapFormSchema / mapFormSubmission / mapLead / mapLeadSession /
+// mapPushSubscription — fonctions retirées 2026-05-23 (scope change : Forms
+// supprimé, Push archivé). Les sites legacy n'ont plus de pipeline de
+// migration de ces données — staminads démarre à J0 pour le nouveau scope.
 
 // ─── visitor_id : génération déterministe pour la transition ────────────────
 

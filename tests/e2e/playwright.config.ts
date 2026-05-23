@@ -38,6 +38,8 @@ export default defineConfig({
         ["list"],
         ["html", { open: "never", outputFolder: "playwright-report" }],
         ["junit", { outputFile: "test-results/junit.xml" }],
+        // JSON report for scripts/ci/e2e-report-to-issues.mjs
+        ["json", { outputFile: "test-results/results.json" }],
       ]
     : [["list"]],
 

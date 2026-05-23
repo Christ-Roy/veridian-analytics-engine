@@ -52,10 +52,41 @@ jobs:
           npx playwright install --with-deps chromium webkit
 
       # ─── Staging (engine + bridge) ─────────────────────────────────
-      - name: Smoke 01 (staging)
+      - name: Full battery staging (all P0+P1 suites)
         env:
           TARGET: staging
-        run: npx playwright test 01-smoke/ --project=chromium-desktop --reporter=list
+          BRIDGE_ADMIN_TOKEN: ${{ secrets.E2E_BRIDGE_ADMIN_TOKEN_STAGING }}
+          E2E_BRIDGE_TEST_WORKSPACE_ID: ${{ secrets.E2E_BRIDGE_TEST_WORKSPACE_ID_STAGING }}
+          E2E_TEST_WORKSPACE_ID: ${{ secrets.E2E_TEST_WORKSPACE_ID_STAGING }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL_STAGING }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
+          E2E_TEST_SITE_KEY: ${{ secrets.E2E_TEST_SITE_KEY_STAGING }}
+          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
+        run: |
+          npx playwright test \
+            01-smoke/ \
+            02-bugs-regression/ \
+            02-tracker-to-dashboard/ \
+            03-forms-leads/ \
+            04-push-pwa/ \
+            05-gsc-oauth/ \
+            07-settings-credentials/ \
+            08-voip-calls/ \
+            09-dashboard-ui/ \
+            10-onboarding-wizard/ \
+            12-auth-flow/ \
+            13-cross-app-inbound/ \
+            18-api-contract/ \
+            19-sdk-tracker/ \
+            --project=chromium-desktop || true
+
+      - name: Mobile responsive (staging)
+        env:
+          TARGET: staging
+          E2E_TEST_WORKSPACE_ID: ${{ secrets.E2E_TEST_WORKSPACE_ID_STAGING }}
+        run: |
+          npx playwright test 09-dashboard-ui/mobile-responsive.spec.ts \
+            --project=chromium-mobile
 
       - name: HMAC contract 06 (staging) — full suite
         env:
@@ -63,18 +94,19 @@ jobs:
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
         run: |
           npx playwright test 06-hub-contract/ \
-            --project=chromium-desktop \
-            --reporter=list
+            --project=chromium-desktop
 
-      # ─── Demo staging (full restricted guards + seed) ──────────────
-      - name: Demo 11 (demo-staging) — full
+      # ─── Demo staging (full restricted guards + seed + UI) ──────────
+      - name: Demo 11 + bugs P0 + dashboard UI (demo-staging) — full
         env:
           TARGET: demo-staging
           DEMO_SECRET: ${{ secrets.DEMO_SECRET_ANALYTICS_STAGING }}
         run: |
-          npx playwright test 11-demo-public/ \
-            --project=chromium-desktop \
-            --reporter=list
+          npx playwright test \
+            11-demo-public/ \
+            02-bugs-regression/ \
+            09-dashboard-ui/dashboard-sections-render.spec.ts \
+            --project=chromium-desktop
 
       - name: Upload Playwright report
         if: always()
@@ -86,7 +118,25 @@ jobs:
             tests/e2e/test-results/
           retention-days: 14
 
-      - name: Open issue on nightly fail
+      - name: Auto-create/close GitHub issues for tagged tests
+        if: always()
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json — skipping issue auto-create"
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target staging || true
+
+      - name: Open umbrella issue on nightly fail
         if: failure() && github.event_name == 'schedule'
         uses: actions/github-script@v7
         with:
@@ -107,6 +157,7 @@ jobs:
                 labels: ['e2e-full-staging-failure', 'staging', 'bug'],
                 body: `La suite E2E nightly a échoué cette nuit.\n\n` +
                       `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+                      `Voir issues détaillées \`e2e-regression\` pour les tests rouges spécifiques.\n\n` +
                       `Pas bloquant pour les deploys, mais à corriger pour ne pas accumuler de dette.`,
               });
             }

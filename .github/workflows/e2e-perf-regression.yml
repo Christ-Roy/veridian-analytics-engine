@@ -1,0 +1,110 @@
+# Veridian Analytics Engine — E2E perf regression (hebdo)
+#
+# Trigger : weekly Monday 04:00 UTC + workflow_dispatch
+#
+# Exécute la suite 14-perf-regression contre staging + demo-staging :
+#   - Web Vitals (FCP/LCP/CLS) mesurés via Playwright Performance Observer
+#   - Bundle size budgets (initial JS, tracker SDK gzip)
+#   - Visual snapshots (golden regression — update via workflow_dispatch)
+#
+# Non-bloquant : la suite est best-effort et tolère beaucoup de variance CI.
+# Fail = warning (pas blocker pour deploy).
+
+name: E2E perf regression
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # weekly Monday 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      update-snapshots:
+        description: "Update golden visual snapshots (creates a PR)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: e2e-perf-regression
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  perf:
+    name: Perf regression (14-perf-regression)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      TARGET: demo-staging
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + deps
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run perf regression suite
+        env:
+          DEMO_SECRET: ${{ secrets.DEMO_SECRET_ANALYTICS_STAGING }}
+        run: |
+          if [ "${{ github.event.inputs.update-snapshots }}" = "true" ]; then
+            echo "::notice::Updating visual snapshots"
+            npx playwright test 14-perf-regression/ --update-snapshots --project=chromium-desktop || true
+          else
+            npx playwright test 14-perf-regression/ --project=chromium-desktop || true
+          fi
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-perf
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Create PR with updated snapshots
+        if: github.event.inputs.update-snapshots == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "test(e2e): update visual regression snapshots"
+          title: "test(e2e): update visual regression snapshots"
+          body: |
+            Mise à jour automatique des golden snapshots E2E.
+
+            **À reviewer manuellement** : screenshots du dashboard / mobile.
+            Si le diff est attendu (UI change volontaire) → merge.
+            Si le diff est suspect (bug visuel) → close + investiguer.
+          branch: e2e/update-visual-snapshots
+          labels: e2e-visual-update, automation
+
+      - name: Auto-create/close GitHub issues for perf failures
+        if: always() && github.event.inputs.update-snapshots != 'true'
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json — skipping issue auto-create"
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target demo-staging || true

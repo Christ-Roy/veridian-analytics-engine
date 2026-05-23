@@ -215,11 +215,13 @@ function WorkspaceLayout() {
                 <nav className="flex gap-1 pl-2">
                 {[
                   { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
+                  { to: '/workspaces/$workspaceId/live', label: 'En direct' },
                   { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
                   { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
                   { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
+                  { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
+                  { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                   { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
-                  { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
                   { to: '/workspaces/$workspaceId/settings', label: 'Paramètres' },
                 ].map(({ to, label, exact }) => {
                   const resolvedPath = to.replace('$workspaceId', workspaceId)
@@ -467,11 +469,13 @@ function WorkspaceLayout() {
                 <>
                   {[
                     { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
+                    { to: '/workspaces/$workspaceId/live', label: 'En direct' },
                     { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
                     { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
                     { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
+                    { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
+                    { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                     { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
-                    { to: '/workspaces/$workspaceId/veridian', label: 'Veridian' },
                   ].map(({ to, label, exact }) => {
                     const resolvedPath = to.replace('$workspaceId', workspaceId)
                     const isActive = exact

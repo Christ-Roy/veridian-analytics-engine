@@ -1,0 +1,120 @@
+# Veridian Analytics Engine — E2E security audit (nightly)
+#
+# Trigger : nightly 03:00 UTC + workflow_dispatch
+#
+# Exécute la suite security :
+#   - 12-auth-flow (login, JWT, password reset)
+#   - 16-security (headers, CORS, injection, secrets leak, HMAC timing, rate-limit)
+#   - 17-multi-tenant-isolation (cross-tenant rejection)
+#   - 18-api-contract (shape stable, version)
+#
+# Tourne UNIQUEMENT contre staging (jamais prod — éviter alertes CrowdSec).
+#
+# Toute issue créée par cette suite a priorité P0 (sécu critique).
+
+name: E2E security audit
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # nightly 03:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-security-audit
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  security:
+    name: Security audit (16, 17, 18, 12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      TARGET: staging
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + deps
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run security suite
+        env:
+          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
+          BRIDGE_ADMIN_TOKEN: ${{ secrets.E2E_BRIDGE_ADMIN_TOKEN_STAGING }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL_STAGING }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
+        run: |
+          npx playwright test \
+            12-auth-flow/ \
+            16-security/ \
+            17-multi-tenant-isolation/ \
+            18-api-contract/ \
+            --project=chromium-desktop || true
+
+      - name: Upload security report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-security
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Auto-create P0 issues for security regressions
+        if: always()
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json — skipping issue auto-create"
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target staging || true
+
+      - name: Open umbrella issue on security fail (P0)
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'e2e-security-failure',
+            });
+            const existing = issues.data.find(i => i.title.includes(`Nightly security audit failed (${today})`));
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `[P0] Nightly security audit failed (${today})`,
+                labels: ['e2e-security-failure', 'p0', 'security', 'bug'],
+                body: `La suite security audit a échoué cette nuit.\n\n` +
+                      `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\n` +
+                      `**Priorité P0** — vérifier les issues détaillées \`e2e-regression\` avec label \`p0\`.\n\n` +
+                      `Une régression sécu doit être fix en priorité avant tout autre travail.`,
+              });
+            }

@@ -1,0 +1,98 @@
+# Veridian Analytics Engine — E2E business flows (manual + before release)
+#
+# Trigger : workflow_dispatch + release branches (à câbler quand release process défini)
+#
+# Exécute la suite 20-business-flows :
+#   - Tenant lifecycle (Hub→bridge provision + tracker)
+#   - Form submission → lead → dashboard
+#   - VoIP connected → call tracked
+#   - GSC connected → query dashboard
+#
+# Pas de schedule auto — c'est un workflow "avant release" / "smoke giga".
+
+name: E2E business flows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "release/**"
+
+concurrency:
+  group: e2e-business-flows-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  business:
+    name: Business flows (20)
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CI: "true"
+      TARGET: staging
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + deps
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run business flows
+        env:
+          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
+          BRIDGE_ADMIN_TOKEN: ${{ secrets.E2E_BRIDGE_ADMIN_TOKEN_STAGING }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL_STAGING }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
+          E2E_TEST_SITE_KEY: ${{ secrets.E2E_TEST_SITE_KEY_STAGING }}
+          E2E_TEST_WORKSPACE_ID: ${{ secrets.E2E_TEST_WORKSPACE_ID_STAGING }}
+        run: |
+          npx playwright test 20-business-flows/ 13-cross-app-inbound/ \
+            --project=chromium-desktop
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-business
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Auto-create issues for business flow failures (P0)
+        if: always()
+        working-directory: .
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          REPORT="tests/e2e/test-results/results.json"
+          if [ ! -f "$REPORT" ]; then
+            echo "::warning::No results.json — skipping issue auto-create"
+            exit 0
+          fi
+          node scripts/ci/e2e-report-to-issues.mjs \
+            --report "$REPORT" \
+            --target staging || true
+
+      - name: Block release if fail
+        if: failure() && startsWith(github.ref, 'refs/heads/release/')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.setFailed("Business flows failed — release branch blocked");
