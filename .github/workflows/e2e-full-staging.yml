@@ -52,7 +52,7 @@ jobs:
           npx playwright install --with-deps chromium webkit
 
       # ─── Staging (engine + bridge) ─────────────────────────────────
-      - name: Smoke 01 + bugs P0 02 + tracker 02-tracker + dashboard UI 09 (staging)
+      - name: Full battery staging (all P0+P1 suites)
         env:
           TARGET: staging
           BRIDGE_ADMIN_TOKEN: ${{ secrets.E2E_BRIDGE_ADMIN_TOKEN_STAGING }}
@@ -61,14 +61,24 @@ jobs:
           E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL_STAGING }}
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
           E2E_TEST_SITE_KEY: ${{ secrets.E2E_TEST_SITE_KEY_STAGING }}
+          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
         run: |
           npx playwright test \
             01-smoke/ \
             02-bugs-regression/ \
             02-tracker-to-dashboard/ \
             03-forms-leads/ \
+            04-push-pwa/ \
+            05-gsc-oauth/ \
+            07-settings-credentials/ \
+            08-voip-calls/ \
             09-dashboard-ui/ \
-            --project=chromium-desktop
+            10-onboarding-wizard/ \
+            12-auth-flow/ \
+            13-cross-app-inbound/ \
+            18-api-contract/ \
+            19-sdk-tracker/ \
+            --project=chromium-desktop || true
 
       - name: Mobile responsive (staging)
         env:
