@@ -128,6 +128,8 @@ function WorkspaceLayout() {
     { key: 'smtp', label: 'Email (SMTP)' },
     { key: 'api-keys', label: 'Clés API' },
     { key: 'sdk', label: 'Installer le SDK' },
+    { key: 'voip', label: 'Téléphonie / VoIP' },
+    { key: 'search-console', label: 'Search Console' },
   ] as const
 
   const closeMobileMenu = () => {
@@ -219,8 +221,6 @@ function WorkspaceLayout() {
                   { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
                   { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
                   { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
-                  { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
-                  { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                   { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                   { to: '/workspaces/$workspaceId/settings', label: 'Paramètres' },
                 ].map(({ to, label, exact }) => {
@@ -473,8 +473,6 @@ function WorkspaceLayout() {
                     { to: '/workspaces/$workspaceId/explore', label: 'Explorer' },
                     { to: '/workspaces/$workspaceId/goals', label: 'Objectifs' },
                     { to: '/workspaces/$workspaceId/filters', label: 'Filtres' },
-                    { to: '/workspaces/$workspaceId/search-console', label: 'Search Console' },
-                    { to: '/workspaces/$workspaceId/calls', label: 'Appels' },
                     { to: '/workspaces/$workspaceId/annotations', label: 'Annotations' },
                   ].map(({ to, label, exact }) => {
                     const resolvedPath = to.replace('$workspaceId', workspaceId)
