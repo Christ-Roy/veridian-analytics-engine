@@ -1,0 +1,21 @@
+{
+  "name": "@veridian/e2e-battery",
+  "private": true,
+  "version": "0.1.0",
+  "description": "End-to-end test battery for Veridian Analytics Engine — runs against live staging/prod URLs. No local build, CI only.",
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test 01-smoke/",
+    "test:hub-contract": "playwright test 06-hub-contract/",
+    "test:demo": "playwright test 11-demo-public/",
+    "test:phase1": "playwright test 01-smoke/",
+    "test:phase2": "playwright test 06-hub-contract/ 11-demo-public/",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}

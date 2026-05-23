@@ -1,0 +1,95 @@
+# Veridian Analytics Engine — E2E smoke staging
+#
+# Trigger : workflow_run après "Staging CI/CD" success (étage 3 deploy-staging)
+#           OU workflow_dispatch manuel
+#
+# Exécute la suite 01-smoke (healthcheck, routes, SSL, security-headers,
+# console-clean) + 06-hub-contract HMAC rejection contre les URLs publiques
+# staging.
+#
+# Durée cible : < 90s. Bloquant : déclenche un rollback via re-deploy si fail.
+
+name: E2E smoke staging
+
+on:
+  workflow_run:
+    workflows: ["Staging CI/CD"]
+    types: [completed]
+    branches: [staging]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-smoke-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    name: Smoke staging (01 + 06-rejection)
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET: staging
+      CI: "true"
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + deps
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: Run smoke 01 + HMAC rejection 06
+        run: |
+          npx playwright test 01-smoke/ 06-hub-contract/hmac-rejection.spec.ts \
+            --project=chromium-desktop \
+            --reporter=list
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-smoke-staging
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 14
+
+      - name: Open issue if smoke fail
+        if: failure() && github.event_name != 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'e2e-smoke-failure,staging',
+            });
+            const existing = issues.data.find(i => i.title.includes('Smoke staging failed'));
+            if (!existing) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `Smoke staging failed (run ${context.runId})`,
+                labels: ['e2e-smoke-failure', 'staging', 'bug'],
+                body: `Smoke E2E staging a échoué.\n\n` +
+                      `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n` +
+                      `SHA: ${context.sha}\n\n` +
+                      `À investiguer en priorité — rollback potentiel nécessaire.`,
+              });
+            }

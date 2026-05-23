@@ -1,0 +1,126 @@
+# Veridian Analytics Engine — E2E smoke prod
+#
+# Trigger : workflow_run après "Prod CI/CD" success (étage deploy-prod)
+#           OU workflow_dispatch manuel
+#
+# Exécute :
+#   - 01-smoke contre prod (https://analytics-engine.app.veridian.site)
+#   - 01-smoke contre demo-prod (https://demo-analytics.veridian.site)
+#   - 06-hub-contract HMAC rejection (sans écrire, juste les rejets)
+#   - 11-demo-public accessible + restricted-guards
+#
+# Bloquant : si fail, le job déclenche le workflow rollback-prod (déjà câblé
+# côté prod-ci.yml via re-run).
+#
+# Durée cible : < 3 min.
+
+name: E2E smoke prod
+
+on:
+  workflow_run:
+    workflows: ["Prod CI/CD"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-smoke-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  actions: write   # pour re-trigger rollback workflow si fail
+
+jobs:
+  smoke:
+    name: Smoke prod + demo-prod
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      CI: "true"
+    defaults:
+      run:
+        working-directory: tests/e2e
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + deps
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      # ─── Prod targets ──────────────────────────────────────────────
+      - name: Smoke 01 (prod)
+        env:
+          TARGET: prod
+        run: |
+          npx playwright test 01-smoke/ \
+            --project=chromium-desktop \
+            --reporter=list
+
+      - name: HMAC rejection 06 (prod)
+        env:
+          TARGET: prod
+        run: |
+          npx playwright test 06-hub-contract/hmac-rejection.spec.ts \
+            --project=chromium-desktop \
+            --reporter=list
+
+      # ─── Demo prod ──────────────────────────────────────────────────
+      - name: Smoke 01 (demo-prod)
+        env:
+          TARGET: demo-prod
+        run: |
+          npx playwright test 01-smoke/ \
+            --project=chromium-desktop \
+            --reporter=list
+
+      - name: Demo public 11 (demo-prod) — read-only
+        env:
+          TARGET: demo-prod
+        run: |
+          # On exclut demo-seed-reseed.spec.ts en prod (skip déjà mais double safety)
+          npx playwright test \
+            11-demo-public/demo-accessible.spec.ts \
+            11-demo-public/demo-banner-cta.spec.ts \
+            11-demo-public/demo-restricted-guards.spec.ts \
+            --project=chromium-desktop \
+            --reporter=list
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-smoke-prod
+          path: |
+            tests/e2e/playwright-report/
+            tests/e2e/test-results/
+          retention-days: 30
+
+      - name: Open issue + Telegram-style flag on prod fail
+        if: failure() && github.event_name != 'workflow_dispatch'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `URGENT: Smoke prod failed (run ${context.runId})`,
+              labels: ['e2e-smoke-failure', 'prod', 'urgent', 'bug'],
+              body: `**SMOKE PROD A ÉCHOUÉ — investigation immédiate requise.**\n\n` +
+                    `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n` +
+                    `SHA: ${context.sha}\n\n` +
+                    `Étapes :\n` +
+                    `1. Vérifier l'artifact \`playwright-report-smoke-prod\`\n` +
+                    `2. Lancer un rollback prod si le issue est confirmé\n` +
+                    `3. Investiguer la cause root\n`,
+            });
