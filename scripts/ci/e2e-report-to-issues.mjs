@@ -117,8 +117,10 @@ async function main() {
   );
 
   // 3. List existing open issues with label e2e-regression
-  const existing = await listIssues(["e2e-regression"]);
-  console.log(`Existing open e2e-regression issues: ${existing.length}`);
+  const existing = DRY ? [] : await listIssues(["e2e-regression"]);
+  console.log(
+    `Existing open e2e-regression issues: ${existing.length}${DRY ? " (DRY: skipped fetch)" : ""}`,
+  );
 
   // 4. For each failure: create or comment on existing
   let created = 0;
