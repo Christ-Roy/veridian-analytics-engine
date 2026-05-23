@@ -411,10 +411,8 @@ const APP_TABLES = [
   "SipCall",
   "PushNotification",
   "PushSubscription",
-  "LeadSession",
-  "FormSubmission",
-  "FormSchema",
-  "Lead",
+  // LeadSession / FormSubmission / FormSchema / Lead — supprimées 2026-05-23
+  // (migration 20260523000000_drop_forms_leads, scope change Robert).
   "Site",
   "GscDaily",
   "GscProperty",
