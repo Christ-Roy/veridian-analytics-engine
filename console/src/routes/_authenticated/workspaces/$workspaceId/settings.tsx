@@ -11,10 +11,11 @@ import { TeamSettings } from '../../../../components/settings/TeamSettings'
 import { CodeSnippet } from '../../../../components/setup/CodeSnippet'
 import { SmtpPage } from '../../../../pages/settings/smtp'
 import { ApiKeysPage } from '../../../../pages/settings/api-keys'
+import { VeridianSettingsPage } from '../../../../veridian/pages/settings'
 import { z } from 'zod'
 
 const settingsSearchSchema = z.object({
-  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'danger']).optional().default('workspace'),
+  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'veridian', 'danger']).optional().default('workspace'),
 })
 
 export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/settings')({
@@ -55,7 +56,7 @@ const currencyOptions = [
   { value: 'BRL', label: 'BRL - Brazilian Real' },
 ]
 
-type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'danger'
+type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'veridian' | 'danger'
 
 const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] = [
   { key: 'workspace', label: 'Workspace' },
@@ -66,6 +67,7 @@ const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] 
   { key: 'api-keys', label: 'API Keys' },
   { key: 'privacy', label: 'Privacy' },
   { key: 'sdk', label: 'Install SDK' },
+  { key: 'veridian', label: 'Veridian' },
   { key: 'danger', label: 'Danger zone', ownerOnly: true },
 ]
 
@@ -705,6 +707,14 @@ window.StaminadsConfig = {
           {section === 'api-keys' && <ApiKeysPage workspaceId={workspaceId} />}
           {section === 'privacy' && privacyContent}
           {section === 'sdk' && sdkContent}
+          {section === 'veridian' && (
+            <VeridianSettingsPage
+              workspaceId={workspaceId}
+              accountEmail={currentUser?.email}
+              accountSettingsUrl={`/workspaces/${workspaceId}/account`}
+              embedded
+            />
+          )}
           {section === 'danger' && isOwner && dangerContent}
         </div>
       </div>

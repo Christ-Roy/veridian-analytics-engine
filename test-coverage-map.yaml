@@ -677,6 +677,37 @@
     (jamais en clair), formulaire d'ajout, toggles notifications déclenchant
     PUT /settings. `api.ts` étendu (requestJson PUT/POST/DELETE + clients
     settings/credentials) — couvert par ce test + dashboard.test.tsx.
+    Le mode `embedded` (UI-NATIVE-INTEGRATION 2026-05-23) est aussi couvert :
+    pas de header standalone, racine sans `min-h-screen`, sections internes
+    intactes. Ce mode est consommé par la sous-route native staminads
+    `console/src/routes/_authenticated/workspaces/$workspaceId/settings.tsx`
+    (section sidebar "Veridian"), thin wrapper non testé directement.
+
+# ─── Intégration native dans le layout staminads (UI-NATIVE-INTEGRATION) ──
+
+- sources:
+    - console/src/routes/_authenticated/workspaces/$workspaceId/veridian.tsx
+    - console/src/routes/_authenticated/workspaces/$workspaceId/settings.tsx
+    - console/src/routes/_authenticated/workspaces/$workspaceId.tsx
+  covered_by:
+    - console/src/veridian/pages/__tests__/dashboard.test.tsx
+    - console/src/veridian/pages/__tests__/settings.test.tsx
+  reason: |
+    Sprint UI-NATIVE-INTEGRATION 2026-05-23. Suppression du tunnel parallèle
+    `/veridian/dashboard/:wsId` + `/veridian/settings/:wsId` (qui contournait
+    le layout staminads) au profit de :
+    - sous-route native `/workspaces/:wsId/veridian` (thin wrapper TanStack
+      autour de VeridianDashboardPage — couvert indirectement par
+      dashboard.test.tsx)
+    - section "Veridian" dans la page Settings native staminads (thin wrapper
+      autour de VeridianSettingsPage en mode `embedded` — couvert indirectement
+      par settings.test.tsx, qui ajoute 2 tests dédiés au mode embedded)
+    - update du menu nav workspaces/$workspaceId.tsx (Veridian pointe sur la
+      nouvelle sous-route) — couverture e2e Playwright suffit (rendu visuel).
+
+    Les thin wrappers de routes TanStack (`*.tsx` dans
+    routes/_authenticated/workspaces/$workspaceId/) sont systématiquement
+    hors scope Vitest dans le repo (src/routes/** = thin route components).
 
 - sources:
     - console/public/sw.js

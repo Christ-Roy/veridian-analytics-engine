@@ -279,4 +279,28 @@ describe('VeridianSettingsPage', () => {
       ).toBeInTheDocument(),
     );
   });
+
+  it('mode embedded : pas de header standalone, racine sans min-h-screen', async () => {
+    render(<VeridianSettingsPage workspaceId="ws1" embedded />);
+    const root = screen.getByTestId('veridian-settings-root');
+    expect(root.getAttribute('data-embedded')).toBe('true');
+    expect(root.className).not.toMatch(/min-h-screen/);
+    // Le SettingsHeader rend un h1 "Paramètres" — il ne doit PAS apparaître
+    // en mode embedded (le layout hôte fournit son propre titre).
+    expect(screen.queryByTestId('settings-header')).not.toBeInTheDocument();
+    // Les sections elles, restent rendues normalement.
+    await waitFor(() =>
+      expect(
+        screen.getByTestId('settings-section-account'),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('mode standalone (default) : header présent + racine pleine hauteur', async () => {
+    render(<VeridianSettingsPage workspaceId="ws1" />);
+    const root = screen.getByTestId('veridian-settings-root');
+    expect(root.getAttribute('data-embedded')).toBe('false');
+    expect(root.className).toMatch(/min-h-screen/);
+    expect(screen.getByTestId('settings-header')).toBeInTheDocument();
+  });
 });

@@ -59,6 +59,13 @@ export interface VeridianSettingsPageProps {
    * cette page plutôt que de réimplémenter le flow auth.
    */
   accountSettingsUrl?: string;
+  /**
+   * Mode "embarqué" : retire le header (`<SettingsHeader />`), le padding
+   * outer + le `min-h-screen`. Utilisé quand la page est incrustée dans
+   * un layout hôte (sidebar staminads native settings) qui fournit déjà
+   * son propre titre + son propre cadre. Default false = mode standalone.
+   */
+  embedded?: boolean;
 }
 
 type ViewState =
@@ -70,6 +77,7 @@ export function VeridianSettingsPage({
   workspaceId,
   accountEmail,
   accountSettingsUrl,
+  embedded = false,
 }: VeridianSettingsPageProps) {
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
   const abortRef = useRef<AbortController | null>(null);
@@ -101,11 +109,22 @@ export function VeridianSettingsPage({
 
   return (
     <div
-      className="veridian-scope min-h-screen px-4 py-8 sm:px-6 lg:px-10"
+      className={cn(
+        'veridian-scope',
+        embedded
+          ? 'w-full'
+          : 'min-h-screen px-4 py-8 sm:px-6 lg:px-10',
+      )}
       data-testid="veridian-settings-root"
+      data-embedded={embedded ? 'true' : 'false'}
     >
-      <div className="mx-auto max-w-4xl space-y-8">
-        <SettingsHeader />
+      <div
+        className={cn(
+          'space-y-8',
+          embedded ? 'w-full' : 'mx-auto max-w-4xl',
+        )}
+      >
+        {!embedded && <SettingsHeader />}
 
         {state.kind === 'loading' && <SettingsSkeleton />}
 
