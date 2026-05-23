@@ -15,8 +15,12 @@ const DEFAULT_METRICS = ['sessions', 'median_duration']
  *
  * - null / undefined → undefined (préserve l'absence de donnée comparée)
  * - valeur non numérique → 0 (fail-safe, pas de NaN propagé à l'UI)
+ *
+ * Exporté pour les routes qui transforment les rows ClickHouse hors du flux
+ * `transformToDimensionData` (cf. goals.tsx — port natif staminads qui shape
+ * les données par lui-même).
  */
-function toMetricNumber(raw: unknown): number | undefined {
+export function toMetricNumber(raw: unknown): number | undefined {
   if (raw === null || raw === undefined) return undefined
   const n = Number(raw)
   return Number.isFinite(n) ? n : 0

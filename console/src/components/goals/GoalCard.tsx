@@ -264,15 +264,20 @@ export function GoalCard({
           const isRightEdgeMobile = index % 2 === 1 // items 1, 3
           const isRightEdgeDesktop = index === 3
 
-          // Format value based on type
+          // Format value based on type.
+          // Defensive Number() coerce : si un consommateur passe une string
+          // ClickHouse non-coercée, `.toFixed` crash la page entière. On
+          // tolère ici en plus de la coerce attendue côté data layer (cf.
+          // goals.tsx → toMetricNumber).
           const formatValue = () => {
+            const numericCurrent = Number(data.current) || 0
             if (config.format === 'currency') {
-              return data.current === 0 ? '-' : formatCurrency(data.current, currency)
+              return numericCurrent === 0 ? '-' : formatCurrency(numericCurrent, currency)
             }
             if (config.format === 'percent') {
-              return `${data.current.toFixed(2)}%`
+              return `${numericCurrent.toFixed(2)}%`
             }
-            return formatNumber(data.current)
+            return formatNumber(numericCurrent)
           }
 
           return (

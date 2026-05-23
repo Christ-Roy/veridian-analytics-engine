@@ -11,6 +11,7 @@ import { GoalDashboardDrawer } from '../../../../components/goals/GoalDashboardD
 import { GoalCard } from '../../../../components/goals/GoalCard'
 import { determineGranularity } from '../../../../lib/chart-utils'
 import { determineGranularityForRange, computeDateRange } from '../../../../lib/date-utils'
+import { toMetricNumber } from '../../../../lib/dimension-utils'
 import type { DatePreset, DateRange, Granularity } from '../../../../types/analytics'
 import type { ComparisonMode, ChartDataPoint } from '../../../../types/dashboard'
 
@@ -148,14 +149,14 @@ function Goals() {
     if (showComparison && typeof sessionsResponse.data === 'object' && 'current' in sessionsResponse.data) {
       const compData = sessionsResponse.data as { current: Record<string, unknown>[]; previous: Record<string, unknown>[] }
       return {
-        current: (compData.current?.[0]?.sessions as number) || 0,
-        previous: (compData.previous?.[0]?.sessions as number) || 0,
+        current: toMetricNumber(compData.current?.[0]?.sessions) ?? 0,
+        previous: toMetricNumber(compData.previous?.[0]?.sessions) ?? 0,
       }
     }
 
     const data = sessionsResponse.data as Record<string, unknown>[]
     return {
-      current: (data?.[0]?.sessions as number) || 0,
+      current: toMetricNumber(data?.[0]?.sessions) ?? 0,
       previous: 0,
     }
   }, [sessionsResponse, showComparison])
@@ -198,13 +199,15 @@ function Goals() {
       tsCurrentData = (timeSeriesResponse?.data as Record<string, unknown>[] | undefined) || []
     }
 
-    // Create maps for previous summary values by goal_name
+    // Create maps for previous summary values by goal_name.
+    // Coerce via toMetricNumber : ClickHouse renvoie les agrégats en string
+    // (cf. dimension-utils.ts), un `as number` mensonger crash GoalCard.toFixed.
     const summaryPrevMap = new Map<string, { goals: number; sum_goal_value: number; median_goal_value: number }>()
     for (const row of summaryPreviousData) {
       summaryPrevMap.set(row.goal_name as string, {
-        goals: row.goals as number,
-        sum_goal_value: row.sum_goal_value as number,
-        median_goal_value: row.median_goal_value as number,
+        goals: toMetricNumber(row.goals) ?? 0,
+        sum_goal_value: toMetricNumber(row.sum_goal_value) ?? 0,
+        median_goal_value: toMetricNumber(row.median_goal_value) ?? 0,
       })
     }
 
@@ -220,10 +223,10 @@ function Goals() {
       }
       tsCurrentByGoal.get(goalName)!.push({
         timestamp: row[dateColumn] as string,
-        value: row.goals as number,
+        value: toMetricNumber(row.goals) ?? 0,
         // Store all metrics in a single pass
-        sum_goal_value: row.sum_goal_value as number,
-        median_goal_value: row.median_goal_value as number,
+        sum_goal_value: toMetricNumber(row.sum_goal_value) ?? 0,
+        median_goal_value: toMetricNumber(row.median_goal_value) ?? 0,
       } as ChartDataPoint & { sum_goal_value: number; median_goal_value: number })
     }
 
@@ -234,9 +237,9 @@ function Goals() {
       }
       tsPreviousByGoal.get(goalName)!.push({
         timestamp: row[dateColumn] as string,
-        value: row.goals as number,
-        sum_goal_value: row.sum_goal_value as number,
-        median_goal_value: row.median_goal_value as number,
+        value: toMetricNumber(row.goals) ?? 0,
+        sum_goal_value: toMetricNumber(row.sum_goal_value) ?? 0,
+        median_goal_value: toMetricNumber(row.median_goal_value) ?? 0,
       } as ChartDataPoint & { sum_goal_value: number; median_goal_value: number })
     }
 
@@ -262,8 +265,11 @@ function Goals() {
           value: metric === 'goals' ? d.value : (d[metric] ?? 0),
         }))
 
-      // Calculate conversion rate (goals / sessions * 100)
-      const currentGoals = row.goals as number
+      // Coerce row metrics via toMetricNumber — ClickHouse renvoie en string
+      // (cf. cb02c61). Sans ça, `.toFixed(2)` côté GoalCard crash la page.
+      const currentGoals = toMetricNumber(row.goals) ?? 0
+      const currentSumValue = toMetricNumber(row.sum_goal_value) ?? 0
+      const currentMedianValue = toMetricNumber(row.median_goal_value) ?? 0
       const prevGoals = prev?.goals
       const currentConvRate = totalSessions.current > 0 ? (currentGoals / totalSessions.current) * 100 : 0
       const prevConvRate = totalSessions.previous > 0 && prevGoals ? (prevGoals / totalSessions.previous) * 100 : undefined
@@ -272,9 +278,9 @@ function Goals() {
         goal_name: goalName,
         metrics: {
           goals: {
-            current: row.goals as number,
+            current: currentGoals,
             previous: prev?.goals,
-            change: calcChange(row.goals as number, prev?.goals),
+            change: calcChange(currentGoals, prev?.goals),
             chartData: extractChartData(currentChartData, 'goals'),
             chartDataPrev: extractChartData(previousChartData, 'goals'),
           },
@@ -286,16 +292,16 @@ function Goals() {
             chartDataPrev: [],
           },
           sum_goal_value: {
-            current: row.sum_goal_value as number,
+            current: currentSumValue,
             previous: prev?.sum_goal_value,
-            change: calcChange(row.sum_goal_value as number, prev?.sum_goal_value),
+            change: calcChange(currentSumValue, prev?.sum_goal_value),
             chartData: extractChartData(currentChartData, 'sum_goal_value'),
             chartDataPrev: extractChartData(previousChartData, 'sum_goal_value'),
           },
           median_goal_value: {
-            current: row.median_goal_value as number,
+            current: currentMedianValue,
             previous: prev?.median_goal_value,
-            change: calcChange(row.median_goal_value as number, prev?.median_goal_value),
+            change: calcChange(currentMedianValue, prev?.median_goal_value),
             chartData: extractChartData(currentChartData, 'median_goal_value'),
             chartDataPrev: extractChartData(previousChartData, 'median_goal_value'),
           },
