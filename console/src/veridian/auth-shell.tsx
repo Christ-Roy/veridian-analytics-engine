@@ -1,29 +1,18 @@
 import type { ReactNode } from 'react'
-import { useAuth } from '../lib/useAuth'
 
 /**
  * AuthShell — chrome commun à toutes les pages d'auth de la console
  * (login, mot de passe oublié, reset, setup).
  *
- * Pourquoi ce composant (ticket U9) :
- *   - Avant U9, chaque page d'auth dupliquait son fond + logo + crédit photo,
- *     et seule `login.tsx` switchait le logo Veridian/Staminads via `isDemo`.
- *     `forgot-password.tsx` et `reset-password.$token.tsx` affichaient
- *     `logo.svg` (Staminads) en dur même sur une instance Veridian.
- *   - AuthShell centralise le branding : sur une instance Veridian (demo),
- *     toutes les pages d'auth affichent le logo + le nom Veridian ; sur
- *     l'instance staminads interne, le branding upstream reste intact.
- *
- * Le branding « Veridian » est piloté par le flag runtime `isDemo` de
- * `AuthContext` (issu de `GET /api/public-config`). C'est le seul signal
- * runtime qui distingue une instance Veridian publique d'un build staminads
- * interne — le bundle console étant unique pour les deux.
+ * Branding figé Veridian sur tous les déploiements (BUG-08/09 — fix
+ * upstream-branding-cleanup 2026-05-23). Le fork Veridian ne sert plus
+ * jamais de marque Staminads, peu importe `isDemo`. Le flag isDemo reste
+ * utilisé pour le banner FR + footer démo + auto-login anonyme, mais ne
+ * pilote plus le branding visuel.
  */
 export function AuthShell({ children }: { children: ReactNode }) {
-  const { isDemo } = useAuth()
-
-  const logoSrc = isDemo ? '/veridian-logo.svg' : '/logo.svg'
-  const logoAlt = isDemo ? 'Veridian Analytics' : 'Staminads'
+  const logoSrc = '/veridian-logo.svg'
+  const logoAlt = 'Veridian Analytics'
 
   return (
     <div

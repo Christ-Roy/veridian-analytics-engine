@@ -264,7 +264,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
               label="From Name"
               rules={[{ required: true, message: 'Please enter from name' }]}
             >
-              <Input placeholder="Staminads Analytics" />
+              <Input placeholder="Veridian Analytics" />
             </Form.Item>
 
             <Form.Item

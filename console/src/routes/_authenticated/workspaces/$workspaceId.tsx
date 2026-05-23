@@ -11,6 +11,7 @@ import { AssistantProvider } from '../../../contexts/AssistantContext'
 import { AssistantButton, AssistantPanel } from '../../../components/Assistant'
 import { useAuth } from '../../../lib/useAuth'
 import { useTimezone } from '../../../hooks/useTimezone'
+import { BRAND, DISPLAY_VERSION } from '../../../config/brand'
 import type { DatePreset } from '../../../types/analytics'
 import type { WorkspaceSearch, ComparisonMode } from '../../../types/dashboard'
 
@@ -142,7 +143,7 @@ function WorkspaceLayout() {
           {/* Mobile: Logo only */}
           <div className="flex md:hidden items-center">
             <Link to="/workspaces/$workspaceId" params={{ workspaceId }}>
-              <img src="/logo.svg" alt="Staminads" className="h-6" />
+              <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-6" />
             </Link>
           </div>
 
@@ -150,7 +151,7 @@ function WorkspaceLayout() {
           <div className="hidden md:block">
           <Space size="large">
             <Link to="/workspaces/$workspaceId" params={{ workspaceId }}>
-              <img src="/logo.svg" alt="Staminads" className="h-6" />
+              <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-6" />
             </Link>
             <Select
               value={workspaceId}
@@ -309,7 +310,7 @@ function WorkspaceLayout() {
                     key: 'documentation',
                     icon: <QuestionCircleOutlined />,
                     label: (
-                      <a href="https://docs.staminads.com" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
+                      <a href={BRAND.docsUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
                         Documentation
                         <ExternalLink size={12} className="text-gray-400" />
                       </a>
@@ -319,7 +320,7 @@ function WorkspaceLayout() {
                     key: 'report-issue',
                     icon: <ExclamationCircleOutlined />,
                     label: (
-                      <a href="https://github.com/staminads/staminads/issues" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
+                      <a href={BRAND.issuesUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2">
                         Report an issue
                         <ExternalLink size={12} className="text-gray-400" />
                       </a>
@@ -328,7 +329,7 @@ function WorkspaceLayout() {
                   { type: 'divider' },
                   {
                     key: 'version',
-                    label: `v${__APP_VERSION__}`,
+                    label: `v${DISPLAY_VERSION}`,
                     disabled: true,
                   },
                 ],
@@ -556,7 +557,7 @@ function WorkspaceLayout() {
           {/* Help Links */}
           <div className="py-2">
             <a
-              href="https://docs.staminads.com"
+              href={BRAND.docsUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
@@ -566,7 +567,7 @@ function WorkspaceLayout() {
               <ExternalLink size={12} className="text-gray-400" />
             </a>
             <a
-              href="https://github.com/staminads/staminads/issues"
+              href={BRAND.issuesUrl}
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
@@ -576,7 +577,7 @@ function WorkspaceLayout() {
               <ExternalLink size={12} className="text-gray-400" />
             </a>
             <div className="px-4 py-2 text-xs text-gray-400">
-              v{__APP_VERSION__}
+              v{DISPLAY_VERSION}
             </div>
           </div>
 
