@@ -432,10 +432,10 @@ function Explore() {
   if (isError) {
     return (
       <div className="flex-1 p-6">
-        <h1 className="text-2xl font-light text-gray-800 mb-4">Explore</h1>
+        <h1 className="text-2xl font-light text-gray-800 mb-4">Explorer</h1>
         <Alert
-          message="Error loading data"
-          description={error instanceof Error ? error.message : 'An unexpected error occurred'}
+          message="Erreur lors du chargement des données"
+          description={error instanceof Error ? error.message : "Une erreur inattendue s'est produite"}
           type="error"
           showIcon
         />
@@ -447,9 +447,9 @@ function Explore() {
   if (dimensions.length === 0) {
     return (
       <div className="flex-1 p-6">
-        <h1 className="text-2xl font-light text-gray-800 mb-4">Explore</h1>
+        <h1 className="text-2xl font-light text-gray-800 mb-4">Explorer</h1>
 
-        <p className="text-gray-500 mb-6">Select a report template to get started, or create your own custom report.</p>
+        <p className="text-gray-500 mb-6">Sélectionnez un modèle de rapport pour démarrer, ou créez votre propre rapport personnalisé.</p>
 
         <ExploreTemplates
           onSelectTemplate={handleSelectTemplate}
@@ -463,7 +463,7 @@ function Explore() {
   return (
     <div className="flex-1 p-6">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2 md:mb-6">
-        <h1 className="text-2xl font-light text-gray-800">Explore</h1>
+        <h1 className="text-2xl font-light text-gray-800">Explorer</h1>
         <div className="flex items-center gap-2">
           <CSVExportButton
             onClick={() => setIsCSVModalOpen(true)}

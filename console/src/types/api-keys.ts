@@ -5,15 +5,15 @@ export type ApiKeyRole = 'admin' | 'editor' | 'viewer'
 export const API_KEY_ROLE_INFO: Record<ApiKeyRole, { label: string; description: string }> = {
   admin: {
     label: 'Admin',
-    description: 'Full access to all API features',
+    description: 'Accès complet à toutes les fonctionnalités API',
   },
   editor: {
-    label: 'Editor',
-    description: 'Analytics, filters, and annotations',
+    label: 'Éditeur',
+    description: 'Analytics, filtres et annotations',
   },
   viewer: {
-    label: 'Viewer',
-    description: 'Read-only access to analytics',
+    label: 'Lecteur',
+    description: 'Accès en lecture seule aux analytics',
   },
 }
 

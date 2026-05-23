@@ -108,7 +108,7 @@ export function ExploreSummary({
     />,
     <Statistic
       key="timescore"
-      title="Median TimeScore"
+      title="TimeScore médian"
       value={formatDuration(totals.median_duration)}
       styles={statisticStyles}
       prefix={
@@ -135,7 +135,7 @@ export function ExploreSummary({
         key="best-timescore"
         content={
           <div className="text-sm">
-            <div className="font-medium mb-2">Best performing combination:</div>
+            <div className="font-medium mb-2">Meilleure combinaison :</div>
             {maxDimensionValues && Object.keys(maxDimensionValues).length > 0 ? (
               <div className="space-y-1">
                 {Object.entries(maxDimensionValues).map(([dim, value]) => (
@@ -143,7 +143,7 @@ export function ExploreSummary({
                     <span className="text-gray-500">{getDimensionLabel(dim, customDimensionLabels)}:</span>
                     <span className="font-medium">
                       {value === null || value === ''
-                        ? '(not set)'
+                        ? '(non défini)'
                         : dim === 'day_of_week' && typeof value === 'number'
                           ? DaysOfWeek[value] ?? String(value)
                           : String(value)}
@@ -152,7 +152,7 @@ export function ExploreSummary({
                 ))}
               </div>
             ) : (
-              <div className="text-gray-500">No dimension data available</div>
+              <div className="text-gray-500">Aucune donnée de dimension disponible</div>
             )}
           </div>
         }
@@ -161,7 +161,7 @@ export function ExploreSummary({
       >
         <div style={{ cursor: 'pointer' }}>
           <Statistic
-            title="Best TimeScore"
+            title="Meilleur TimeScore"
             value={formatDuration(bestTimeScore)}
             styles={statisticStyles}
             prefix={
@@ -186,7 +186,7 @@ export function ExploreSummary({
     ] : []),
     <Statistic
       key="bounce"
-      title="Bounce Rate"
+      title="Taux de rebond"
       value={totals.bounce_rate.toFixed(1)}
       styles={statisticStyles}
       suffix={
@@ -202,7 +202,7 @@ export function ExploreSummary({
     />,
     <Statistic
       key="scroll"
-      title={<span className={annotations && annotations.length > 0 ? '' : 'md:pr-[70px]'}>Median Scroll Depth</span>}
+      title={<span className={annotations && annotations.length > 0 ? '' : 'md:pr-[70px]'}>Profondeur de scroll médiane</span>}
       value={totals.median_scroll.toFixed(1)}
       styles={statisticStyles}
       suffix={
@@ -220,7 +220,7 @@ export function ExploreSummary({
         key="annotations"
         content={
           <div className="text-sm max-w-xs">
-            <div className="font-medium mb-2">Annotations in this period:</div>
+            <div className="font-medium mb-2">Annotations sur cette période :</div>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {annotations.map((annotation) => (
                 <div key={annotation.id} className="flex gap-2 items-start">
@@ -238,7 +238,7 @@ export function ExploreSummary({
                   <div>
                     <div className="font-medium">{annotation.title}</div>
                     <div className="text-gray-500 text-xs">
-                      {annotation.date} at {annotation.time} in {annotation.timezone}
+                      Le {annotation.date} à {annotation.time} ({annotation.timezone})
                     </div>
                     {annotation.description && (
                       <div className="text-gray-600 text-xs mt-1">{annotation.description}</div>

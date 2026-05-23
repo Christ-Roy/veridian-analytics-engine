@@ -56,7 +56,7 @@ export function BreakdownTableView({
     },
     {
       title: (
-        <Tooltip title="Green = meets reference, Cyan = exceeds reference">
+        <Tooltip title="Vert = atteint la référence, Cyan = dépasse la référence">
           <span className="cursor-help border-b border-dotted border-gray-400">TimeScore</span>
         </Tooltip>
       ),

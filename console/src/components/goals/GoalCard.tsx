@@ -51,15 +51,15 @@ const METRIC_CONFIG: {
   format: 'number' | 'currency' | 'percent'
   tooltip?: string
 }[] = [
-  { key: 'goals', label: 'Count', format: 'number' },
+  { key: 'goals', label: 'Nombre', format: 'number' },
   {
     key: 'conversion_rate',
-    label: 'Conv. Rate',
+    label: 'Taux de conv.',
     format: 'percent',
     tooltip: 'Not all visitors come with the same intent. This rate should be interpreted with caution as it includes all traffic regardless of purpose.',
   },
-  { key: 'sum_goal_value', label: 'Value', format: 'currency' },
-  { key: 'median_goal_value', label: 'Median', format: 'currency' },
+  { key: 'sum_goal_value', label: 'Valeur', format: 'currency' },
+  { key: 'median_goal_value', label: 'Médiane', format: 'currency' },
 ]
 
 function granularityToUnit(granularity: Granularity): dayjs.OpUnitType {
@@ -247,7 +247,7 @@ export function GoalCard({
           size="small"
           icon={<EyeOutlined />}
           onClick={onViewDashboard}
-          title="View full dashboard"
+          title="Voir le tableau de bord complet"
         />
       </div>
 

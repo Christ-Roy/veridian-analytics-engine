@@ -31,13 +31,13 @@ function PortSecurityHint({ port }: { port: number | null }) {
 
   let hint = ''
   if (port === 465) {
-    hint = 'Uses implicit TLS (SMTPS)'
+    hint = 'Utilise TLS implicite (SMTPS)'
   } else if (port === 587) {
-    hint = 'Uses STARTTLS (recommended)'
+    hint = 'Utilise STARTTLS (recommandé)'
   } else if (port === 25) {
-    hint = 'Uses opportunistic STARTTLS'
+    hint = 'Utilise STARTTLS opportuniste'
   } else {
-    hint = 'Uses STARTTLS if available'
+    hint = 'Utilise STARTTLS si disponible'
   }
 
   return (
@@ -74,7 +74,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
     mutationFn: (data: SmtpSettings) => api.smtp.update(workspaceId, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['smtp-info', workspaceId] })
-      messageApi.success('SMTP settings saved')
+      messageApi.success('Paramètres SMTP enregistrés')
       setHasChanges(false)
     },
     onError: (error: Error) => {
@@ -88,7 +88,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['smtp-info', workspaceId] })
       form.resetFields()
-      messageApi.success('SMTP settings removed. Falling back to global configuration.')
+      messageApi.success('Paramètres SMTP supprimés. Retour à la configuration globale.')
       setHasChanges(false)
     },
     onError: (error: Error) => {
@@ -101,7 +101,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
     mutationFn: (to: string) => api.smtp.test(workspaceId, to),
     onSuccess: (result) => {
       if (result.success) {
-        messageApi.success('Test email sent successfully')
+        messageApi.success('Email de test envoyé avec succès')
       } else {
         messageApi.error(result.message)
       }
@@ -160,7 +160,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
 
   const handleTestEmail = () => {
     if (!testEmail) {
-      messageApi.warning('Please enter a test email address')
+      messageApi.warning('Veuillez saisir une adresse email de test')
       return
     }
     testMutation.mutate(testEmail)
@@ -182,15 +182,15 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
       <div>
         <div className="flex items-center justify-between mb-4">
           <Title level={5} className="!mb-0">
-            Email Delivery Status
+            État de la livraison des emails
           </Title>
           {status?.available ? (
             <Tag color="success" icon={<CheckCircleOutlined />}>
-              Configured
+              Configuré
             </Tag>
           ) : (
             <Tag color="error" icon={<CloseCircleOutlined />}>
-              Not Configured
+              Non configuré
             </Tag>
           )}
         </div>
@@ -198,8 +198,8 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
         {status?.source === 'global' && (
           <Alert
             type="info"
-            message="Using Global SMTP"
-            description={`Emails are being sent using the system's default SMTP configuration${status.from_email ? ` (${status.from_email})` : ''}. You can configure custom SMTP settings below to use your own email server.`}
+            message="Utilisation du SMTP global"
+            description={`Les emails sont envoyés via la configuration SMTP par défaut du système${status.from_email ? ` (${status.from_email})` : ''}. Vous pouvez configurer un SMTP personnalisé ci-dessous pour utiliser votre propre serveur d'envoi.`}
             showIcon
             className="mt-4"
           />
@@ -219,17 +219,17 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
           <div className="flex items-end gap-4">
             <Form.Item
               name="host"
-              label="SMTP Host"
-              rules={[{ required: true, message: 'Please enter SMTP host' }]}
+              label="Hôte SMTP"
+              rules={[{ required: true, message: 'Veuillez saisir l\'hôte SMTP' }]}
               className="flex-1"
             >
-              <Input placeholder="smtp.example.com" />
+              <Input placeholder="smtp.exemple.fr" />
             </Form.Item>
 
             <Form.Item
               name="port"
               label="Port"
-              rules={[{ required: true, message: 'Please enter port' }]}
+              rules={[{ required: true, message: 'Veuillez saisir le port' }]}
             >
               <InputNumber
                 min={1}
@@ -244,15 +244,15 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Form.Item
               name="username"
-              label="Username"
+              label="Identifiant"
             >
-              <Input placeholder="username or email" autoComplete="off" />
+              <Input placeholder="identifiant ou email" autoComplete="off" />
             </Form.Item>
 
             <Form.Item
               name="password"
-              label="Password"
-              extra={settings?.password ? "Enter new password to update, or leave as ******** to keep existing" : undefined}
+              label="Mot de passe"
+              extra={settings?.password ? "Saisissez un nouveau mot de passe pour le modifier, ou laissez ******** pour conserver l'existant" : undefined}
             >
               <Input.Password placeholder="••••••••" autoComplete="new-password" />
             </Form.Item>
@@ -261,21 +261,21 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Form.Item
               name="from_name"
-              label="From Name"
-              rules={[{ required: true, message: 'Please enter from name' }]}
+              label="Nom expéditeur"
+              rules={[{ required: true, message: 'Veuillez saisir le nom expéditeur' }]}
             >
               <Input placeholder="Veridian Analytics" />
             </Form.Item>
 
             <Form.Item
               name="from_email"
-              label="From Email"
+              label="Email expéditeur"
               rules={[
-                { required: true, message: 'Please enter from email' },
-                { type: 'email', message: 'Please enter a valid email' },
+                { required: true, message: 'Veuillez saisir l\'email expéditeur' },
+                { type: 'email', message: 'Veuillez saisir un email valide' },
               ]}
             >
-              <Input placeholder="noreply@example.com" />
+              <Input placeholder="noreply@exemple.fr" />
             </Form.Item>
           </div>
 
@@ -290,15 +290,16 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
                 loading={updateMutation.isPending}
                 disabled={!hasChanges}
               >
-                Save Settings
+                Enregistrer
               </Button>
 
               {hasWorkspaceConfig && (
                 <Popconfirm
-                  title="Remove SMTP settings"
-                  description="This will revert to the global SMTP configuration (if available)."
+                  title="Supprimer les paramètres SMTP"
+                  description="Ceci revient à la configuration SMTP globale (si disponible)."
                   onConfirm={() => deleteMutation.mutate()}
-                  okText="Remove"
+                  okText="Supprimer"
+                  cancelText="Annuler"
                   okButtonProps={{ danger: true }}
                 >
                   <Button
@@ -306,7 +307,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
                     icon={<DeleteOutlined />}
                     loading={deleteMutation.isPending}
                   >
-                    Remove Custom SMTP
+                    Supprimer le SMTP personnalisé
                   </Button>
                 </Popconfirm>
               )}
@@ -319,16 +320,16 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
       {status?.available && (
         <div>
           <Title level={5} className="!mb-4">
-            Test Email Delivery
+            Tester la livraison email
           </Title>
           <div className="bg-white p-6 rounded-lg shadow-sm max-w-xl">
             <Paragraph type="secondary" className="!mb-4">
-              Send a test email to verify your SMTP configuration is working correctly.
+              Envoyez un email de test pour vérifier que votre configuration SMTP fonctionne correctement.
             </Paragraph>
 
             <Space.Compact style={{ width: '100%' }}>
               <Input
-                placeholder="Enter test email address"
+                placeholder="Saisissez une adresse email de test"
                 value={testEmail}
                 onChange={(e) => setTestEmail(e.target.value)}
                 type="email"
@@ -339,7 +340,7 @@ export function SmtpPage({ workspaceId }: SmtpPageProps) {
                 onClick={handleTestEmail}
                 loading={testMutation.isPending}
               >
-                Send Test
+                Envoyer le test
               </Button>
             </Space.Compact>
           </div>

@@ -70,8 +70,8 @@ export function DashboardFilters({
           <Dropdown
             menu={{
               items: [
-                { key: 'create', label: 'Create subscription', onClick: onSubscribeClick },
-                { key: 'view', label: 'View subscriptions', onClick: onViewSubscriptions },
+                { key: 'create', label: 'Créer un abonnement', onClick: onSubscribeClick },
+                { key: 'view', label: 'Voir les abonnements', onClick: onViewSubscriptions },
               ],
             }}
             trigger={['click']}

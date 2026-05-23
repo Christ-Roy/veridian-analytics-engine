@@ -60,7 +60,7 @@ export function ConditionRow({ index, value, onChange, onRemove, isOnlyCondition
           value={value.field}
           onChange={(field) => onChange({ ...value, field })}
           options={fieldOptions}
-          placeholder="Select field"
+          placeholder="Sélectionner un champ"
           className="w-full md:!w-[180px] md:shrink-0"
           showSearch
           optionFilterProp="label"
@@ -86,15 +86,15 @@ export function ConditionRow({ index, value, onChange, onRemove, isOnlyCondition
         <Input
           value={value.value ?? ''}
           onChange={(e) => onChange({ ...value, value: e.target.value })}
-          placeholder={value.operator === 'regex' ? 'Regular expression' : 'Value'}
+          placeholder={value.operator === 'regex' ? 'Expression régulière' : 'Valeur'}
           className="flex-1 min-w-0"
         />
       )}
       <Popconfirm
-        title="Delete this condition?"
+        title="Supprimer cette condition ?"
         onConfirm={onRemove}
-        okText="Delete"
-        cancelText="Cancel"
+        okText="Supprimer"
+        cancelText="Annuler"
         disabled={isOnlyCondition}
       >
         <Button

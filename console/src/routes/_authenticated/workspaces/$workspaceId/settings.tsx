@@ -44,31 +44,31 @@ const timezoneOptions = [
 ]
 
 const currencyOptions = [
-  { value: 'USD', label: 'USD - US Dollar' },
+  { value: 'USD', label: 'USD - Dollar américain' },
   { value: 'EUR', label: 'EUR - Euro' },
-  { value: 'GBP', label: 'GBP - British Pound' },
-  { value: 'JPY', label: 'JPY - Japanese Yen' },
-  { value: 'CAD', label: 'CAD - Canadian Dollar' },
-  { value: 'AUD', label: 'AUD - Australian Dollar' },
-  { value: 'CHF', label: 'CHF - Swiss Franc' },
-  { value: 'CNY', label: 'CNY - Chinese Yuan' },
-  { value: 'INR', label: 'INR - Indian Rupee' },
-  { value: 'BRL', label: 'BRL - Brazilian Real' },
+  { value: 'GBP', label: 'GBP - Livre sterling' },
+  { value: 'JPY', label: 'JPY - Yen japonais' },
+  { value: 'CAD', label: 'CAD - Dollar canadien' },
+  { value: 'AUD', label: 'AUD - Dollar australien' },
+  { value: 'CHF', label: 'CHF - Franc suisse' },
+  { value: 'CNY', label: 'CNY - Yuan chinois' },
+  { value: 'INR', label: 'INR - Roupie indienne' },
+  { value: 'BRL', label: 'BRL - Real brésilien' },
 ]
 
 type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'veridian' | 'danger'
 
 const menuItems: { key: SettingsSection; label: string; ownerOnly?: boolean }[] = [
-  { key: 'workspace', label: 'Workspace' },
-  { key: 'dimensions', label: 'Custom Dimensions' },
-  { key: 'team', label: 'Team' },
-  { key: 'integrations', label: 'Integrations' },
+  { key: 'workspace', label: 'Espace de travail' },
+  { key: 'dimensions', label: 'Dimensions personnalisées' },
+  { key: 'team', label: 'Équipe' },
+  { key: 'integrations', label: 'Intégrations' },
   { key: 'smtp', label: 'Email (SMTP)' },
-  { key: 'api-keys', label: 'API Keys' },
-  { key: 'privacy', label: 'Privacy' },
-  { key: 'sdk', label: 'Install SDK' },
+  { key: 'api-keys', label: 'Clés API' },
+  { key: 'privacy', label: 'Confidentialité' },
+  { key: 'sdk', label: 'Installer le SDK' },
   { key: 'veridian', label: 'Veridian' },
-  { key: 'danger', label: 'Danger zone', ownerOnly: true },
+  { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
 ]
 
 function Settings() {
@@ -136,10 +136,10 @@ function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] })
       queryClient.invalidateQueries({ queryKey: ['workspaces'] })
-      message.success('Workspace settings saved')
+      message.success('Paramètres de l\'espace de travail enregistrés')
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to save workspace settings')
+      message.error(error.message || 'Échec de l\'enregistrement des paramètres')
     },
   })
 
@@ -148,10 +148,10 @@ function Settings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspaceId] })
       setEditingSlot(null)
-      message.success('Label updated')
+      message.success('Libellé mis à jour')
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to update label')
+      message.error(error.message || 'Échec de la mise à jour du libellé')
     },
   })
 
@@ -159,11 +159,11 @@ function Settings() {
     mutationFn: () => api.workspaces.delete(workspaceId),
     onSuccess: async () => {
       await queryClient.refetchQueries({ queryKey: ['workspaces'] })
-      message.success('Workspace deleted')
+      message.success('Espace de travail supprimé')
       navigate({ to: '/workspaces' })
     },
     onError: (error: Error) => {
-      message.error(error.message || 'Failed to delete workspace')
+      message.error(error.message || 'Échec de la suppression de l\'espace de travail')
     },
   })
 
@@ -188,7 +188,7 @@ function Settings() {
   const detectLogo = async () => {
     const website = form.getFieldValue('website')
     if (!website) {
-      message.warning('Please enter a website URL first')
+      message.warning('Veuillez d\'abord saisir l\'URL du site')
       return
     }
 
@@ -197,12 +197,12 @@ function Settings() {
       const meta = await api.tools.websiteMeta(website)
       if (meta.logo_url) {
         form.setFieldValue('logo_url', meta.logo_url)
-        message.success('Logo detected')
+        message.success('Logo détecté')
       } else {
-        message.info('No logo found for this website')
+        message.info('Aucun logo trouvé pour ce site')
       }
     } catch {
-      message.error('Failed to detect logo')
+      message.error('Échec de la détection du logo')
     } finally {
       setDetectingLogo(false)
     }
@@ -254,7 +254,7 @@ function Settings() {
     const trimmed = domainInput.trim().toLowerCase()
     if (!trimmed) return
     if (allowedDomains.includes(trimmed)) {
-      message.warning('Domain already added')
+      message.warning('Domaine déjà ajouté')
       return
     }
     setAllowedDomains([...allowedDomains, trimmed])
@@ -296,24 +296,24 @@ function Settings() {
         >
           <Form.Item
             name="name"
-            label="Workspace Name"
-            rules={[{ required: true, message: 'Name is required' }]}
+            label="Nom de l'espace de travail"
+            rules={[{ required: true, message: 'Le nom est obligatoire' }]}
           >
-            <Input placeholder="My Website" />
+            <Input placeholder="Mon site" />
           </Form.Item>
 
           <Form.Item
             name="website"
-            label="Website URL"
+            label="URL du site web"
             rules={[
-              { required: true, message: 'Website is required' },
-              { type: 'url', message: 'Must be a valid URL' },
+              { required: true, message: 'Le site est obligatoire' },
+              { type: 'url', message: 'L\'URL doit être valide' },
             ]}
           >
-            <Input placeholder="https://example.com" />
+            <Input placeholder="https://exemple.fr" />
           </Form.Item>
 
-          <Form.Item name="logo_url" label="Logo URL">
+          <Form.Item name="logo_url" label="URL du logo">
             <Input
               placeholder="https://example.com/logo.png"
               suffix={
@@ -325,7 +325,7 @@ function Settings() {
                   onClick={detectLogo}
                   className="!p-0 !h-auto"
                 >
-                  Detect
+                  Détecter
                 </Button>
               }
               prefix={
@@ -336,7 +336,7 @@ function Settings() {
             />
           </Form.Item>
 
-          <Form.Item name="timezone" label="Timezone">
+          <Form.Item name="timezone" label="Fuseau horaire">
             <Select
               options={timezoneOptions}
               showSearch
@@ -346,7 +346,7 @@ function Settings() {
             />
           </Form.Item>
 
-          <Form.Item name="currency" label="Currency">
+          <Form.Item name="currency" label="Devise">
             <Select
               options={currencyOptions}
               showSearch
@@ -358,8 +358,8 @@ function Settings() {
 
           <Form.Item
             name="timescore_reference"
-            label="TimeScore Reference (seconds)"
-            tooltip="Target median session duration for heat map coloring in Explore. Higher values = higher bar for 'green' engagement."
+            label="Référence TimeScore (secondes)"
+            tooltip="Durée médiane cible des sessions pour la coloration de la heat map dans Explorer. Une valeur plus élevée = barre plus haute pour l'engagement « vert »."
           >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
@@ -373,8 +373,8 @@ function Settings() {
 
           <Form.Item
             name="bounce_threshold"
-            label="Bounce Threshold (seconds)"
-            tooltip="Sessions shorter than this duration are counted as bounces. Default is 10 seconds."
+            label="Seuil de rebond (secondes)"
+            tooltip="Les sessions plus courtes que cette durée sont comptées comme rebonds. Valeur par défaut : 10 secondes."
           >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
@@ -382,8 +382,8 @@ function Settings() {
           <Form.Item
             label={
               <span>
-                Allowed Domains{' '}
-                <Tooltip title="Restrict tracking to specific domains. Leave empty to allow all domains. Supports wildcards like *.example.com">
+                Domaines autorisés{' '}
+                <Tooltip title="Restreint le tracking à des domaines spécifiques. Laissez vide pour autoriser tous les domaines. Accepte les jokers comme *.exemple.fr">
                   <InfoCircleOutlined className="text-gray-400" />
                 </Tooltip>
               </span>
@@ -393,7 +393,7 @@ function Settings() {
               <Input
                 value={domainInput}
                 onChange={(e) => setDomainInput(e.target.value)}
-                placeholder="example.com or *.example.com"
+                placeholder="exemple.fr ou *.exemple.fr"
                 onPressEnter={(e) => {
                   e.preventDefault()
                   handleAddDomain()
@@ -406,7 +406,7 @@ function Settings() {
                     onClick={handleAddDomain}
                     className="!p-0 !h-auto"
                   >
-                    Add
+                    Ajouter
                   </Button>
                 }
               />
@@ -424,7 +424,7 @@ function Settings() {
                 </div>
               )}
               {allowedDomains.length === 0 && (
-                <div className="text-gray-400 text-sm">All domains allowed (no restrictions)</div>
+                <div className="text-gray-400 text-sm">Tous les domaines sont autorisés (aucune restriction)</div>
               )}
             </div>
           </Form.Item>
@@ -435,7 +435,7 @@ function Settings() {
               htmlType="submit"
               loading={updateWorkspaceMutation.isPending}
             >
-              Save Changes
+              Enregistrer les modifications
             </Button>
           </Form.Item>
         </Form>
@@ -462,19 +462,19 @@ function Settings() {
           pagination={false}
           columns={[
             {
-              title: 'Slot',
+              title: 'Emplacement',
               dataIndex: 'slot',
               key: 'slot',
               width: 100,
               render: (slot: number) => <Tag color="purple">stm_{slot}</Tag>,
             },
             {
-              title: 'Label',
+              title: 'Libellé',
               dataIndex: 'label',
               key: 'label',
               render: (label: string | null) => (
                 <span className={label ? 'font-medium' : 'text-gray-400 italic'}>
-                  {label || '(empty)'}
+                  {label || '(vide)'}
                 </span>
               ),
             },
@@ -489,7 +489,7 @@ function Settings() {
                   icon={<EditOutlined />}
                   onClick={() => handleEditClick(record.slot)}
                 >
-                  Edit
+                  Modifier
                 </Button>
               ),
             },
@@ -497,20 +497,21 @@ function Settings() {
         />
 
         <Modal
-          title="Edit Dimension Label"
+          title="Modifier le libellé de la dimension"
           open={editingSlot !== null}
           onCancel={() => setEditingSlot(null)}
           onOk={handleSaveLabel}
           confirmLoading={updateLabelMutation.isPending}
-          okText="Save"
+          okText="Enregistrer"
+          cancelText="Annuler"
         >
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Slot</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Emplacement</label>
               <Input value={`stm_${editingSlot}`} disabled />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Label</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Libellé</label>
               <Input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
@@ -536,15 +537,15 @@ window.StaminadsConfig = {
     <div className="max-w-xl">
       <CodeSnippet code={sdkSnippet} />
       <p className="text-gray-500 mt-4">
-        Add this code snippet to your website's <code>&lt;head&gt;</code> or <code>&lt;body&gt;</code> tag.
+        Ajoutez ce snippet de code dans la balise <code>&lt;head&gt;</code> ou <code>&lt;body&gt;</code> de votre site.
       </p>
       {sessionCount === 0 && (
         <div className="mt-6 flex items-center gap-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
           <Spin indicator={<LoadingOutlined style={{ fontSize: 20 }} spin />} />
           <div>
-            <div className="font-medium text-blue-900">Waiting for first event...</div>
+            <div className="font-medium text-blue-900">En attente du premier événement…</div>
             <div className="text-sm text-blue-700">
-              Install the SDK on your website and we'll detect it automatically.
+              Installez le SDK sur votre site, nous le détecterons automatiquement.
             </div>
           </div>
         </div>
@@ -554,13 +555,13 @@ window.StaminadsConfig = {
 
   const privacyContent = (
     <div className="bg-white p-6 rounded-lg shadow-sm max-w-xl">
-      <h3 className="text-lg font-medium mb-4">Geographic Data Collection</h3>
+      <h3 className="text-lg font-medium mb-4">Collecte de données géographiques</h3>
 
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-medium">Enable geo-location tracking</div>
-            <div className="text-sm text-gray-500">Track visitor country, region, city, and coordinates</div>
+            <div className="font-medium">Activer le tracking de géolocalisation</div>
+            <div className="text-sm text-gray-500">Enregistrer le pays, la région, la ville et les coordonnées des visiteurs</div>
           </div>
           <Switch checked={geoEnabled} onChange={setGeoEnabled} />
         </div>
@@ -569,31 +570,31 @@ window.StaminadsConfig = {
           <div className="ml-6 border-l-2 border-gray-100 pl-4 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-medium">Store city name</div>
-                <div className="text-sm text-gray-500">Record the city of visitors</div>
+                <div className="font-medium">Enregistrer le nom de la ville</div>
+                <div className="text-sm text-gray-500">Enregistrer la ville des visiteurs</div>
               </div>
               <Switch checked={geoStoreCity} onChange={setGeoStoreCity} />
             </div>
 
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-medium">Store region/state name</div>
-                <div className="text-sm text-gray-500">Record the region or state of visitors</div>
+                <div className="font-medium">Enregistrer le nom de la région</div>
+                <div className="text-sm text-gray-500">Enregistrer la région ou le département des visiteurs</div>
               </div>
               <Switch checked={geoStoreRegion} onChange={setGeoStoreRegion} />
             </div>
 
             <div>
-              <div className="font-medium mb-1">Coordinates precision</div>
-              <div className="text-sm text-gray-500 mb-2">Lower precision = more privacy</div>
+              <div className="font-medium mb-1">Précision des coordonnées</div>
+              <div className="text-sm text-gray-500 mb-2">Précision plus faible = davantage de confidentialité</div>
               <Select
                 value={geoCoordinatesPrecision}
                 onChange={setGeoCoordinatesPrecision}
                 style={{ width: '100%' }}
                 options={[
-                  { value: 0, label: 'Country level (~111km precision)' },
-                  { value: 1, label: 'Regional (~11km precision)' },
-                  { value: 2, label: 'City level (~1km precision)' },
+                  { value: 0, label: 'Niveau pays (précision ~111 km)' },
+                  { value: 1, label: 'Régional (précision ~11 km)' },
+                  { value: 2, label: 'Niveau ville (précision ~1 km)' },
                 ]}
               />
             </div>
@@ -602,7 +603,7 @@ window.StaminadsConfig = {
       </div>
 
       <div className="mt-6 p-3 bg-blue-50 rounded text-sm text-blue-700">
-        IP addresses are never stored — only used for geo lookup. Country is always included when geo tracking is enabled.
+        Les adresses IP ne sont jamais stockées — uniquement utilisées pour la résolution géographique. Le pays est toujours inclus lorsque le tracking géo est activé.
       </div>
 
       <div className="mt-6">
@@ -611,7 +612,7 @@ window.StaminadsConfig = {
           onClick={savePrivacySettings}
           loading={updateWorkspaceMutation.isPending}
         >
-          Save Changes
+          Enregistrer les modifications
         </Button>
       </div>
     </div>
@@ -619,17 +620,17 @@ window.StaminadsConfig = {
 
   const dangerContent = (
     <div className="bg-white p-6 rounded-lg shadow-sm max-w-xl border border-red-200">
-      <h3 className="text-lg font-medium text-red-600 mb-4">Delete Workspace</h3>
+      <h3 className="text-lg font-medium text-red-600 mb-4">Supprimer l'espace de travail</h3>
       <p className="text-gray-600 mb-4">
-        Once you delete a workspace, there is no going back. This will permanently delete all
-        analytics data, team members, API keys, and settings.
+        Une fois l'espace de travail supprimé, l'action est irréversible. Toutes les données
+        analytics, membres de l'équipe, clés API et paramètres seront supprimés définitivement.
       </p>
       <Button danger onClick={() => setDeleteConfirmOpen(true)}>
-        Delete this workspace
+        Supprimer cet espace de travail
       </Button>
 
       <Modal
-        title="Delete Workspace"
+        title="Supprimer l'espace de travail"
         open={deleteConfirmOpen}
         onCancel={() => {
           setDeleteConfirmOpen(false)
@@ -640,7 +641,7 @@ window.StaminadsConfig = {
             setDeleteConfirmOpen(false)
             setDeleteConfirmText('')
           }}>
-            Cancel
+            Annuler
           </Button>,
           <Button
             key="delete"
@@ -650,15 +651,15 @@ window.StaminadsConfig = {
             disabled={deleteConfirmText !== workspace.name}
             onClick={() => deleteWorkspaceMutation.mutate()}
           >
-            Delete
+            Supprimer
           </Button>,
         ]}
       >
         <p className="mb-4">
-          This action cannot be undone. This will permanently delete the workspace
-          <strong> {workspace.name}</strong> and all of its data.
+          Cette action est irréversible. L'espace de travail
+          <strong> {workspace.name}</strong> et toutes ses données seront supprimés définitivement.
         </p>
-        <p className="mb-2">Please type <strong>{workspace.name}</strong> to confirm:</p>
+        <p className="mb-2">Veuillez saisir <strong>{workspace.name}</strong> pour confirmer :</p>
         <Input
           value={deleteConfirmText}
           onChange={(e) => setDeleteConfirmText(e.target.value)}
@@ -670,7 +671,7 @@ window.StaminadsConfig = {
 
   return (
     <div className="flex-1 p-6">
-      <h1 className="hidden md:block text-2xl font-light text-gray-800 mb-6">Settings</h1>
+      <h1 className="hidden md:block text-2xl font-light text-gray-800 mb-6">Paramètres</h1>
 
       <div className="flex gap-6">
         {/* Sidebar Menu - hidden on mobile, accessible via hamburger menu */}

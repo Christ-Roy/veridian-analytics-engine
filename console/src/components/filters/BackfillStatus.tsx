@@ -44,20 +44,20 @@ export function BackfillStatus({ workspaceId }: BackfillStatusProps) {
           <Space>
             <SyncOutlined spin className="text-blue-500" />
             <Text strong>
-              {activeTask.status === 'pending' ? 'Preparing backfill...' : 'Backfill in progress'}
+              {activeTask.status === 'pending' ? 'Préparation du retraitement…' : 'Retraitement en cours'}
             </Text>
           </Space>
           <Popconfirm
-            title="Cancel backfill?"
-            description="Progress will be lost."
+            title="Annuler le retraitement ?"
+            description="La progression sera perdue."
             onConfirm={() => {
-              cancelBackfill().then(() => message.info('Backfill cancelled'))
+              cancelBackfill().then(() => message.info('Retraitement annulé'))
             }}
-            okText="Yes, cancel"
-            cancelText="No"
+            okText="Oui, annuler"
+            cancelText="Non"
           >
             <Button size="small" icon={<StopOutlined />} loading={isCancelling}>
-              Cancel
+              Annuler
             </Button>
           </Popconfirm>
         </div>
@@ -74,9 +74,9 @@ export function BackfillStatus({ workspaceId }: BackfillStatusProps) {
               {activeTask.sessions.processed.toLocaleString()} /{' '}
               {activeTask.sessions.total.toLocaleString()} sessions
             </span>
-            {activeTask.current_chunk && <span>Processing: {activeTask.current_chunk}</span>}
+            {activeTask.current_chunk && <span>En cours : {activeTask.current_chunk}</span>}
             {activeTask.estimated_remaining_seconds && activeTask.estimated_remaining_seconds > 0 && (
-              <span>~{formatDuration(activeTask.estimated_remaining_seconds)} remaining</span>
+              <span>~{formatDuration(activeTask.estimated_remaining_seconds)} restantes</span>
             )}
           </Space>
         </div>
@@ -91,33 +91,33 @@ export function BackfillStatus({ workspaceId }: BackfillStatusProps) {
         type="info"
         showIcon
         className="!mb-4"
-        message="Filter configuration has changed"
+        message="La configuration des filtres a changé"
         description={
           <div className="flex items-center justify-between mt-2">
             <Text type="secondary">
               {summary.lastCompletedFilterVersion
-                ? 'Historical data was processed with a different filter configuration.'
-                : 'No backfill has been run yet. Run a backfill to apply filters to historical data.'}
+                ? 'Les données historiques ont été traitées avec une configuration de filtres différente.'
+                : "Aucun retraitement n'a encore été lancé. Lancez un retraitement pour appliquer les filtres aux données historiques."}
             </Text>
             <Space>
-              <Text type="secondary">Lookback:</Text>
+              <Text type="secondary">Période :</Text>
               <InputNumber
                 min={1}
                 max={365}
                 value={lookbackDays}
                 onChange={(v) => setLookbackDays(v || 30)}
-                addonAfter="days"
+                addonAfter="jours"
                 style={{ width: 130 }}
               />
               <Button
                 type="primary"
                 icon={<PlayCircleOutlined />}
                 onClick={() => {
-                  startBackfill(lookbackDays).then(() => message.success('Backfill started'))
+                  startBackfill(lookbackDays).then(() => message.success('Retraitement démarré'))
                 }}
                 loading={isStarting}
               >
-                Start Backfill
+                Lancer le retraitement
               </Button>
             </Space>
           </div>

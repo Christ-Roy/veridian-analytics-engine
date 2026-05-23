@@ -20,13 +20,13 @@ const buildTimezoneOptions = (workspaceTimezone: string) => {
 }
 
 const DAYS_OF_WEEK = [
-  { value: 1, label: 'Monday' },
-  { value: 2, label: 'Tuesday' },
-  { value: 3, label: 'Wednesday' },
-  { value: 4, label: 'Thursday' },
-  { value: 5, label: 'Friday' },
-  { value: 6, label: 'Saturday' },
-  { value: 7, label: 'Sunday' },
+  { value: 1, label: 'Lundi' },
+  { value: 2, label: 'Mardi' },
+  { value: 3, label: 'Mercredi' },
+  { value: 4, label: 'Jeudi' },
+  { value: 5, label: 'Vendredi' },
+  { value: 6, label: 'Samedi' },
+  { value: 7, label: 'Dimanche' },
 ]
 
 const HOURS = Array.from({ length: 24 }, (_, i) => ({
@@ -205,7 +205,7 @@ export function SubscribeDrawer({
   return (
     <>
     <Drawer
-      title={isEditing ? 'Edit Subscription' : 'Subscribe to Report'}
+      title={isEditing ? "Modifier l'abonnement" : "S'abonner au rapport"}
       placement="right"
       size={480}
       open={open}
@@ -213,7 +213,7 @@ export function SubscribeDrawer({
       styles={{ body: { paddingBottom: 80 } }}
       footer={
         <div className="flex justify-end gap-2">
-          <Button onClick={handleClose}>Cancel</Button>
+          <Button onClick={handleClose}>Annuler</Button>
           <Button type="primary" ghost onClick={handlePreview} loading={previewMutation.isPending}>
             Preview
           </Button>
@@ -239,48 +239,48 @@ export function SubscribeDrawer({
       >
         <Form.Item
           name="name"
-          label="Report Name"
-          rules={[{ required: true, message: 'Please enter a name' }]}
+          label="Nom du rapport"
+          rules={[{ required: true, message: 'Veuillez saisir un nom' }]}
         >
-          <Input placeholder="e.g., Daily Traffic Summary" />
+          <Input placeholder="ex : Résumé trafic quotidien" />
         </Form.Item>
 
-        <Form.Item name="frequency" label="Frequency" rules={[{ required: true }]}>
+        <Form.Item name="frequency" label="Fréquence" rules={[{ required: true }]}>
           <Radio.Group>
-            <Radio.Button value="daily">Daily</Radio.Button>
-            <Radio.Button value="weekly">Weekly</Radio.Button>
-            <Radio.Button value="monthly">Monthly</Radio.Button>
+            <Radio.Button value="daily">Quotidien</Radio.Button>
+            <Radio.Button value="weekly">Hebdomadaire</Radio.Button>
+            <Radio.Button value="monthly">Mensuel</Radio.Button>
           </Radio.Group>
         </Form.Item>
 
         {frequency === 'weekly' && (
           <Form.Item
             name="day_of_week"
-            label="Day of Week"
-            rules={[{ required: true, message: 'Please select a day' }]}
+            label="Jour de la semaine"
+            rules={[{ required: true, message: 'Veuillez sélectionner un jour' }]}
           >
-            <Select options={DAYS_OF_WEEK} placeholder="Select day" />
+            <Select options={DAYS_OF_WEEK} placeholder="Sélectionner un jour" />
           </Form.Item>
         )}
 
         {frequency === 'monthly' && (
           <Form.Item
             name="day_of_month"
-            label="Day of Month"
-            rules={[{ required: true, message: 'Please select a day' }]}
+            label="Jour du mois"
+            rules={[{ required: true, message: 'Veuillez sélectionner un jour' }]}
           >
-            <Select options={DAYS_OF_MONTH} placeholder="Select day" />
+            <Select options={DAYS_OF_MONTH} placeholder="Sélectionner un jour" />
           </Form.Item>
         )}
 
         <Row gutter={16}>
           <Col span={8}>
-            <Form.Item name="hour" label="Send Time" rules={[{ required: true }]}>
+            <Form.Item name="hour" label="Heure d'envoi" rules={[{ required: true }]}>
               <Select options={HOURS} />
             </Form.Item>
           </Col>
           <Col span={16}>
-            <Form.Item name="timezone" label="Timezone" rules={[{ required: true }]}>
+            <Form.Item name="timezone" label="Fuseau horaire" rules={[{ required: true }]}>
               <Select
                 showSearch
                 optionFilterProp="label"
@@ -290,7 +290,7 @@ export function SubscribeDrawer({
           </Col>
         </Row>
 
-        <Form.Item name="limit" label="Results per Widget" rules={[{ required: true }]}>
+        <Form.Item name="limit" label="Résultats par widget" rules={[{ required: true }]}>
           <Radio.Group>
             {AVAILABLE_LIMITS.map((l) => (
               <Radio.Button key={l} value={l}>{l}</Radio.Button>
@@ -300,7 +300,7 @@ export function SubscribeDrawer({
 
         {filters.length > 0 && (
           <div className="bg-gray-50 p-3 rounded-lg mb-4">
-            <div className="text-xs font-medium text-gray-500 mb-1">With Filters</div>
+            <div className="text-xs font-medium text-gray-500 mb-1">Avec les filtres</div>
             <div className="flex flex-wrap gap-1">
               {filters.map((f, i) => (
                 <Tag key={i} color="orange" bordered={false}>
@@ -324,7 +324,7 @@ export function SubscribeDrawer({
                   form.setFieldValue('dimensions', allKeys)
                 }}
               >
-                select all
+                tout sélectionner
               </a>
             </div>
           }

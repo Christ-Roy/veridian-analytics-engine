@@ -154,7 +154,7 @@ export function DimensionSelector({ value, onChange, customDimensionLabels }: Di
     <div className="bg-white rounded-lg shadow-lg border border-gray-200 w-64">
       <div className="p-2 border-b border-gray-100">
         <Input
-          placeholder="Search dimensions..."
+          placeholder="Rechercher des dimensions…"
           prefix={<SearchOutlined className="text-gray-400" />}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
@@ -165,7 +165,7 @@ export function DimensionSelector({ value, onChange, customDimensionLabels }: Di
         {Object.keys(filteredByCategory).length === 0 ? (
           <div className="p-4">
             <Empty
-              description={allDimensionsSelected ? 'All dimensions selected' : 'No dimensions found'}
+              description={allDimensionsSelected ? 'Toutes les dimensions sont sélectionnées' : 'Aucune dimension trouvée'}
               image={Empty.PRESENTED_IMAGE_SIMPLE}
             />
           </div>

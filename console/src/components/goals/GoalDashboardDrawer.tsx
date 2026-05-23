@@ -325,7 +325,7 @@ export function GoalDashboardDrawer({
         >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <DimensionTableWidget
-              title="Top Sources"
+              title="Sources principales"
               tabs={sourcesTabConfig}
               columns={GOAL_COLUMNS.map(c => c.key === 'sum_goal_value' ? { ...c, currency } : c)}
               iconPrefix={(value, tabKey) =>
@@ -342,16 +342,16 @@ export function GoalDashboardDrawer({
               }
             />
             <DimensionTableWidget
-              title="Top Campaigns"
+              title="Campagnes principales"
               tabs={campaignsTabConfig}
               columns={GOAL_COLUMNS.map(c => c.key === 'sum_goal_value' ? { ...c, currency } : c)}
-              emptyText="No campaign data"
+              emptyText="Aucune donnée de campagne"
             />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
             <DimensionTableWidget
-              title="Countries"
+              title="Pays"
               tabs={countriesTabConfig}
               columns={GOAL_COLUMNS.map(c => c.key === 'sum_goal_value' ? { ...c, currency } : c)}
               iconPrefix={(value, tabKey) =>
@@ -359,7 +359,7 @@ export function GoalDashboardDrawer({
               }
             />
             <DimensionTableWidget
-              title="Devices"
+              title="Appareils"
               tabs={devicesTabConfig}
               columns={GOAL_COLUMNS.map(c => c.key === 'sum_goal_value' ? { ...c, currency } : c)}
             />
@@ -367,11 +367,11 @@ export function GoalDashboardDrawer({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
             <TrafficHeatmapWidget
-              title="Goals by Day and Hour"
+              title="Objectifs par jour et heure"
               data={heatmapData}
               loading={heatmapFetching && !heatmapResponse}
               timescoreReference={0}
-              emptyText="No goal data"
+              emptyText="Aucune donnée d'objectif"
               tabs={GOAL_HEATMAP_TABS}
             />
           </div>

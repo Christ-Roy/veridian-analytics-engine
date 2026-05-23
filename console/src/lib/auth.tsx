@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     })
-    if (!res.ok) throw new Error('Invalid credentials')
+    if (!res.ok) throw new Error('Identifiants invalides')
     const { access_token, user: userData } = await res.json()
     const authUser: AuthUser = {
       id: userData.id,

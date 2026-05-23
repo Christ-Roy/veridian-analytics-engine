@@ -175,12 +175,12 @@ function MobileExploreCard({
               {showComparison && <ChangeIndicator value={record.median_duration_change} />}
             </div>
           </div>
-          <MobileMetricRow label="Bounce Rate" value={`${record.bounce_rate.toFixed(1)}%`} change={record.bounce_rate_change} invertColors showComparison={showComparison} />
-          <MobileMetricRow label="Scroll Depth" value={`${record.median_scroll.toFixed(1)}%`} change={record.median_scroll_change} showComparison={showComparison} />
+          <MobileMetricRow label="Taux de rebond" value={`${record.bounce_rate.toFixed(1)}%`} change={record.bounce_rate_change} invertColors showComparison={showComparison} />
+          <MobileMetricRow label="Profondeur de scroll" value={`${record.median_scroll.toFixed(1)}%`} change={record.median_scroll_change} showComparison={showComparison} />
 
           {canDrillDown && !record.childrenLoaded && (
             <Button type="primary" ghost block size="small" className="mt-2" onClick={(e) => { e.stopPropagation(); onDrillDown(); }}>
-              Drill Down
+              Explorer en détail
             </Button>
           )}
         </div>
@@ -335,7 +335,7 @@ export function ExploreTable({
       },
       {
         title: (
-          <Tooltip title="Median session duration. Green = meets reference, Cyan = exceeds reference (exceptional engagement).">
+          <Tooltip title="Durée médiane des sessions. Vert = atteint la référence, Cyan = dépasse la référence (engagement exceptionnel).">
             <span className="cursor-help border-b border-dotted border-gray-400">TimeScore</span>
           </Tooltip>
         ),
@@ -356,7 +356,7 @@ export function ExploreTable({
         width: 150
       },
       {
-        title: 'Bounce Rate',
+        title: 'Taux de rebond',
         dataIndex: 'bounce_rate',
         key: 'bounce_rate',
         align: 'right',
@@ -370,7 +370,7 @@ export function ExploreTable({
         width: 120
       },
       {
-        title: 'Median Scroll Depth',
+        title: 'Profondeur de scroll médiane',
         dataIndex: 'median_scroll',
         key: 'median_scroll',
         align: 'right',
@@ -405,7 +405,7 @@ export function ExploreTable({
               onBreakdownClick(record)
             }}
             onMouseEnter={() => onBreakdownHover?.(record)}
-            title="View breakdown"
+            title="Voir la décomposition"
           />
         )
       })
@@ -426,7 +426,7 @@ export function ExploreTable({
   if (dimensions.length === 0) {
     return (
       <Empty
-        description="Select dimensions to start exploring"
+        description="Sélectionnez des dimensions pour commencer à explorer"
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         className="py-12"
       />
@@ -447,7 +447,7 @@ export function ExploreTable({
             ))}
           </div>
         ) : data.length === 0 ? (
-          <Empty description="No data found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          <Empty description="Aucune donnée trouvée" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         ) : (
           renderMobileCards(data)
         )}
@@ -503,7 +503,7 @@ export function ExploreTable({
             emptyText: loading ? (
               <Spin />
             ) : (
-              <Empty description="No data found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="Aucune donnée trouvée" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             )
           }}
         />

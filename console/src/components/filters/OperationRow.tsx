@@ -83,7 +83,7 @@ export function OperationRow({ index, value, onChange, onRemove, isOnlyOperation
           value={value.dimension}
           onChange={(dimension) => onChange({ ...value, dimension })}
           options={dimensionOptions}
-          placeholder="Select dimension"
+          placeholder="Sélectionner une dimension"
           className="w-full md:!w-[180px] md:shrink-0"
           showSearch
           optionFilterProp="label"
@@ -111,16 +111,16 @@ export function OperationRow({ index, value, onChange, onRemove, isOnlyOperation
         <Input
           value={value.value || ''}
           onChange={(e) => onChange({ ...value, value: e.target.value })}
-          placeholder="Value"
+          placeholder="Valeur"
           className="flex-1 min-w-0"
         />
       )}
       {!showValueInput && <div className="hidden md:block flex-1" />}
       <Popconfirm
-        title="Delete this operation?"
+        title="Supprimer cette opération ?"
         onConfirm={onRemove}
-        okText="Delete"
-        cancelText="Cancel"
+        okText="Supprimer"
+        cancelText="Annuler"
         disabled={isOnlyOperation}
       >
         <Button

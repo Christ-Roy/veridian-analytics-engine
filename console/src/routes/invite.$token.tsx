@@ -35,7 +35,7 @@ function InviteAcceptPage() {
           setExpired(true)
         }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Invalid invitation')
+        setError(err instanceof Error ? err.message : 'Invitation invalide')
       } finally {
         setLoading(false)
       }
@@ -67,7 +67,7 @@ function InviteAcceptPage() {
     confirmPassword: string
   }) => {
     if (values.password !== values.confirmPassword) {
-      setError('Passwords do not match')
+      setError('Les mots de passe ne correspondent pas')
       return
     }
 
@@ -89,7 +89,7 @@ function InviteAcceptPage() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       navigate({ to: `/workspaces/${result.workspaceId}` } as any)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept invitation')
+      setError(err instanceof Error ? err.message : "Échec de l'acceptation de l'invitation")
     } finally {
       setAccepting(false)
     }
@@ -105,7 +105,7 @@ function InviteAcceptPage() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       navigate({ to: `/workspaces/${result.workspaceId}` } as any)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to accept invitation')
+      setError(err instanceof Error ? err.message : "Échec de l'acceptation de l'invitation")
     } finally {
       setAccepting(false)
     }
@@ -123,7 +123,7 @@ function InviteAcceptPage() {
       return (
         <div className="text-center py-8">
           <Spin size="large" />
-          <p className="mt-4 text-gray-600">Loading invitation...</p>
+          <p className="mt-4 text-gray-600">Chargement de l'invitation…</p>
         </div>
       )
     }
@@ -135,7 +135,7 @@ function InviteAcceptPage() {
           <p className="text-red-600 mb-6">{error}</p>
           <Link to="/login">
             <Button type="primary" block size="large">
-              Go to sign in
+              Aller à la connexion
             </Button>
           </Link>
         </div>
@@ -147,11 +147,11 @@ function InviteAcceptPage() {
       return (
         <div className="text-center">
           <p className="text-gray-600 mb-6">
-            This invitation link has expired. Please contact the workspace administrator for a new invitation.
+            Ce lien d'invitation a expiré. Contactez l'administrateur de l'espace de travail pour en obtenir une nouvelle.
           </p>
           <Link to="/login">
             <Button type="primary" block size="large">
-              Go to sign in
+              Aller à la connexion
             </Button>
           </Link>
         </div>
@@ -179,7 +179,7 @@ function InviteAcceptPage() {
           )}
 
           <h2 className="text-xl font-semibold mb-1">
-            Join {invitation.workspace.name}
+            Rejoindre {invitation.workspace.name}
           </h2>
 
           <div className="flex items-center justify-center gap-2 text-gray-500 mb-2">
@@ -188,16 +188,16 @@ function InviteAcceptPage() {
           </div>
 
           <Tag color={roleColors[invitation.role]}>
-            {invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1)}
+            {invitation.role === 'admin' ? 'Admin' : invitation.role === 'editor' ? 'Éditeur' : invitation.role === 'viewer' ? 'Lecteur' : invitation.role}
           </Tag>
         </div>
 
         <div className="border-t border-gray-200 my-6" />
 
         <p className="text-center text-gray-600 mb-6">
-          <strong>{invitation.inviter.name}</strong> invited you to join this
-          workspace as {invitation.role === 'admin' ? 'an' : 'a'}{' '}
-          <strong>{invitation.role}</strong>.
+          <strong>{invitation.inviter.name}</strong> vous invite à rejoindre cet
+          espace de travail en tant que{' '}
+          <strong>{invitation.role === 'admin' ? 'admin' : invitation.role === 'editor' ? 'éditeur' : 'lecteur'}</strong>.
         </p>
 
         {/* Existing User Flow */}
@@ -207,7 +207,7 @@ function InviteAcceptPage() {
               // Logged in as correct user
               <div className="text-center">
                 <p className="text-gray-600 mb-4">
-                  You're signed in as <strong>{currentUserEmail}</strong>
+                  Vous êtes connecté en tant que <strong>{currentUserEmail}</strong>
                 </p>
                 <Button
                   type="primary"
@@ -216,14 +216,14 @@ function InviteAcceptPage() {
                   loading={accepting}
                   onClick={handleExistingUserAccept}
                 >
-                  Accept Invitation
+                  Accepter l'invitation
                 </Button>
               </div>
             ) : isAuthenticated ? (
               // Logged in as different user
               <div className="text-center">
                 <p className="text-amber-600 mb-4">
-                  This invitation is for {invitation.email}, but you're signed in as {currentUserEmail}. Please sign out and sign in with the correct account.
+                  Cette invitation est pour {invitation.email}, mais vous êtes connecté en tant que {currentUserEmail}. Veuillez vous déconnecter et vous reconnecter avec le bon compte.
                 </p>
                 <Button
                   type="primary"
@@ -231,18 +231,18 @@ function InviteAcceptPage() {
                   block
                   onClick={() => navigate({ to: '/login' })}
                 >
-                  Sign in as {invitation.email}
+                  Se connecter en tant que {invitation.email}
                 </Button>
               </div>
             ) : (
               // Not logged in
               <div className="text-center">
                 <p className="text-gray-600 mb-4">
-                  You already have an account. Please sign in to accept this invitation.
+                  Vous avez déjà un compte. Veuillez vous connecter pour accepter cette invitation.
                 </p>
                 <Link to="/login" search={{ redirect: `/invite/${token}` }}>
                   <Button type="primary" size="large" block>
-                    Sign in to Accept
+                    Se connecter pour accepter
                   </Button>
                 </Link>
               </div>
@@ -252,7 +252,7 @@ function InviteAcceptPage() {
           /* New User Registration Flow */
           <div>
             <p className="text-center text-gray-600 mb-4">
-              Create your account to join the workspace
+              Créez votre compte pour rejoindre l'espace de travail
             </p>
 
             <Form
@@ -270,14 +270,14 @@ function InviteAcceptPage() {
 
               <Form.Item
                 name="name"
-                label="Your Name"
+                label="Votre nom"
                 rules={[
-                  { required: true, message: 'Please enter your name' },
-                  { min: 1, max: 100, message: 'Name must be 1-100 characters' },
+                  { required: true, message: 'Veuillez saisir votre nom' },
+                  { min: 1, max: 100, message: 'Le nom doit faire 1 à 100 caractères' },
                 ]}
               >
                 <Input
-                  placeholder="Enter your full name"
+                  placeholder="Saisissez votre nom complet"
                   size="large"
                   autoComplete="name"
                 />
@@ -285,14 +285,14 @@ function InviteAcceptPage() {
 
               <Form.Item
                 name="password"
-                label="Password"
+                label="Mot de passe"
                 rules={[
-                  { required: true, message: 'Please enter a password' },
-                  { min: 8, message: 'Password must be at least 8 characters' },
+                  { required: true, message: 'Veuillez saisir un mot de passe' },
+                  { min: 8, message: 'Le mot de passe doit faire au moins 8 caractères' },
                 ]}
               >
                 <Input.Password
-                  placeholder="Create a password"
+                  placeholder="Créez un mot de passe"
                   size="large"
                   autoComplete="new-password"
                 />
@@ -300,21 +300,21 @@ function InviteAcceptPage() {
 
               <Form.Item
                 name="confirmPassword"
-                label="Confirm Password"
+                label="Confirmer le mot de passe"
                 rules={[
-                  { required: true, message: 'Please confirm your password' },
+                  { required: true, message: 'Veuillez confirmer votre mot de passe' },
                   ({ getFieldValue }) => ({
                     validator(_, value) {
                       if (!value || getFieldValue('password') === value) {
                         return Promise.resolve()
                       }
-                      return Promise.reject(new Error('Passwords do not match'))
+                      return Promise.reject(new Error('Les mots de passe ne correspondent pas'))
                     },
                   }),
                 ]}
               >
                 <Input.Password
-                  placeholder="Confirm your password"
+                  placeholder="Confirmez votre mot de passe"
                   size="large"
                   autoComplete="new-password"
                 />
@@ -328,7 +328,7 @@ function InviteAcceptPage() {
                   size="large"
                   loading={accepting}
                 >
-                  Create Account & Join
+                  Créer le compte et rejoindre
                 </Button>
               </Form.Item>
             </Form>
@@ -338,7 +338,7 @@ function InviteAcceptPage() {
         <div className="border-t border-gray-200 my-6" />
 
         <p className="text-center text-xs text-gray-500">
-          By joining, you agree to the workspace's terms and policies.
+          En rejoignant, vous acceptez les conditions et politiques de l'espace de travail.
         </p>
       </>
     )

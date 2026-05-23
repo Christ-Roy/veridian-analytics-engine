@@ -73,7 +73,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       setIsCreateModalOpen(false)
       setNewKeyResponse({ key: data.key, name: data.apiKey.name })
       form.resetFields()
-      messageApi.success('API key created successfully')
+      messageApi.success('Clé API créée avec succès')
     },
     onError: (error: Error) => {
       messageApi.error(error.message)
@@ -85,7 +85,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
     mutationFn: api.apiKeys.revoke,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['apiKeys', workspaceId] })
-      messageApi.success('API key revoked')
+      messageApi.success('Clé API révoquée')
     },
     onError: (error: Error) => {
       messageApi.error(error.message)
@@ -121,8 +121,8 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
   }
 
   const formatDate = (date: string | null) => {
-    if (!date) return 'Never'
-    return new Date(date).toLocaleDateString('en-US', {
+    if (!date) return 'Jamais'
+    return new Date(date).toLocaleDateString('fr-FR', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -130,8 +130,8 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
   }
 
   const formatDateTime = (date: string | null) => {
-    if (!date) return 'Never'
-    return new Date(date).toLocaleString('en-US', {
+    if (!date) return 'Jamais'
+    return new Date(date).toLocaleString('fr-FR', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
@@ -141,14 +141,14 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
   }
 
   const getStatusInfo = (record: PublicApiKey): { status: 'success' | 'error' | 'warning'; text: string } => {
-    if (record.status === 'revoked') return { status: 'error', text: 'Revoked' }
-    if (record.expires_at && new Date(record.expires_at) < new Date()) return { status: 'warning', text: 'Expired' }
+    if (record.status === 'revoked') return { status: 'error', text: 'Révoquée' }
+    if (record.expires_at && new Date(record.expires_at) < new Date()) return { status: 'warning', text: 'Expirée' }
     return { status: 'success', text: 'Active' }
   }
 
   const columns = [
     {
-      title: 'Name',
+      title: 'Nom',
       dataIndex: 'name',
       key: 'name',
       render: (name: string, record: PublicApiKey) => {
@@ -164,7 +164,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       },
     },
     {
-      title: 'Role',
+      title: 'Rôle',
       dataIndex: 'role',
       key: 'role',
       width: 100,
@@ -175,7 +175,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       ),
     },
     {
-      title: 'Created',
+      title: 'Création',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
@@ -184,7 +184,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       ),
     },
     {
-      title: 'Last Used',
+      title: 'Dernière utilisation',
       dataIndex: 'last_used_at',
       key: 'last_used_at',
       width: 140,
@@ -198,11 +198,11 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       width: 50,
       render: (_: unknown, record: PublicApiKey) => (
         <Popconfirm
-          title="Revoke API Key"
-          description="Are you sure you want to revoke this API key? This action cannot be undone."
+          title="Révoquer la clé API"
+          description="Êtes-vous sûr de vouloir révoquer cette clé API ? Cette action est irréversible."
           onConfirm={() => handleRevokeKey(record.id)}
-          okText="Revoke"
-          cancelText="Cancel"
+          okText="Révoquer"
+          cancelText="Annuler"
           okButtonProps={{ danger: true }}
           disabled={record.status === 'revoked'}
         >
@@ -225,8 +225,8 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
           icon={<PlusOutlined />}
           onClick={() => setIsCreateModalOpen(true)}
         >
-          <span className="hidden md:inline">Create API Key</span>
-          <span className="md:hidden">Create</span>
+          <span className="hidden md:inline">Créer une clé API</span>
+          <span className="md:hidden">Créer</span>
         </Button>
       </div>
 
@@ -234,11 +234,11 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
       <div className="md:hidden space-y-3">
         {isLoading ? (
           <div className="bg-white rounded-lg p-6 text-center text-gray-500">
-            <LoadingOutlined className="mr-2" />Loading...
+            <LoadingOutlined className="mr-2" />Chargement…
           </div>
         ) : apiKeys.length === 0 ? (
           <div className="bg-white rounded-lg p-6">
-            <Empty description="No API keys" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty description="Aucune clé API" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           </div>
         ) : (
           apiKeys.map((apiKey) => {
@@ -261,21 +261,21 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
                   </div>
                 </div>
                 <div className="text-gray-400 text-xs mt-2 space-y-1">
-                  <div>Created {formatDate(apiKey.created_at)}</div>
-                  <div>Last used {formatDateTime(apiKey.last_used_at)}</div>
+                  <div>Créée le {formatDate(apiKey.created_at)}</div>
+                  <div>Dernière utilisation : {formatDateTime(apiKey.last_used_at)}</div>
                 </div>
                 {!isDisabled && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <Popconfirm
-                      title="Revoke API Key"
-                      description="Are you sure you want to revoke this API key? This action cannot be undone."
+                      title="Révoquer la clé API"
+                      description="Êtes-vous sûr de vouloir révoquer cette clé API ? Cette action est irréversible."
                       onConfirm={() => handleRevokeKey(apiKey.id)}
-                      okText="Revoke"
-                      cancelText="Cancel"
+                      okText="Révoquer"
+                      cancelText="Annuler"
                       okButtonProps={{ danger: true }}
                     >
                       <Button block size="small" icon={<DeleteOutlined />}>
-                        Revoke
+                        Révoquer
                       </Button>
                     </Popconfirm>
                   </div>
@@ -300,7 +300,7 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
 
       {/* Create API Key Modal */}
       <Modal
-        title="Create API Key"
+        title="Créer une clé API"
         open={isCreateModalOpen}
         onCancel={() => {
           setIsCreateModalOpen(false)
@@ -308,7 +308,8 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
         }}
         onOk={() => form.submit()}
         confirmLoading={createMutation.isPending}
-        okText="Create"
+        okText="Créer"
+        cancelText="Annuler"
         width={600}
       >
         <Form
@@ -319,34 +320,34 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
         >
           <Form.Item
             name="name"
-            label="Name"
+            label="Nom"
             rules={[
-              { required: true, message: 'Name is required' },
-              { max: 100, message: 'Name must be 100 characters or less' },
+              { required: true, message: 'Le nom est obligatoire' },
+              { max: 100, message: 'Le nom doit faire 100 caractères maximum' },
             ]}
           >
-            <Input placeholder="Production API Key" />
+            <Input placeholder="Clé API production" />
           </Form.Item>
 
           <Form.Item
             name="description"
-            label="Description (optional)"
-            rules={[{ max: 500, message: 'Description must be 500 characters or less' }]}
+            label="Description (optionnelle)"
+            rules={[{ max: 500, message: 'La description doit faire 500 caractères maximum' }]}
           >
             <Input.TextArea
               rows={2}
-              placeholder="Used for production data ingestion"
+              placeholder="Utilisée pour l'ingestion des données de production"
             />
           </Form.Item>
 
           <Form.Item
             name="role"
-            label="Role"
-            rules={[{ required: true, message: 'Please select a role' }]}
+            label="Rôle"
+            rules={[{ required: true, message: 'Veuillez sélectionner un rôle' }]}
           >
             <Select
               options={roleOptions}
-              placeholder="Select a role"
+              placeholder="Sélectionnez un rôle"
               optionLabelProp="label"
               optionRender={(option) => {
                 const role = option.value as ApiKeyRole
@@ -363,8 +364,8 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
 
           <Form.Item
             name="expires_at"
-            label="Expiration Date (optional)"
-            tooltip="Leave empty for no expiration"
+            label="Date d'expiration (optionnelle)"
+            tooltip="Laissez vide pour aucune expiration"
           >
             <DatePicker
               showTime
@@ -378,12 +379,12 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
 
       {/* Show Key Once Modal */}
       <Modal
-        title="API Key Created"
+        title="Clé API créée"
         open={!!newKeyResponse}
         onCancel={() => setNewKeyResponse(null)}
         footer={[
           <Button key="close" type="primary" onClick={() => setNewKeyResponse(null)}>
-            Done
+            Terminé
           </Button>,
         ]}
         width={650}
@@ -391,18 +392,18 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
         styles={{ body: { paddingTop: 20, paddingBottom: 20 } }}
       >
         <Alert
-          description="This is the only time you will see this key. Make sure to save it securely."
+          description="Vous ne verrez cette clé qu'une seule fois. Pensez à la sauvegarder en lieu sûr."
           type="warning"
           className="!mb-4"
         />
 
         <div className="space-y-4">
           <div>
-            <Text strong>Name:</Text> {newKeyResponse?.name}
+            <Text strong>Nom :</Text> {newKeyResponse?.name}
           </div>
 
           <div>
-            <Text strong>API Key:</Text>
+            <Text strong>Clé API :</Text>
             <Space.Compact className="mt-1 w-full">
               <Input
                 value={newKeyResponse?.key}
@@ -414,10 +415,10 @@ export function ApiKeysPage({ workspaceId }: ApiKeysPageProps) {
                 icon={<CopyOutlined />}
                 onClick={() => {
                   navigator.clipboard.writeText(newKeyResponse?.key || '')
-                  messageApi.success('Copied to clipboard')
+                  messageApi.success('Copié dans le presse-papiers')
                 }}
               >
-                Copy
+                Copier
               </Button>
             </Space.Compact>
           </div>

@@ -73,43 +73,43 @@ export const SOURCE_FIELDS = [
   { value: 'utm_id', label: 'UTM ID', category: 'UTM' },
   { value: 'utm_id_from', label: 'UTM ID From', category: 'UTM' },
   // Traffic
-  { value: 'referrer', label: 'Referrer', category: 'Traffic' },
-  { value: 'referrer_domain', label: 'Referrer Domain', category: 'Traffic' },
-  { value: 'referrer_path', label: 'Referrer Path', category: 'Traffic' },
-  { value: 'is_direct', label: 'Is Direct', category: 'Traffic' },
+  { value: 'referrer', label: 'Référent', category: 'Traffic' },
+  { value: 'referrer_domain', label: 'Domaine référent', category: 'Traffic' },
+  { value: 'referrer_path', label: 'Chemin référent', category: 'Traffic' },
+  { value: 'is_direct', label: 'Direct ?', category: 'Traffic' },
   // Pages
-  { value: 'landing_page', label: 'Landing Page', category: 'Pages' },
-  { value: 'landing_domain', label: 'Landing Domain', category: 'Pages' },
-  { value: 'landing_path', label: 'Landing Path', category: 'Pages' },
-  { value: 'path', label: 'Current Path', category: 'Pages' },
+  { value: 'landing_page', label: "Page d'entrée", category: 'Pages' },
+  { value: 'landing_domain', label: "Domaine d'entrée", category: 'Pages' },
+  { value: 'landing_path', label: "Chemin d'entrée", category: 'Pages' },
+  { value: 'path', label: 'Chemin actuel', category: 'Pages' },
   // Device
-  { value: 'device', label: 'Device', category: 'Device' },
-  { value: 'browser', label: 'Browser', category: 'Device' },
-  { value: 'browser_type', label: 'Browser Type', category: 'Device' },
-  { value: 'os', label: 'Operating System', category: 'Device' },
+  { value: 'device', label: 'Appareil', category: 'Device' },
+  { value: 'browser', label: 'Navigateur', category: 'Device' },
+  { value: 'browser_type', label: 'Type de navigateur', category: 'Device' },
+  { value: 'os', label: "Système d'exploitation", category: 'Device' },
   { value: 'user_agent', label: 'User Agent', category: 'Device' },
-  { value: 'connection_type', label: 'Connection Type', category: 'Device' },
+  { value: 'connection_type', label: 'Type de connexion', category: 'Device' },
   // Geo
-  { value: 'language', label: 'Language', category: 'Geo' },
-  { value: 'timezone', label: 'Timezone', category: 'Geo' },
+  { value: 'language', label: 'Langue', category: 'Geo' },
+  { value: 'timezone', label: 'Fuseau horaire', category: 'Geo' },
 ] as const
 
 // Dimensions that filters can write to
 export const WRITABLE_DIMENSIONS = [
   // Channel classification
-  { value: 'channel', label: 'Channel', category: 'Channel' },
-  { value: 'channel_group', label: 'Channel Group', category: 'Channel' },
+  { value: 'channel', label: 'Canal', category: 'Channel' },
+  { value: 'channel_group', label: 'Groupe de canaux', category: 'Channel' },
   // Custom dimension slots
-  { value: 'stm_1', label: 'Custom Dimension 1', category: 'Custom' },
-  { value: 'stm_2', label: 'Custom Dimension 2', category: 'Custom' },
-  { value: 'stm_3', label: 'Custom Dimension 3', category: 'Custom' },
-  { value: 'stm_4', label: 'Custom Dimension 4', category: 'Custom' },
-  { value: 'stm_5', label: 'Custom Dimension 5', category: 'Custom' },
-  { value: 'stm_6', label: 'Custom Dimension 6', category: 'Custom' },
-  { value: 'stm_7', label: 'Custom Dimension 7', category: 'Custom' },
-  { value: 'stm_8', label: 'Custom Dimension 8', category: 'Custom' },
-  { value: 'stm_9', label: 'Custom Dimension 9', category: 'Custom' },
-  { value: 'stm_10', label: 'Custom Dimension 10', category: 'Custom' },
+  { value: 'stm_1', label: 'Dimension personnalisée 1', category: 'Custom' },
+  { value: 'stm_2', label: 'Dimension personnalisée 2', category: 'Custom' },
+  { value: 'stm_3', label: 'Dimension personnalisée 3', category: 'Custom' },
+  { value: 'stm_4', label: 'Dimension personnalisée 4', category: 'Custom' },
+  { value: 'stm_5', label: 'Dimension personnalisée 5', category: 'Custom' },
+  { value: 'stm_6', label: 'Dimension personnalisée 6', category: 'Custom' },
+  { value: 'stm_7', label: 'Dimension personnalisée 7', category: 'Custom' },
+  { value: 'stm_8', label: 'Dimension personnalisée 8', category: 'Custom' },
+  { value: 'stm_9', label: 'Dimension personnalisée 9', category: 'Custom' },
+  { value: 'stm_10', label: 'Dimension personnalisée 10', category: 'Custom' },
   // UTM fields
   { value: 'utm_source', label: 'UTM Source', category: 'UTM' },
   { value: 'utm_medium', label: 'UTM Medium', category: 'UTM' },
@@ -117,27 +117,27 @@ export const WRITABLE_DIMENSIONS = [
   { value: 'utm_term', label: 'UTM Term', category: 'UTM' },
   { value: 'utm_content', label: 'UTM Content', category: 'UTM' },
   // Traffic fields
-  { value: 'referrer_domain', label: 'Referrer Domain', category: 'Traffic' },
-  { value: 'is_direct', label: 'Is Direct', category: 'Traffic' },
+  { value: 'referrer_domain', label: 'Domaine référent', category: 'Traffic' },
+  { value: 'is_direct', label: 'Direct ?', category: 'Traffic' },
 ] as const
 
 export const OPERATORS = [
-  { value: 'equals' as const, label: 'equals' },
-  { value: 'not_equals' as const, label: 'not equals' },
-  { value: 'contains' as const, label: 'contains' },
-  { value: 'not_contains' as const, label: 'not contains' },
-  { value: 'is_empty' as const, label: 'is empty' },
-  { value: 'is_not_empty' as const, label: 'is not empty' },
-  { value: 'regex' as const, label: 'matches regex' },
+  { value: 'equals' as const, label: 'égal à' },
+  { value: 'not_equals' as const, label: 'différent de' },
+  { value: 'contains' as const, label: 'contient' },
+  { value: 'not_contains' as const, label: 'ne contient pas' },
+  { value: 'is_empty' as const, label: 'est vide' },
+  { value: 'is_not_empty' as const, label: 'non vide' },
+  { value: 'regex' as const, label: 'correspond à la regex' },
 ] as const
 
 // Operators that don't require a value
 export const VALUELESS_OPERATORS: FilterOperator[] = ['is_empty', 'is_not_empty']
 
 export const FILTER_ACTIONS = [
-  { value: 'set_value' as const, label: 'Set value', description: 'Always set to specified value' },
-  { value: 'unset_value' as const, label: 'Clear value', description: 'Set to null/empty' },
-  { value: 'set_default_value' as const, label: 'Set default', description: 'Set only if currently null' },
+  { value: 'set_value' as const, label: 'Définir la valeur', description: 'Toujours définir à la valeur spécifiée' },
+  { value: 'unset_value' as const, label: 'Effacer la valeur', description: 'Définir à null/vide' },
+  { value: 'set_default_value' as const, label: 'Valeur par défaut', description: 'Définir uniquement si actuellement null' },
 ] as const
 
 // Common filter tags for UI suggestions

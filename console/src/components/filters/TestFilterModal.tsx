@@ -98,7 +98,7 @@ export function TestFilterModal({
       key: 'action',
     },
     {
-      title: 'Result Value',
+      title: 'Valeur résultante',
       dataIndex: 'resultValue',
       key: 'resultValue',
       render: (value: string | null) => (
@@ -109,7 +109,7 @@ export function TestFilterModal({
 
   const multiResultColumns = [
     {
-      title: 'Priority',
+      title: 'Priorité',
       dataIndex: ['filter', 'priority'],
       key: 'priority',
       width: 80,
@@ -118,7 +118,7 @@ export function TestFilterModal({
       ),
     },
     {
-      title: 'Name',
+      title: 'Nom',
       dataIndex: ['filter', 'name'],
       key: 'name',
       render: (name: string) => (
@@ -130,7 +130,7 @@ export function TestFilterModal({
       key: 'conditions',
       render: (_: unknown, record: MultiResult) => {
         if (record.filter.conditions.length === 0) {
-          return <span className="text-gray-400 italic">(always matches)</span>
+          return <span className="text-gray-400 italic">(correspond toujours)</span>
         }
         const visibleConditions = record.filter.conditions.slice(0, 2)
         const hiddenCount = record.filter.conditions.length - 2
@@ -144,14 +144,14 @@ export function TestFilterModal({
               </div>
             ))}
             {hiddenCount > 0 && (
-              <span className="text-gray-400 text-xs">+{hiddenCount} more</span>
+              <span className="text-gray-400 text-xs">+{hiddenCount} de plus</span>
             )}
           </div>
         )
       },
     },
     {
-      title: 'Operations',
+      title: 'Opérations',
       key: 'operations',
       render: (_: unknown, record: MultiResult) => (
         <div className="flex flex-col gap-1">
@@ -179,7 +179,7 @@ export function TestFilterModal({
 
   return (
     <Modal
-      title={isSingleMode ? 'Test Filter' : 'Test All Filters'}
+      title={isSingleMode ? 'Tester le filtre' : 'Tester tous les filtres'}
       open={open}
       onCancel={handleClose}
       footer={null}
@@ -215,7 +215,7 @@ export function TestFilterModal({
               disabled={!isSingleMode && !filters?.length}
               block
             >
-              Run Test
+              Lancer le test
             </Button>
           </div>
         )}
@@ -224,17 +224,17 @@ export function TestFilterModal({
         {singleResult && (
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-medium">Result:</span>
+              <span className="text-sm font-medium">Résultat :</span>
               {singleResult.matches ? (
-                <Tag color="success">Matches</Tag>
+                <Tag color="success">Correspondance</Tag>
               ) : (
-                <Tag color="error">No Match</Tag>
+                <Tag color="error">Aucune correspondance</Tag>
               )}
             </div>
 
             {singleResult.matches && singleResult.operationResults.length > 0 ? (
               <div className="mb-4">
-                <div className="text-xs text-gray-500 mb-2">Operation Results:</div>
+                <div className="text-xs text-gray-500 mb-2">Résultats des opérations :</div>
                 <Table
                   dataSource={singleResult.operationResults.map((op, i) => ({ ...op, key: i }))}
                   columns={operationColumns}
@@ -243,11 +243,11 @@ export function TestFilterModal({
                 />
               </div>
             ) : singleResult.matches ? (
-              <Empty description="No operations defined" className="mb-4" />
+              <Empty description="Aucune opération définie" className="mb-4" />
             ) : null}
 
             <Button onClick={() => setSingleResult(null)} block>
-              Back
+              Retour
             </Button>
           </div>
         )}
@@ -256,9 +256,9 @@ export function TestFilterModal({
         {multiResults && (
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <span className="text-sm font-medium">Results:</span>
+              <span className="text-sm font-medium">Résultats :</span>
               <span className="text-gray-500">
-                {matchingFilters.length} of {multiResults.length} filters match
+                {matchingFilters.length} filtre(s) sur {multiResults.length} correspondent
               </span>
             </div>
 
@@ -271,7 +271,7 @@ export function TestFilterModal({
             />
 
             <Button onClick={() => setMultiResults(null)} block>
-              Back
+              Retour
             </Button>
           </div>
         )}

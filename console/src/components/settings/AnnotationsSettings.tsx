@@ -65,10 +65,10 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
       setIsModalOpen(false)
       setEditingAnnotation(null)
       form.resetFields()
-      message.success(editingAnnotation ? 'Annotation updated' : 'Annotation added')
+      message.success(editingAnnotation ? 'Annotation mise à jour' : 'Annotation ajoutée')
     },
     onError: () => {
-      message.error('Failed to save annotation')
+      message.error("Échec de l'enregistrement de l'annotation")
     },
   })
 
@@ -141,7 +141,7 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
       width: 160,
       render: (_: string, record: Annotation) => (
         <div>
-          <div className="font-semibold">{dayjs(record.date).format('MMM D, YYYY')} {record.time}</div>
+          <div className="font-semibold">{dayjs(record.date).locale('fr').format('D MMM YYYY')} {record.time}</div>
           <div className="text-xs text-gray-400">{record.timezone}</div>
         </div>
       ),
@@ -171,10 +171,11 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
       render: (_: unknown, record: Annotation) => (
         <div className="flex gap-1">
           <Popconfirm
-            title="Delete annotation?"
-            description="This action cannot be undone."
+            title="Supprimer l'annotation ?"
+            description="Cette action est irréversible."
             onConfirm={() => handleDelete(record.id)}
-            okText="Delete"
+            okText="Supprimer"
+            cancelText="Annuler"
             okButtonProps={{ danger: true }}
           >
             <Button
@@ -200,12 +201,12 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold text-gray-900">Annotations</h1>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            <span className="hidden md:inline">Add Annotation</span>
-            <span className="md:hidden">Add</span>
+            <span className="hidden md:inline">Ajouter une annotation</span>
+            <span className="md:hidden">Ajouter</span>
           </Button>
         </div>
         <p className="text-gray-500 mt-3 md:mt-1">
-          Mark significant dates on your dashboard charts, like product launches or campaigns.
+          Marquez des dates importantes sur vos graphiques (lancement produit, campagne, etc.).
         </p>
       </div>
 
@@ -213,7 +214,7 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
       <div className="md:hidden space-y-3">
         {annotations.length === 0 ? (
           <div className="bg-white rounded-lg p-6">
-            <Empty description="No annotations yet" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Empty description="Aucune annotation pour le moment" image={Empty.PRESENTED_IMAGE_SIMPLE} />
           </div>
         ) : (
           annotations.map((annotation) => (
@@ -229,7 +230,7 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
                     <div className="text-sm text-gray-500 mt-1">{annotation.description}</div>
                   )}
                   <div className="text-sm text-gray-400 mt-2">
-                    {dayjs(annotation.date).format('MMM D, YYYY')} {annotation.time}
+                    {dayjs(annotation.date).locale('fr').format('D MMM YYYY')} {annotation.time}
                     <span className="mx-1">·</span>
                     {annotation.timezone}
                   </div>
@@ -237,14 +238,15 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
               </div>
               <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
                 <Popconfirm
-                  title="Delete annotation?"
-                  description="This action cannot be undone."
+                  title="Supprimer l'annotation ?"
+                  description="Cette action est irréversible."
                   onConfirm={() => handleDelete(annotation.id)}
-                  okText="Delete"
+                  okText="Supprimer"
+                  cancelText="Annuler"
                   okButtonProps={{ danger: true }}
                 >
                   <Button block size="small" icon={<DeleteOutlined />}>
-                    Delete
+                    Supprimer
                   </Button>
                 </Popconfirm>
                 <Button
@@ -253,7 +255,7 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
                   icon={<EditOutlined />}
                   onClick={() => handleEdit(annotation)}
                 >
-                  Edit
+                  Modifier
                 </Button>
               </div>
             </div>
@@ -269,12 +271,12 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
           rowKey="id"
           pagination={false}
           showHeader={false}
-          locale={{ emptyText: 'No annotations yet' }}
+          locale={{ emptyText: 'Aucune annotation pour le moment' }}
         />
       </div>
 
       <Modal
-        title={editingAnnotation ? 'Edit Annotation' : 'Add Annotation'}
+        title={editingAnnotation ? "Modifier l'annotation" : 'Ajouter une annotation'}
         open={isModalOpen}
         onCancel={() => {
           setIsModalOpen(false)
@@ -283,14 +285,15 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
         }}
         onOk={handleSave}
         confirmLoading={updateMutation.isPending}
-        okText={editingAnnotation ? 'Save' : 'Add'}
+        okText={editingAnnotation ? 'Enregistrer' : 'Ajouter'}
+        cancelText="Annuler"
       >
         <Form form={form} layout="vertical" className="mt-4">
           <div className="flex flex-wrap gap-4 items-end">
             <Form.Item
               name="date"
               label="Date"
-              rules={[{ required: true, message: 'Date is required' }]}
+              rules={[{ required: true, message: 'La date est obligatoire' }]}
               className="min-w-[160px]"
             >
               <DatePicker className="w-full" />
@@ -298,13 +301,13 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
 
             <Form.Item
               name="time"
-              label="Time"
-              rules={[{ required: true, message: 'Time is required' }]}
+              label="Heure"
+              rules={[{ required: true, message: "L'heure est obligatoire" }]}
             >
               <TimePicker format="HH:mm" />
             </Form.Item>
 
-            <Form.Item label="Color" className="w-full md:w-auto">
+            <Form.Item label="Couleur" className="w-full md:w-auto">
               <div className="flex gap-2">
                 {PRESET_COLORS.map((color) => (
                   <button
@@ -325,12 +328,12 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
 
           <Form.Item
             name="timezone"
-            label="Timezone"
-            rules={[{ required: true, message: 'Timezone is required' }]}
+            label="Fuseau horaire"
+            rules={[{ required: true, message: 'Le fuseau horaire est obligatoire' }]}
           >
             <Select
               showSearch
-              placeholder="Select timezone"
+              placeholder="Sélectionner un fuseau horaire"
               optionFilterProp="label"
               options={COMMON_TIMEZONES.map((tz) => ({ value: tz, label: tz }))}
             />
@@ -338,22 +341,22 @@ export function AnnotationsSettings({ workspace }: AnnotationsSettingsProps) {
 
           <Form.Item
             name="title"
-            label="Title"
+            label="Titre"
             rules={[
-              { required: true, message: 'Title is required' },
-              { max: 100, message: 'Title must be 100 characters or less' },
+              { required: true, message: 'Le titre est obligatoire' },
+              { max: 100, message: 'Le titre doit faire 100 caractères maximum' },
             ]}
           >
-            <Input placeholder="e.g., Product Launch X" maxLength={100} />
+            <Input placeholder="ex : Lancement du produit X" maxLength={100} />
           </Form.Item>
 
           <Form.Item
             name="description"
-            label="Description (optional)"
-            rules={[{ max: 500, message: 'Description must be 500 characters or less' }]}
+            label="Description (optionnelle)"
+            rules={[{ max: 500, message: 'La description doit faire 500 caractères maximum' }]}
           >
             <Input.TextArea
-              placeholder="Additional context about this event"
+              placeholder="Contexte supplémentaire sur cet événement"
               maxLength={500}
               rows={3}
             />

@@ -71,7 +71,7 @@ function FiltersPage() {
   }
 
   const segmentedOptions = [
-    { value: 'all', label: 'All' },
+    { value: 'all', label: 'Tous' },
     ...tags.map((tag) => ({ value: tag, label: tag })),
   ]
 
@@ -79,19 +79,19 @@ function FiltersPage() {
     <div className="p-6">
       <div className="mb-6">
         <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-semibold text-gray-900">Filters</h1>
+          <h1 className="text-2xl font-semibold text-gray-900">Filtres</h1>
           <Space>
             <Button type="primary" ghost icon={<ExperimentOutlined />} onClick={() => setTestModalOpen(true)}>
-              Test
+              Tester
             </Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-              <span className="hidden md:inline">Create Filter</span>
-              <span className="md:hidden">Create</span>
+              <span className="hidden md:inline">Créer un filtre</span>
+              <span className="md:hidden">Créer</span>
             </Button>
           </Space>
         </div>
         <p className="text-gray-500 mt-3 md:mt-1">
-          Define filters to map channels, set custom dimensions, and modify traffic source fields
+          Définissez des filtres pour mapper les canaux, définir des dimensions personnalisées et modifier les champs de source de trafic
         </p>
       </div>
 
@@ -108,7 +108,7 @@ function FiltersPage() {
           )}
           <div className="w-full md:w-[300px] md:ml-auto">
             <Input
-              placeholder="Search..."
+              placeholder="Rechercher..."
               allowClear
               prefix={<SearchOutlined className="text-gray-400" />}
               onChange={(e) => setSearchText(e.target.value)}
@@ -127,7 +127,7 @@ function FiltersPage() {
         />
       ) : filters.length > 0 ? (
         <Empty
-          description="No filters match the selected tags"
+          description="Aucun filtre ne correspond aux tags sélectionnés"
           className="py-12"
         />
       ) : (
@@ -135,13 +135,13 @@ function FiltersPage() {
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
             <span className="text-gray-500">
-              No filters yet. Create your first filter to start organizing your traffic data.
+              Aucun filtre pour le moment. Créez votre premier filtre pour commencer à organiser vos données de trafic.
             </span>
           }
           className="py-12"
         >
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            Create Filter
+            Créer un filtre
           </Button>
         </Empty>
       )}

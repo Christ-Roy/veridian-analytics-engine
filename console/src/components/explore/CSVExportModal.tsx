@@ -121,11 +121,11 @@ export function CSVExportModal({
       const csv = generateCSV(rows, dimensions, totalSessions, showComparison, customDimensionLabels)
       downloadCSV(csv)
 
-      message.success(`Exported ${rows.length} rows to CSV`)
+      message.success(`${rows.length} lignes exportées en CSV`)
       onCancel()
     } catch (error) {
       console.error('CSV export failed:', error)
-      message.error('Failed to export CSV. Please try again.')
+      message.error('Échec de l\'export CSV. Veuillez réessayer.')
     } finally {
       setIsExporting(false)
     }
@@ -133,14 +133,14 @@ export function CSVExportModal({
 
   return (
     <Modal
-      title="Export to CSV"
+      title="Exporter en CSV"
       open={open}
       onCancel={onCancel}
       width={500}
       centered
       footer={[
         <Button key="cancel" onClick={onCancel}>
-          Cancel
+          Annuler
         </Button>,
         <Button
           key="export"
@@ -149,18 +149,18 @@ export function CSVExportModal({
           onClick={handleExport}
           loading={isExporting}
         >
-          Download
+          Télécharger
         </Button>,
       ]}
     >
       <Alert
-        message="Export Information"
+        message="Informations sur l'export"
         description={
           <ul className="list-disc pl-5 mt-2 space-y-1">
-            <li>Dimensions: {dimensions.map(d => getDimensionLabel(d, customDimensionLabels)).join(' → ')}</li>
-            <li>Include only the top {MAX_ROWS} rows ordered by session count</li>
-            <li>Uses current date range, filters, and minimum sessions settings</li>
-            {showComparison && <li>Includes comparison period data</li>}
+            <li>Dimensions : {dimensions.map(d => getDimensionLabel(d, customDimensionLabels)).join(' → ')}</li>
+            <li>Inclut uniquement les {MAX_ROWS} premières lignes, ordonnées par nombre de sessions</li>
+            <li>Utilise la plage de dates, les filtres et le seuil minimum actuels</li>
+            {showComparison && <li>Inclut les données de la période de comparaison</li>}
           </ul>
         }
         type="info"
@@ -168,7 +168,7 @@ export function CSVExportModal({
         className="mt-4"
       />
       <Descriptions column={1} size="small" className="mt-4" bordered>
-        <Descriptions.Item label="File name">
+        <Descriptions.Item label="Nom du fichier">
           explore-report-{dayjs().format('YYYY-MM-DD')}.csv
         </Descriptions.Item>
       </Descriptions>

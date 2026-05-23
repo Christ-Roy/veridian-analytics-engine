@@ -10,9 +10,9 @@ interface IntegrationsSettingsProps {
 }
 
 const MODEL_SUGGESTIONS = [
-  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7 ($5 / $25 per MTok)' },
-  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 ($3 / $15 per MTok)' },
-  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 ($1 / $5 per MTok)' },
+  { value: 'claude-opus-4-7', label: 'Claude Opus 4.7 (5 $ / 25 $ par MTok)' },
+  { value: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 (3 $ / 15 $ par MTok)' },
+  { value: 'claude-haiku-4-5', label: 'Claude Haiku 4.5 (1 $ / 5 $ par MTok)' },
 ]
 
 // Mask an API key for display (show prefix and last 4 chars)
@@ -57,11 +57,11 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['workspaces', workspace.id] })
       queryClient.invalidateQueries({ queryKey: ['workspaces'] })
-      message.success('Integration settings saved')
+      message.success('Paramètres d\'intégration enregistrés')
       form.setFieldValue('api_key', '') // Clear after save
     },
     onError: () => {
-      message.error('Failed to save integration settings')
+      message.error('Échec de l\'enregistrement des paramètres d\'intégration')
     },
   })
 
@@ -109,7 +109,7 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
   const handleToggle = (checked: boolean) => {
     // Don't allow enabling without an API key
     if (checked && !anthropicIntegration?.settings?.api_key_encrypted) {
-      message.warning('Please add an API key first')
+      message.warning('Veuillez d\'abord ajouter une clé API')
       return
     }
 
@@ -119,7 +119,7 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
     // IMPORTANT: Only proceed if we have an existing integration to prevent race conditions
     // where stale data could overwrite the API key
     if (!anthropicIntegration) {
-      message.warning('Please save the API key first')
+      message.warning('Veuillez d\'abord enregistrer la clé API')
       setIsEnabled(false)
       return
     }
@@ -141,14 +141,14 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
   return (
     <div className="bg-white p-6 rounded-lg shadow-sm max-w-xl">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-medium">Anthropic Integration</h2>
-        <Tooltip title="Status">
+        <h2 className="text-lg font-medium">Intégration Anthropic</h2>
+        <Tooltip title="Statut">
           <Popconfirm
-            title={isEnabled ? 'Disable integration?' : 'Enable integration?'}
-            description={isEnabled ? 'The AI Assistant will no longer be available.' : 'The AI Assistant will become available.'}
+            title={isEnabled ? 'Désactiver l\'intégration ?' : 'Activer l\'intégration ?'}
+            description={isEnabled ? 'L\'assistant IA ne sera plus disponible.' : 'L\'assistant IA deviendra disponible.'}
             onConfirm={() => handleToggle(!isEnabled)}
-            okText="Yes"
-            cancelText="No"
+            okText="Oui"
+            cancelText="Non"
           >
             <Switch checked={isEnabled} />
           </Popconfirm>
@@ -158,11 +158,11 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
       <Form form={form} layout="vertical" onFinish={onFinish} initialValues={initialValues} key={workspace.id}>
         <Form.Item
           name="api_key"
-          label="API Key"
-          extra={apiKeyPlaceholder ? `Current: ${apiKeyPlaceholder}` : 'No API key configured'}
+          label="Clé API"
+          extra={apiKeyPlaceholder ? `Actuelle : ${apiKeyPlaceholder}` : 'Aucune clé API configurée'}
         >
           <Input.Password
-            placeholder={apiKeyPlaceholder || 'Enter your Anthropic API key'}
+            placeholder={apiKeyPlaceholder || 'Saisissez votre clé API Anthropic'}
             visibilityToggle={{
               visible: showApiKey,
               onVisibleChange: setShowApiKey,
@@ -173,8 +173,8 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
 
         <Form.Item
           name="model"
-          label="Model"
-          extra="Pick a suggestion or type any Anthropic model ID"
+          label="Modèle"
+          extra="Sélectionnez une suggestion ou saisissez l'identifiant d'un modèle Anthropic"
         >
           <AutoComplete
             options={MODEL_SUGGESTIONS}
@@ -187,7 +187,7 @@ export function IntegrationsSettings({ workspace }: IntegrationsSettingsProps) {
 
         <Form.Item className="mb-0">
           <Button type="primary" htmlType="submit" loading={updateMutation.isPending}>
-            Save Changes
+            Enregistrer les modifications
           </Button>
         </Form.Item>
       </Form>

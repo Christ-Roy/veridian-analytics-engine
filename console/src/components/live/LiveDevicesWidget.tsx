@@ -24,7 +24,7 @@ export function LiveDevicesWidget({ data, loading }: LiveDevicesWidgetProps) {
     return (
       <div className="rounded-md overflow-hidden bg-white">
         <div className="px-4 pt-4 pb-4">
-          <h3 className="text-base font-semibold text-gray-900">Devices</h3>
+          <h3 className="text-base font-semibold text-gray-900">Appareils</h3>
         </div>
         <div className="flex items-center justify-center py-12">
           <Spin />
@@ -36,12 +36,12 @@ export function LiveDevicesWidget({ data, loading }: LiveDevicesWidgetProps) {
   return (
     <div className="rounded-md overflow-hidden bg-white">
       <div className="px-4 pt-4 pb-4">
-        <h3 className="text-base font-semibold text-gray-900">Devices</h3>
+        <h3 className="text-base font-semibold text-gray-900">Appareils</h3>
       </div>
 
       {data.length === 0 ? (
         <Empty
-          description="No device data"
+          description="Aucune donnée d'appareil"
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           className="py-8"
         />
@@ -49,7 +49,7 @@ export function LiveDevicesWidget({ data, loading }: LiveDevicesWidgetProps) {
         <div className="flex flex-col">
           {data.map((row, index) => {
             const percent = (row.sessions / maxValue) * 100
-            const displayDevice = row.device || 'Unknown'
+            const displayDevice = row.device || 'Inconnu'
             const icon = deviceIcons[displayDevice.toLowerCase()]
 
             return (

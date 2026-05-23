@@ -26,7 +26,7 @@ export function DimensionTableWidget({
   columns = DEFAULT_COLUMNS,
   iconPrefix,
   onRowClick,
-  emptyText = 'No data available',
+  emptyText = 'Aucune donnée disponible',
 }: DimensionTableWidgetProps) {
   const { showComparison, timescoreReference, showEvoDetails, setShowEvoDetails } = useDashboardContext()
   const [activeTabKey, setActiveTabKey] = useState(tabs[0].key)
@@ -165,7 +165,7 @@ export function DimensionTableWidget({
               <Maximize2 size={16} />
             </button>
             {/* Desktop: with tooltip */}
-            <Tooltip title="Expand">
+            <Tooltip title="Agrandir">
               <button
                 onClick={() => setDrawerOpen(true)}
                 className="hidden md:block p-1.5 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer"
@@ -345,7 +345,7 @@ export function DimensionTableWidget({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               {title}
-              <Tooltip title="Limited to top 200 results for performance">
+              <Tooltip title="Limité aux 200 premiers résultats pour des raisons de performance">
                 <Info size={14} className="text-gray-400 cursor-help" />
               </Tooltip>
             </div>

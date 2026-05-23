@@ -32,9 +32,9 @@ export function SyncStatusIcon({ workspaceId }: SyncStatusIconProps) {
 
   // Tooltip text
   const tooltipMap: Record<Exclude<SyncStatus, 'synced'>, string> = {
-    syncing: 'Syncing filters...',
-    needs_backfill: 'Filters need sync',
-    error: 'Sync failed',
+    syncing: 'Synchronisation des filtres…',
+    needs_backfill: 'Les filtres doivent être synchronisés',
+    error: 'Échec de la synchronisation',
   }
 
   const handleStartBackfill = async () => {
@@ -47,7 +47,7 @@ export function SyncStatusIcon({ workspaceId }: SyncStatusIconProps) {
     <div className="w-64">
       {syncStatus === 'syncing' && (
         <>
-          <div className="font-medium mb-2">Syncing filters...</div>
+          <div className="font-medium mb-2">Synchronisation des filtres…</div>
           <Progress percent={taskProgress?.progress_percent ?? 0} size="small" />
           <div className="text-xs text-gray-500 mt-2">
             {taskProgress?.sessions.processed.toLocaleString()} /{' '}
@@ -56,40 +56,40 @@ export function SyncStatusIcon({ workspaceId }: SyncStatusIconProps) {
           {taskProgress?.estimated_remaining_seconds != null &&
             taskProgress.estimated_remaining_seconds > 0 && (
               <div className="text-xs text-gray-500">
-                ~{formatDuration(taskProgress.estimated_remaining_seconds)} remaining
+                ~{formatDuration(taskProgress.estimated_remaining_seconds)} restantes
               </div>
             )}
           <Button size="small" onClick={() => cancelBackfill()} loading={isCancelling} className="mt-2">
-            Cancel
+            Annuler
           </Button>
         </>
       )}
       {syncStatus === 'needs_backfill' && (
         <>
-          <div className="font-medium mb-2">Filters out of sync</div>
-          <div className="text-xs text-gray-500 mb-2">Historical data needs to be reprocessed.</div>
+          <div className="font-medium mb-2">Filtres désynchronisés</div>
+          <div className="text-xs text-gray-500 mb-2">Les données historiques doivent être retraitées.</div>
           <Space>
             <InputNumber
               min={1}
               max={365}
               value={lookbackDays}
               onChange={(v) => setLookbackDays(v || 30)}
-              addonAfter="days"
+              addonAfter="jours"
               size="small"
               style={{ width: 120 }}
             />
             <Button type="primary" size="small" onClick={handleStartBackfill} loading={isStarting}>
-              Sync
+              Synchroniser
             </Button>
           </Space>
         </>
       )}
       {syncStatus === 'error' && (
         <>
-          <div className="font-medium text-red-600 mb-2">Sync failed</div>
+          <div className="font-medium text-red-600 mb-2">Échec de la synchronisation</div>
           <div className="text-xs text-gray-500 mb-2">{taskProgress?.error_message}</div>
           <Button size="small" onClick={handleStartBackfill} loading={isStarting}>
-            Retry
+            Réessayer
           </Button>
         </>
       )}

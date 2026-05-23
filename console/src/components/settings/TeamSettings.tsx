@@ -47,9 +47,16 @@ const roleColors: Record<Role, string> = {
 
 const roleOptions = [
   { value: 'admin', label: 'Admin' },
-  { value: 'editor', label: 'Editor' },
-  { value: 'viewer', label: 'Viewer' },
+  { value: 'editor', label: 'Éditeur' },
+  { value: 'viewer', label: 'Lecteur' },
 ]
+
+const ROLE_LABELS_FR: Record<Role, string> = {
+  owner: 'Propriétaire',
+  admin: 'Admin',
+  editor: 'Éditeur',
+  viewer: 'Lecteur',
+}
 
 export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
   const queryClient = useQueryClient()
@@ -98,7 +105,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       api.members.updateRole(workspaceId, userId, role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['members', workspaceId] })
-      message.success('Role updated')
+      message.success('Rôle mis à jour')
     },
     onError: (error: Error) => {
       message.error(error.message)
@@ -110,7 +117,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
     mutationFn: (userId: string) => api.members.remove(workspaceId, userId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['members', workspaceId] })
-      message.success('Member removed')
+      message.success('Membre retiré')
     },
     onError: (error: Error) => {
       message.error(error.message)
@@ -122,7 +129,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
     mutationFn: (id: string) => api.invitations.revoke(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['invitations', workspaceId] })
-      message.success('Invitation revoked')
+      message.success('Invitation révoquée')
     },
     onError: (error: Error) => {
       message.error(error.message)
@@ -133,7 +140,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
   const resendInvitationMutation = useMutation({
     mutationFn: (id: string) => api.invitations.resend(id),
     onSuccess: () => {
-      message.success('Invitation resent')
+      message.success('Invitation renvoyée')
     },
     onError: (error: Error) => {
       message.error(error.message)
@@ -143,7 +150,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
   // Member columns
   const memberColumns = [
     {
-      title: 'Member',
+      title: 'Membre',
       key: 'member',
       render: (_: unknown, record: Member) => (
         <Space>
@@ -158,7 +165,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       ),
     },
     {
-      title: 'Role',
+      title: 'Rôle',
       key: 'role',
       width: 150,
       render: (_: unknown, record: Member) => {
@@ -172,7 +179,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
         if (record.role === 'owner') {
           return (
             <Tag color={roleColors.owner} icon={<CrownOutlined />}>
-              Owner
+              {ROLE_LABELS_FR.owner}
             </Tag>
           )
         }
@@ -197,18 +204,18 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
 
         return (
           <Tag color={roleColors[record.role]}>
-            {record.role.charAt(0).toUpperCase() + record.role.slice(1)}
+            {ROLE_LABELS_FR[record.role]}
           </Tag>
         )
       },
     },
     {
-      title: 'Joined',
+      title: 'Date d\'adhésion',
       key: 'joined_at',
       width: 120,
       render: (_: unknown, record: Member) => (
         <Text type="secondary">
-          {new Date(record.joined_at).toLocaleDateString()}
+          {new Date(record.joined_at).toLocaleDateString('fr-FR')}
         </Text>
       ),
     },
@@ -229,12 +236,13 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
 
         return (
           <Popconfirm
-            title="Remove member"
-            description={`Are you sure you want to remove ${record.user.name}?`}
+            title="Retirer le membre"
+            description={`Êtes-vous sûr de vouloir retirer ${record.user.name} ?`}
             onConfirm={() => removeMemberMutation.mutate(record.user_id)}
-            okText="Remove"
+            okText="Retirer"
+            cancelText="Annuler"
           >
-            <Tooltip title="Remove member">
+            <Tooltip title="Retirer le membre">
               <Button
                 type="text"
                 icon={<DeleteOutlined />}
@@ -263,17 +271,17 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       ),
     },
     {
-      title: 'Role',
+      title: 'Rôle',
       key: 'role',
       width: 100,
       render: (_: unknown, record: Invitation) => (
         <Tag color={roleColors[record.role]}>
-          {record.role.charAt(0).toUpperCase() + record.role.slice(1)}
+          {ROLE_LABELS_FR[record.role]}
         </Tag>
       ),
     },
     {
-      title: 'Invited by',
+      title: 'Invité par',
       key: 'inviter',
       width: 150,
       render: (_: unknown, record: Invitation) => (
@@ -281,12 +289,12 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       ),
     },
     {
-      title: 'Expires',
+      title: 'Expiration',
       key: 'expires_at',
       width: 120,
       render: (_: unknown, record: Invitation) => (
         <Text type="secondary">
-          {new Date(record.expires_at).toLocaleDateString()}
+          {new Date(record.expires_at).toLocaleDateString('fr-FR')}
         </Text>
       ),
     },
@@ -298,12 +306,13 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       render: (_: unknown, record: Invitation) => (
         <Space>
           <Popconfirm
-            title="Revoke invitation"
-            description={`Are you sure you want to revoke the invitation for ${record.email}?`}
+            title="Révoquer l'invitation"
+            description={`Êtes-vous sûr de vouloir révoquer l'invitation pour ${record.email} ?`}
             onConfirm={() => revokeInvitationMutation.mutate(record.id)}
-            okText="Revoke"
+            okText="Révoquer"
+            cancelText="Annuler"
           >
-            <Tooltip title="Revoke invitation">
+            <Tooltip title="Révoquer l'invitation">
               <Button
                 type="text"
                 icon={<CloseOutlined />}
@@ -313,13 +322,14 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
             </Tooltip>
           </Popconfirm>
           <Popconfirm
-            title="Resend invitation"
-            description={`Resend invitation email to ${record.email}?`}
+            title="Renvoyer l'invitation"
+            description={`Renvoyer l'email d'invitation à ${record.email} ?`}
             onConfirm={() => resendInvitationMutation.mutate(record.id)}
-            okText="Resend"
+            okText="Renvoyer"
+            cancelText="Annuler"
             disabled={!smtpStatus?.available}
           >
-            <Tooltip title={!smtpStatus?.available ? 'SMTP not configured' : 'Resend invitation'}>
+            <Tooltip title={!smtpStatus?.available ? 'SMTP non configuré' : "Renvoyer l'invitation"}>
               <Button
                 type="text"
                 icon={<ReloadOutlined />}
@@ -344,11 +354,11 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       <div>
         <div className="flex justify-between items-center mb-4">
           <Title level={5} className="!mb-0">
-            Team Members ({members.length})
+            Membres de l'équipe ({members.length})
           </Title>
           {canManageMembers && (
             <Tooltip
-              title={!smtpStatus?.available ? 'SMTP not configured. Configure SMTP settings first.' : undefined}
+              title={!smtpStatus?.available ? 'SMTP non configuré. Configurez d\'abord les paramètres SMTP.' : undefined}
             >
               <Button
                 type="primary"
@@ -356,8 +366,8 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
                 onClick={() => setInviteModalOpen(true)}
                 disabled={!smtpStatus?.available}
               >
-                <span className="hidden md:inline">Invite Member</span>
-                <span className="md:hidden">Invite</span>
+                <span className="hidden md:inline">Inviter un membre</span>
+                <span className="md:hidden">Inviter</span>
               </Button>
             </Tooltip>
           )}
@@ -366,10 +376,10 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
         {/* Mobile: Card view */}
         <div className="md:hidden space-y-3">
           {membersLoading ? (
-            <div className="bg-white rounded-lg p-6 text-center text-gray-500">Loading...</div>
+            <div className="bg-white rounded-lg p-6 text-center text-gray-500">Chargement…</div>
           ) : members.length === 0 ? (
             <div className="bg-white rounded-lg p-6">
-              <Empty description="No team members" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="Aucun membre dans l'équipe" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
             members.map((member) => {
@@ -399,7 +409,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
                         </div>
                         <div className="shrink-0">
                           {member.role === 'owner' ? (
-                            <Tag color={roleColors.owner} icon={<CrownOutlined />}>Owner</Tag>
+                            <Tag color={roleColors.owner} icon={<CrownOutlined />}>{ROLE_LABELS_FR.owner}</Tag>
                           ) : canChangeRole ? (
                             <Select
                               value={member.role}
@@ -416,26 +426,27 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
                             />
                           ) : (
                             <Tag color={roleColors[member.role]}>
-                              {member.role.charAt(0).toUpperCase() + member.role.slice(1)}
+                              {ROLE_LABELS_FR[member.role]}
                             </Tag>
                           )}
                         </div>
                       </div>
                       <div className="text-gray-400 text-xs mt-2">
-                        Joined {new Date(member.joined_at).toLocaleDateString()}
+                        Membre depuis le {new Date(member.joined_at).toLocaleDateString('fr-FR')}
                       </div>
                     </div>
                   </div>
                   {canRemove && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
                       <Popconfirm
-                        title="Remove member"
-                        description={`Are you sure you want to remove ${member.user.name}?`}
+                        title="Retirer le membre"
+                        description={`Êtes-vous sûr de vouloir retirer ${member.user.name} ?`}
                         onConfirm={() => removeMemberMutation.mutate(member.user_id)}
-                        okText="Remove"
+                        okText="Retirer"
+                        cancelText="Annuler"
                       >
                         <Button block size="small" icon={<DeleteOutlined />} loading={removeMemberMutation.isPending}>
-                          Remove
+                          Retirer
                         </Button>
                       </Popconfirm>
                     </div>
@@ -463,13 +474,13 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
       {canManageMembers && pendingInvitations.length > 0 && (
         <div>
           <Title level={5} className="!mt-8 !mb-4">
-            Pending Invitations ({pendingInvitations.length})
+            Invitations en attente ({pendingInvitations.length})
           </Title>
 
           {/* Mobile: Card view */}
           <div className="md:hidden space-y-3">
             {invitationsLoading ? (
-              <div className="bg-white rounded-lg p-6 text-center text-gray-500">Loading...</div>
+              <div className="bg-white rounded-lg p-6 text-center text-gray-500">Chargement…</div>
             ) : (
               pendingInvitations.map((invitation) => (
                 <div key={invitation.id} className="bg-white rounded-lg border border-gray-200 p-4">
@@ -482,31 +493,33 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
                         <div className="font-medium truncate">{invitation.email}</div>
                         <div className="shrink-0">
                           <Tag color={roleColors[invitation.role]}>
-                            {invitation.role.charAt(0).toUpperCase() + invitation.role.slice(1)}
+                            {ROLE_LABELS_FR[invitation.role]}
                           </Tag>
                         </div>
                       </div>
                       <div className="text-gray-400 text-xs mt-2">
-                        Invited by {invitation.inviter.name} · Expires {new Date(invitation.expires_at).toLocaleDateString()}
+                        Invité par {invitation.inviter.name} · Expire le {new Date(invitation.expires_at).toLocaleDateString('fr-FR')}
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
                     <Popconfirm
-                      title="Revoke invitation"
-                      description={`Are you sure you want to revoke the invitation for ${invitation.email}?`}
+                      title="Révoquer l'invitation"
+                      description={`Êtes-vous sûr de vouloir révoquer l'invitation pour ${invitation.email} ?`}
                       onConfirm={() => revokeInvitationMutation.mutate(invitation.id)}
-                      okText="Revoke"
+                      okText="Révoquer"
+                      cancelText="Annuler"
                     >
                       <Button block size="small" icon={<CloseOutlined />} loading={revokeInvitationMutation.isPending}>
-                        Revoke
+                        Révoquer
                       </Button>
                     </Popconfirm>
                     <Popconfirm
-                      title="Resend invitation"
-                      description={`Resend invitation email to ${invitation.email}?`}
+                      title="Renvoyer l'invitation"
+                      description={`Renvoyer l'email d'invitation à ${invitation.email} ?`}
                       onConfirm={() => resendInvitationMutation.mutate(invitation.id)}
-                      okText="Resend"
+                      okText="Renvoyer"
+                      cancelText="Annuler"
                       disabled={!smtpStatus?.available}
                     >
                       <Button
@@ -516,7 +529,7 @@ export function TeamSettings({ workspaceId, userRole }: TeamSettingsProps) {
                         loading={resendInvitationMutation.isPending}
                         disabled={!smtpStatus?.available}
                       >
-                        Resend
+                        Renvoyer
                       </Button>
                     </Popconfirm>
                   </div>

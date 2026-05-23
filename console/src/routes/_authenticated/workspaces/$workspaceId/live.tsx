@@ -181,7 +181,7 @@ function LiveView() {
             className="flex items-center gap-1 text-gray-500 hover:text-gray-700 transition-colors"
           >
             <ArrowLeft size={16} />
-            <span className="text-sm">Dashboard</span>
+            <span className="text-sm">Tableau de bord</span>
           </Link>
         </div>
         <div className="flex items-center gap-3">
@@ -190,7 +190,7 @@ function LiveView() {
             <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
           </span>
           <span className="text-lg font-medium text-gray-800">
-            {totalSessions} live now
+            {totalSessions} en direct
           </span>
         </div>
       </div>

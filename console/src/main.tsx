@@ -4,11 +4,16 @@ import { RouterProvider } from '@tanstack/react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App, ConfigProvider } from 'antd'
 import type { ThemeConfig } from 'antd'
+import frFR from 'antd/locale/fr_FR'
+import dayjs from 'dayjs'
+import 'dayjs/locale/fr'
 import { createAppRouter } from './router'
 import { AuthProvider } from './lib/auth'
 import { useAuth } from './lib/useAuth'
 import './index.css'
 import 'flag-icons/css/flag-icons.min.css'
+
+dayjs.locale('fr')
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -45,7 +50,7 @@ export function InnerApp() {
   const auth = useAuth()
 
   if (auth.isLoading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading...</div>
+    return <div className="min-h-screen flex items-center justify-center">Chargement…</div>
   }
 
   return <RouterProvider router={router} context={{ auth, queryClient }} />
@@ -55,7 +60,7 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ConfigProvider theme={theme}>
+        <ConfigProvider theme={theme} locale={frFR}>
           <App>
             <InnerApp />
           </App>

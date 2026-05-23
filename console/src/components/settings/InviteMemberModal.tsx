@@ -14,17 +14,17 @@ const roleOptions = [
   {
     value: 'admin',
     label: 'Admin',
-    description: 'Can manage settings, members, and integrations',
+    description: 'Peut gérer les paramètres, les membres et les intégrations',
   },
   {
     value: 'editor',
-    label: 'Editor',
-    description: 'Can view analytics, create filters and annotations',
+    label: 'Éditeur',
+    description: 'Peut consulter les analytics, créer des filtres et des annotations',
   },
   {
     value: 'viewer',
-    label: 'Viewer',
-    description: 'Can only view dashboards and analytics',
+    label: 'Lecteur',
+    description: 'Peut uniquement consulter les tableaux de bord et les analytics',
   },
 ]
 
@@ -67,12 +67,12 @@ export function InviteMemberModal({
 
   return (
     <Modal
-      title="Invite Team Member"
+      title="Inviter un membre de l'équipe"
       open={open}
       onCancel={handleCancel}
       footer={[
         <Button key="cancel" onClick={handleCancel}>
-          Cancel
+          Annuler
         </Button>,
         <Button
           key="submit"
@@ -80,7 +80,7 @@ export function InviteMemberModal({
           loading={inviteMutation.isPending}
           onClick={handleSubmit}
         >
-          Send Invitation
+          Envoyer l'invitation
         </Button>,
       ]}
     >
@@ -102,22 +102,22 @@ export function InviteMemberModal({
       >
         <Form.Item
           name="email"
-          label="Email Address"
+          label="Adresse email"
           rules={[
-            { required: true, message: 'Please enter an email address' },
-            { type: 'email', message: 'Please enter a valid email' },
+            { required: true, message: 'Veuillez saisir une adresse email' },
+            { type: 'email', message: 'Veuillez saisir un email valide' },
           ]}
         >
           <Input
-            placeholder="colleague@company.com"
+            placeholder="collegue@entreprise.fr"
             autoComplete="email"
           />
         </Form.Item>
 
         <Form.Item
           name="role"
-          label="Role"
-          rules={[{ required: true, message: 'Please select a role' }]}
+          label="Rôle"
+          rules={[{ required: true, message: 'Veuillez sélectionner un rôle' }]}
         >
           <Select
             options={roleOptions.map((opt) => ({
@@ -135,8 +135,8 @@ export function InviteMemberModal({
       </Form>
 
       <div className="text-sm text-gray-500 mt-4">
-        An invitation email will be sent to this address. The invitation expires
-        in 7 days.
+        Un email d'invitation sera envoyé à cette adresse. L'invitation expire
+        sous 7 jours.
       </div>
     </Modal>
   )

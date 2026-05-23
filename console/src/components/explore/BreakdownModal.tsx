@@ -25,8 +25,8 @@ export function BreakdownModal({
   excludeDimensions = [],
   initialDimensions = [],
   customDimensionLabels,
-  title = 'Breakdown by',
-  submitText = 'View Breakdown',
+  title = 'Décomposer par',
+  submitText = 'Voir la décomposition',
 }: BreakdownModalProps) {
   const { message } = App.useApp()
   const [selectedDimensions, setSelectedDimensions] = useState<string[]>(initialDimensions)
@@ -74,7 +74,7 @@ export function BreakdownModal({
 
   const handleSubmit = () => {
     if (selectedDimensions.length === 0) {
-      message.error('Please select at least one dimension')
+      message.error('Veuillez sélectionner au moins une dimension')
       return
     }
     onSubmit(selectedDimensions)
@@ -109,7 +109,7 @@ export function BreakdownModal({
       }}
       footer={[
         <Button key="cancel" onClick={handleCancel}>
-          Cancel
+          Annuler
         </Button>,
         <Button key="submit" type="primary" onClick={handleSubmit} disabled={selectedDimensions.length === 0}>
           {submitText}
@@ -118,9 +118,9 @@ export function BreakdownModal({
     >
       <div className="py-4 flex flex-col h-full">
         <div className="mb-4 p-3 bg-gray-50 rounded-lg flex items-center gap-2 flex-wrap min-h-[46px]">
-          <span className="text-xs font-medium text-gray-500">Selected dimensions (in order):</span>
+          <span className="text-xs font-medium text-gray-500">Dimensions sélectionnées (dans l'ordre) :</span>
           {selectedDimensions.length === 0 ? (
-            <span className="text-xs text-gray-400 italic">(select a dimension below)</span>
+            <span className="text-xs text-gray-400 italic">(sélectionnez une dimension ci-dessous)</span>
           ) : (
             selectedDimensions.map((dim, index) => (
               <Tag
@@ -140,7 +140,7 @@ export function BreakdownModal({
         <div className="flex-1 overflow-y-auto overflow-x-hidden border border-gray-200 rounded-lg min-h-0">
           {Object.keys(filteredByCategory).length === 0 ? (
             <div className="p-8">
-              <Empty description="No dimensions found" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              <Empty description="Aucune dimension trouvée" image={Empty.PRESENTED_IMAGE_SIMPLE} />
             </div>
           ) : (
             <Row gutter={16} className="pt-3 pl-6">
@@ -148,7 +148,7 @@ export function BreakdownModal({
               <Col span={6} className="p-3">
                 {filteredByCategory['Channel'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Channel</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Canal</div>
                     <div className="space-y-1">
                       {filteredByCategory['Channel'].map((dim) => (
                         <div
@@ -182,7 +182,7 @@ export function BreakdownModal({
                 )}
                 {filteredByCategory['Traffic'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Traffic</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Trafic</div>
                     <div className="space-y-1">
                       {filteredByCategory['Traffic'].map((dim) => (
                         <div
@@ -220,7 +220,7 @@ export function BreakdownModal({
                 )}
                 {filteredByCategory['Time'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Time</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Temps</div>
                     <div className="space-y-1">
                       {filteredByCategory['Time'].map((dim) => (
                         <div
@@ -241,7 +241,7 @@ export function BreakdownModal({
               <Col span={6} className="p-3">
                 {filteredByCategory['Geo'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Geo</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Géographie</div>
                     <div className="space-y-1">
                       {filteredByCategory['Geo'].map((dim) => (
                         <div
@@ -258,7 +258,7 @@ export function BreakdownModal({
                 )}
                 {filteredByCategory['Device'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Device</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2 mt-4">Appareil</div>
                     <div className="space-y-1">
                       {filteredByCategory['Device'].map((dim) => (
                         <div
@@ -279,7 +279,7 @@ export function BreakdownModal({
               <Col span={6} className="p-3">
                 {filteredByCategory['Custom'] && (
                   <>
-                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Custom Dimensions</div>
+                    <div className="text-xs font-semibold text-[var(--primary)] uppercase mb-2">Dimensions personnalisées</div>
                     <div className="space-y-1">
                       {filteredByCategory['Custom'].map((dim) => (
                         <div

@@ -10,7 +10,7 @@ interface PreviewDrawerProps {
 export function PreviewDrawer({ open, onClose, html, loading }: PreviewDrawerProps) {
   return (
     <Drawer
-      title="Email Preview"
+      title="Aperçu de l'email"
       placement="right"
       size={700}
       open={open}
@@ -36,7 +36,7 @@ export function PreviewDrawer({ open, onClose, html, loading }: PreviewDrawerPro
       ) : html ? (
         <iframe
           srcDoc={html}
-          title="Email Preview"
+          title="Aperçu de l'email"
           className="w-full h-full border-0"
           style={{ minHeight: 'calc(100vh - 120px)' }}
         />

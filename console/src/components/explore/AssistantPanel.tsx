@@ -19,10 +19,10 @@ interface AssistantPanelProps {
 }
 
 const QUICK_PROMPTS = [
-  'Show me UTM campaigns by device for last week',
-  'Landing pages with bounce rate over 50%',
-  'Compare channels this month vs last month',
-  'Traffic by day of week and hour',
+  'Montre-moi les campagnes UTM par appareil de la semaine dernière',
+  "Pages d'entrée avec un taux de rebond supérieur à 50 %",
+  'Compare les canaux ce mois-ci vs le mois dernier',
+  'Trafic par jour de la semaine et heure',
 ]
 
 // Hook to detect mobile viewport
@@ -48,26 +48,26 @@ function ConfigPreview({
 }) {
   return (
     <div className="bg-blue-50 border border-blue-200 rounded-md p-3 mt-2">
-      <div className="text-sm font-medium mb-2">Suggested configuration:</div>
+      <div className="text-sm font-medium mb-2">Configuration suggérée :</div>
       <ul className="text-sm space-y-1 mb-3">
         {config.dimensions && (
-          <li>• <span className="text-gray-500">Dimensions:</span> {config.dimensions.join(', ')}</li>
+          <li>• <span className="text-gray-500">Dimensions :</span> {config.dimensions.join(', ')}</li>
         )}
         {config.period && (
-          <li>• <span className="text-gray-500">Period:</span> {config.period}</li>
+          <li>• <span className="text-gray-500">Période :</span> {config.period}</li>
         )}
         {config.filters && config.filters.length > 0 && (
-          <li>• <span className="text-gray-500">Filters:</span> {config.filters.length} filter(s)</li>
+          <li>• <span className="text-gray-500">Filtres :</span> {config.filters.length} filtre(s)</li>
         )}
         {config.comparison && config.comparison !== 'none' && (
-          <li>• <span className="text-gray-500">Comparison:</span> {config.comparison}</li>
+          <li>• <span className="text-gray-500">Comparaison :</span> {config.comparison}</li>
         )}
       </ul>
       <Space>
         <Button type="primary" size="small" icon={<CheckOutlined />} onClick={onApply}>
-          View Report
+          Voir le rapport
         </Button>
-        <Button size="small" onClick={onDismiss}>Dismiss</Button>
+        <Button size="small" onClick={onDismiss}>Ignorer</Button>
       </Space>
     </div>
   )
@@ -130,11 +130,11 @@ export function AssistantPanel({
         className="flex-1 overflow-y-auto p-4 space-y-3"
         role="log"
         aria-live="polite"
-        aria-label="Assistant conversation"
+        aria-label="Conversation avec l'assistant"
       >
         {messages.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500 mb-4">Ask me to create a report!</p>
+            <p className="text-gray-500 mb-4">Demandez-moi de créer un rapport !</p>
             <div className="flex flex-wrap gap-x-3 gap-y-4 justify-center">
               {QUICK_PROMPTS.map((prompt, i) => (
                 <div
@@ -197,7 +197,7 @@ export function AssistantPanel({
       {/* Status indicator */}
       {status === 'connecting' && (
         <div className="flex items-center gap-2 px-4 py-2 text-gray-500 text-sm">
-          <Spin size="small" /> Connecting...
+          <Spin size="small" /> Connexion…
         </div>
       )}
 
@@ -206,16 +206,16 @@ export function AssistantPanel({
         <div className="rounded-lg overflow-hidden transition-shadow [&:focus-within]:shadow-[0_0_0_2px_var(--ant-color-primary)]">
           <Sender
             ref={inputRef}
-            placeholder="Describe the report you want..."
+            placeholder="Décrivez le rapport que vous souhaitez…"
             onSubmit={handleSend}
             loading={isStreaming}
             disabled={isStreaming}
-            aria-label="Chat input"
+            aria-label="Saisie de la conversation"
           />
         </div>
         {usage.costUsd > 0 && (
           <div className="text-xs text-gray-400 mt-2 text-center">
-            {usage.inputTokens.toLocaleString()} in · {usage.outputTokens.toLocaleString()} out · ${usage.costUsd.toFixed(4)}
+            {usage.inputTokens.toLocaleString()} entrée · {usage.outputTokens.toLocaleString()} sortie · ${usage.costUsd.toFixed(4)}
           </div>
         )}
       </div>
@@ -225,7 +225,7 @@ export function AssistantPanel({
   const title = (
     <div className="flex items-center gap-2">
       <ThunderboltOutlined />
-      <span>AI Assistant</span>
+      <span>Assistant IA</span>
     </div>
   )
 
@@ -234,9 +234,9 @@ export function AssistantPanel({
       type="link"
       size="small"
       onClick={onClear}
-      aria-label="Reset conversation"
+      aria-label="Réinitialiser la conversation"
     >
-      Reset
+      Réinitialiser
     </Button>
   ) : null
 
