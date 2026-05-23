@@ -223,6 +223,115 @@ test("syncCallLogs : les CDR Telnyx mockés sont RÉELLEMENT upsertés en SipCal
   assert.ok(cred?.lastSyncAt, "lastSyncAt doit être positionné");
 });
 
+test("syncCallLogs : pousse chaque appel comme event phone_call vers staminads /api/track", async () => {
+  // UI-NATIVE-PURE (2026-05-23) : les appels VoIP doivent apparaître comme
+  // événements `goal` custom `phone_call` dans staminads natif, pour qu'ils
+  // s'affichent automatiquement dans Live / Explore / Goals — pas dans une
+  // page custom. On vérifie ici que le sync POST bien sur /api/track avec
+  // le bon payload.
+  const t = await mkTenant();
+  await seedTelnyxCred(t.id);
+  const cdrSynced = telnyxCdr({ id: `push_${RUN_NONCE}`, duration: 42 });
+
+  // Mock fetch qui répond à la fois aux endpoints Telnyx ET staminads
+  // /api/track, en enregistrant les payloads pushés.
+  const trackCalls: Array<{ url: string; body: unknown }> = [];
+  const mixedFetch: typeof fetch = (async (input, init) => {
+    const url = input instanceof URL ? input.toString() : String(input);
+    if (url.includes("/detail_records")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [cdrSynced], meta: { total_pages: 1 } }),
+        text: async () => "",
+      } as unknown as Response;
+    }
+    if (url.includes("/api/track")) {
+      const body = init?.body
+        ? JSON.parse(String(init.body)) as unknown
+        : null;
+      trackCalls.push({ url, body });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true }),
+        text: async () => "",
+      } as unknown as Response;
+    }
+    return {
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "not_mocked",
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const result = await syncCallLogs(h.prisma, t.id, {
+    encryptionKey: TEST_ENCRYPTION_KEY,
+    fetchImpl: mixedFetch,
+    now: () => FIXED_NOW,
+  });
+
+  assert.equal(result.totalUpserted, 1);
+  assert.equal(result.providers[0].staminadsPushed, 1);
+  assert.equal(result.providers[0].staminadsFailed, 0);
+  assert.equal(trackCalls.length, 1);
+  const payload = trackCalls[0].body as Record<string, unknown>;
+  assert.equal(payload.workspace_id, t.workspaceId);
+  const actions = payload.actions as Array<Record<string, unknown>>;
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].type, "goal");
+  assert.equal(actions[0].name, "phone_call");
+  const props = actions[0].properties as Record<string, string>;
+  assert.equal(props.direction, "inbound");
+  assert.equal(props.status, "answered");
+  assert.equal(props.duration_sec, "42");
+  assert.equal(props.provider, "telnyx");
+  assert.equal(props.external_id, `push_${RUN_NONCE}`);
+});
+
+test("syncCallLogs : push staminads en échec → sync DB OK quand même (fail-soft)", async () => {
+  // Si staminads est down, le sync doit terminer (DB OK) et marquer le
+  // push comme failed — on ne perd jamais d'appel à cause d'un /api/track
+  // indispo.
+  const t = await mkTenant();
+  await seedTelnyxCred(t.id);
+  const cdr = telnyxCdr({ id: `failsoft_${RUN_NONCE}` });
+
+  const failTrackFetch: typeof fetch = (async (input) => {
+    const url = input instanceof URL ? input.toString() : String(input);
+    if (url.includes("/detail_records")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [cdr], meta: { total_pages: 1 } }),
+        text: async () => "",
+      } as unknown as Response;
+    }
+    if (url.includes("/api/track")) {
+      throw new Error("staminads_unreachable");
+    }
+    return {
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+      text: async () => "",
+    } as unknown as Response;
+  }) as typeof fetch;
+
+  const result = await syncCallLogs(h.prisma, t.id, {
+    encryptionKey: TEST_ENCRYPTION_KEY,
+    fetchImpl: failTrackFetch,
+    now: () => FIXED_NOW,
+  });
+
+  // La DB a bien upserté l'appel, le push staminads est marqué failed.
+  assert.equal(result.totalUpserted, 1);
+  assert.equal(result.providers[0].error, null);
+  assert.equal(result.providers[0].staminadsPushed, 0);
+  assert.equal(result.providers[0].staminadsFailed, 1);
+});
+
 test("syncCallLogs : re-sync identique → idempotent (vraie contrainte unique)", async () => {
   const t = await mkTenant();
   await seedTelnyxCred(t.id);
