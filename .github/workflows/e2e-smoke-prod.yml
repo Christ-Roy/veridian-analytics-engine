@@ -58,39 +58,38 @@ jobs:
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
 
-      # ─── Prod targets ──────────────────────────────────────────────
-      - name: Smoke 01 + bugs P0 regression 02 (prod)
+      # ─── Prod target (BLOQUANT — un fail déclenche rollback) ───────
+      - name: Prod — Smoke 01 + bugs P0 02 + HMAC rejection 06
         env:
           TARGET: prod
         run: |
           npx playwright test \
             01-smoke/ \
             02-bugs-regression/ \
+            06-hub-contract/hmac-rejection.spec.ts \
             --project=chromium-desktop
 
-      - name: HMAC rejection 06 (prod)
-        env:
-          TARGET: prod
+      # Sauvegarder le report prod avant qu'il soit écrasé par le run démo
+      - name: Save prod test-results for issue creator
+        if: always()
         run: |
-          npx playwright test 06-hub-contract/hmac-rejection.spec.ts \
-            --project=chromium-desktop
+          mkdir -p tests/e2e/test-results-prod
+          cp -r tests/e2e/test-results/* tests/e2e/test-results-prod/ 2>/dev/null || true
+          ls tests/e2e/test-results-prod/ | head -5
 
-      # ─── Demo prod ──────────────────────────────────────────────────
-      - name: Smoke 01 + bugs P0 regression 02 (demo-prod)
+      # ─── Demo prod (NON-BLOQUANT — sert à GÉNÉRER du travail via issues) ──
+      # Ces tests trouvent des bugs UI démo (BUG-02/03/05/06/12/21 etc.). On
+      # NE veut PAS qu'un bug démo déclenche un rollback prod (la démo est
+      # standalone, son crash ne casse pas les tenants). MAIS on veut que les
+      # rouges créent des issues GitHub pour les agents UI.
+      - name: Demo-prod — Smoke + bugs P0 + dashboard UI (non-bloquant)
+        continue-on-error: true
         env:
           TARGET: demo-prod
         run: |
           npx playwright test \
             01-smoke/ \
             02-bugs-regression/ \
-            --project=chromium-desktop
-
-      - name: Demo public 11 + dashboard UI 09 (demo-prod) — read-only
-        env:
-          TARGET: demo-prod
-        run: |
-          # On exclut demo-seed-reseed.spec.ts en prod (skip déjà mais double safety)
-          npx playwright test \
             11-demo-public/demo-accessible.spec.ts \
             11-demo-public/demo-banner-cta.spec.ts \
             11-demo-public/demo-restricted-guards.spec.ts \
@@ -117,14 +116,21 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
         run: |
-          REPORT="tests/e2e/test-results/results.json"
-          if [ ! -f "$REPORT" ]; then
-            echo "::warning::No results.json — skipping issue auto-create"
-            exit 0
+          # On a deux rapports : test-results-prod/ (prod, bloquant) et
+          # test-results/ (dernier = démo-prod, non-bloquant). On traite les
+          # deux pour créer/fermer les issues correspondantes.
+          if [ -f tests/e2e/test-results-prod/results.json ]; then
+            echo "── Processing PROD report ──"
+            node scripts/ci/e2e-report-to-issues.mjs \
+              --report tests/e2e/test-results-prod/results.json \
+              --target prod || true
           fi
-          node scripts/ci/e2e-report-to-issues.mjs \
-            --report "$REPORT" \
-            --target prod || true
+          if [ -f tests/e2e/test-results/results.json ]; then
+            echo "── Processing DEMO-PROD report ──"
+            node scripts/ci/e2e-report-to-issues.mjs \
+              --report tests/e2e/test-results/results.json \
+              --target demo-prod || true
+          fi
 
       - name: Open umbrella issue on prod fail
         if: failure() && github.event_name != 'workflow_dispatch'
