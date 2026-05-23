@@ -46,7 +46,7 @@ function WorkspaceLayout() {
   const { workspaceId } = Route.useParams()
   const { data: workspaces } = useSuspenseQuery(workspacesQueryOptions)
   const { data: workspace } = useSuspenseQuery(workspaceQueryOptions(workspaceId))
-  const { logout, user } = useAuth()
+  const { logout, user, isDemo } = useAuth()
   const { message } = App.useApp()
   const { timezone, setTimezone, workspaceTimezone } = useTimezone(workspace.timezone)
   const navigate = useNavigate()
@@ -341,32 +341,34 @@ function WorkspaceLayout() {
                 className="!text-gray-500 hover:!text-gray-800 hover:!bg-gray-100"
               />
             </Dropdown>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'account',
-                    icon: <UserOutlined />,
-                    label: 'Account',
-                    onClick: () => navigate({ to: '/workspaces/$workspaceId/account', params: { workspaceId } }),
-                  },
-                  { type: 'divider' },
-                  {
-                    key: 'logout',
-                    icon: <LogoutOutlined />,
-                    label: 'Logout',
-                    onClick: handleLogout,
-                  },
-                ],
-              }}
-              placement="bottomRight"
-            >
-              <Button
-                type="text"
-                icon={<UserOutlined />}
-                className="!text-gray-500 hover:!text-gray-800 hover:!bg-gray-100"
-              />
-            </Dropdown>
+            {!isDemo && (
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'account',
+                      icon: <UserOutlined />,
+                      label: 'Account',
+                      onClick: () => navigate({ to: '/workspaces/$workspaceId/account', params: { workspaceId } }),
+                    },
+                    { type: 'divider' },
+                    {
+                      key: 'logout',
+                      icon: <LogoutOutlined />,
+                      label: 'Logout',
+                      onClick: handleLogout,
+                    },
+                  ],
+                }}
+                placement="bottomRight"
+              >
+                <Button
+                  type="text"
+                  icon={<UserOutlined />}
+                  className="!text-gray-500 hover:!text-gray-800 hover:!bg-gray-100"
+                />
+              </Dropdown>
+            )}
           </Space>
           </div>
         </div>
@@ -580,31 +582,35 @@ function WorkspaceLayout() {
             </div>
           </div>
 
-          {/* Divider */}
-          <div className="border-t border-gray-200" />
+          {!isDemo && (
+            <>
+              {/* Divider */}
+              <div className="border-t border-gray-200" />
 
-          {/* Account */}
-          <Link
-            to="/workspaces/$workspaceId/account"
-            params={{ workspaceId }}
-            onClick={closeMobileMenu}
-            className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
-          >
-            <UserOutlined />
-            Account
-          </Link>
+              {/* Account */}
+              <Link
+                to="/workspaces/$workspaceId/account"
+                params={{ workspaceId }}
+                onClick={closeMobileMenu}
+                className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50"
+              >
+                <UserOutlined />
+                Account
+              </Link>
 
-          {/* Logout */}
-          <button
-            onClick={() => {
-              closeMobileMenu()
-              handleLogout()
-            }}
-            className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full text-left"
-          >
-            <LogoutOutlined />
-            Logout
-          </button>
+              {/* Logout */}
+              <button
+                onClick={() => {
+                  closeMobileMenu()
+                  handleLogout()
+                }}
+                className="flex items-center gap-3 px-4 py-3 text-gray-700 hover:bg-gray-50 w-full text-left"
+              >
+                <LogoutOutlined />
+                Logout
+              </button>
+            </>
+          )}
       </div>
 
       <div className="flex-1">

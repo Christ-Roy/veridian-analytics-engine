@@ -12,6 +12,13 @@
 # Hub-facing provisioning layer and has no business being public (ticket E1
 # §6). The demo only serves the read-only console + the public demo API.
 #
+# Side effect for the console UI: the Veridian-flavored tabs (Score, Status,
+# Shadow Marketing, Forms, GSC, Push, Calls) that consume `/api/admin/*` are
+# gated behind `useAuth().isDemo` and render `<VeridianDemoComingSoon />` on
+# the demo (see console/src/veridian/pages/dashboard.tsx). Without that gate,
+# every prospect lands on a raw "ERREUR 404 NOT FOUND" — fixes BUG-02.
+# Same gating hides /account and the user menu Logout entry (BUG-12, BUG-21).
+#
 # Deployment target: Dokploy prod (isolated compose) so the demo stays up
 # even if the dev-pub staging host is down.
 #
