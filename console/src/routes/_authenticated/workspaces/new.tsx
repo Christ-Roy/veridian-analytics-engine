@@ -34,7 +34,9 @@ function NewWorkspaceForm() {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['workspaces'] })
       message.success('Workspace created')
-      navigate({ to: '/workspaces/$workspaceId/install-sdk', params: { workspaceId: data.id } })
+      // Veridian onboarding (sprint UI-WELCOME-NATIVE, 2026-05-22) : nouveau
+      // workspace → wizard `welcome` (au lieu de `install-sdk` staminads upstream).
+      navigate({ to: '/workspaces/$workspaceId/welcome', params: { workspaceId: data.id } })
     },
     onError: () => message.error('Failed to create workspace'),
   })
