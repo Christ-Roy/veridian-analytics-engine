@@ -589,7 +589,7 @@
 - sources:
     - console/src/veridian/pages/welcome.tsx
     - console/src/veridian/api.ts
-    - console/src/routes/_authenticated/veridian.welcome.$workspaceId.tsx
+    - console/src/routes/_authenticated/workspaces/$workspaceId/welcome.tsx
   covered_by:
     - console/src/veridian/pages/__tests__/welcome.test.tsx
   reason: |
@@ -600,9 +600,16 @@
     (workspaceId + endpoint embarqués, slash final retiré), bouton
     copier (navigator.clipboard.writeText + toast), navigation entre
     étapes, polling waiting → ok → onComplete, timeout 60s → panneau
-    d'aide, erreur 403 → message d'accès refusé. La route TanStack
-    `veridian.welcome.$workspaceId.tsx` est un thin wrapper (resolve
-    endpoint + navigate onComplete) couvert indirectement.
+    d'aide, erreur 403 → message d'accès refusé.
+
+    Sprint UI-WELCOME-NATIVE (2026-05-23) : la route a été migrée du
+    tunnel parallèle `/veridian/welcome/:workspaceId` vers la sous-route
+    native `/workspaces/:workspaceId/welcome` (intégrée au layout
+    staminads — nav + assistant + breadcrumbs visibles). Le layout
+    parent `workspaces/$workspaceId.tsx` redirige automatiquement vers
+    cette welcome route quand `workspace.status !== 'active'`. À la fin
+    du wizard (event détecté), `onComplete` flag `status = 'active'`
+    puis navigue sur le dashboard staminads `/workspaces/:id`.
 
 # ─── Tab Calls + flow auth + pages d'erreur (U9) ──────────────────────
 

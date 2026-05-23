@@ -67,17 +67,32 @@ function WorkspaceLayout() {
     }
   }, [timezonePopoverOpen])
 
-  // Redirect to install-sdk if workspace is not active
+  // Redirect to the Veridian welcome wizard if workspace is not yet active.
+  // `welcome` est le NOUVEAU chemin d'onboarding (sprint UI-WELCOME-NATIVE,
+  // 2026-05-22) : intégré au layout staminads, pas de tunnel parallèle.
+  // `install-sdk` reste accessible directement pour qui veut le pattern
+  // staminads upstream, mais n'est plus la destination par défaut.
   const isInstallSdkPage = currentPath.endsWith('/install-sdk')
+  const isWelcomePage = currentPath.endsWith('/welcome')
   useEffect(() => {
-    if (workspace.status !== 'active' && !isInstallSdkPage) {
+    if (
+      workspace.status !== 'active' &&
+      !isInstallSdkPage &&
+      !isWelcomePage
+    ) {
       navigate({
-        to: '/workspaces/$workspaceId/install-sdk',
+        to: '/workspaces/$workspaceId/welcome',
         params: { workspaceId },
         replace: true,
       })
     }
-  }, [workspace.status, isInstallSdkPage, navigate, workspaceId])
+  }, [
+    workspace.status,
+    isInstallSdkPage,
+    isWelcomePage,
+    navigate,
+    workspaceId,
+  ])
 
   const isWorkspaceActive = workspace.status === 'active'
 
@@ -175,6 +190,24 @@ function WorkspaceLayout() {
                 }] : []),
               ]}
             />
+            {!isWorkspaceActive && (
+              <div className="flex items-center">
+                <div className="h-5 w-px bg-gray-200" />
+                <nav className="flex gap-1 pl-2">
+                  <Link
+                    to="/workspaces/$workspaceId/welcome"
+                    params={{ workspaceId }}
+                    className={`px-4 py-2 rounded transition-colors ${
+                      currentPath.endsWith('/welcome')
+                        ? '!text-[var(--primary)] bg-white'
+                        : '!text-gray-500 hover:!text-[var(--primary)]'
+                    }`}
+                  >
+                    Démarrage
+                  </Link>
+                </nav>
+              </div>
+            )}
             {isWorkspaceActive && (
               <div className="flex items-center">
                 <div className="h-5 w-px bg-gray-200" />
@@ -405,6 +438,24 @@ function WorkspaceLayout() {
               ]}
             />
           </div>
+
+          {/* Navigation Links — onboarding (workspace pas actif) */}
+          {!isWorkspaceActive && (
+            <nav className="flex flex-col py-2">
+              <Link
+                to="/workspaces/$workspaceId/welcome"
+                params={{ workspaceId }}
+                onClick={closeMobileMenu}
+                className={`px-4 py-3 transition-colors ${
+                  currentPath.endsWith('/welcome')
+                    ? '!text-[var(--primary)] bg-purple-50'
+                    : '!text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                Démarrage
+              </Link>
+            </nav>
+          )}
 
           {/* Navigation Links */}
           {isWorkspaceActive && (
