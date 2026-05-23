@@ -11,13 +11,6 @@ import { createApp, validateConfig, type BridgeConfig } from "./app.js";
 import { assertSkipHmacAllowed } from "./hub-hmac.js";
 import { registerGscRoutes } from "./gsc/routes.js";
 import { readOauthConfigFromEnv, OauthConfigError } from "./gsc/index.js";
-import { registerFormsRoutes } from "./forms/index.js";
-import { registerPushRoutes } from "./push/routes.js";
-import {
-  configureWebPush,
-  readVapidConfigFromEnv,
-  PushConfigError,
-} from "./push/index.js";
 import { registerSettingsRoutes } from "./settings/index.js";
 import {
   readEncryptionKeyFromEnv,
@@ -121,86 +114,18 @@ try {
   }
 }
 
-// ─── Forms feature (B1) — optional ────────────────────────────────────
-//
-// On câble si BRIDGE_DATABASE_URL est présent (sinon pas de Prisma).
-// `getPrisma()` est partagé avec GSC : même singleton.
-try {
-  if (!process.env.BRIDGE_DATABASE_URL) {
-    throw new Error("BRIDGE_DATABASE_URL missing — Forms feature disabled");
-  }
-  const prisma = getPrisma();
+// ─── Forms feature (B1) — REMOVED 2026-05-23 ──────────────────────────────
+// Scope change : Robert a retiré le tracking de formulaires du périmètre
+// commercialisé. Les goals staminads natifs couvrent ce besoin. Code retiré
+// (cf chore/cleanup-veridian-scope). Migration 20260523000000_drop_forms_leads
+// DROP les tables FormSubmission / FormSchema / Lead / LeadSession (Site est
+// CONSERVÉE — utilisée par settings + provision-existing-tenant).
 
-  function requireAdminForForms(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): void {
-    const auth = req.header("authorization");
-    if (!auth?.startsWith("Bearer ")) {
-      res.status(401).json({ error: "missing_bearer" });
-      return;
-    }
-    const token = auth.slice("Bearer ".length).trim();
-    if (token !== cfg.veridianAdminApiKey) {
-      res.status(403).json({ error: "invalid_admin_key" });
-      return;
-    }
-    next();
-  }
-
-  registerFormsRoutes(app, {
-    prisma,
-    requireAdmin: requireAdminForForms,
-    staminadsUrl: cfg.staminadsUrl,
-  });
-  console.log("[bridge] Forms routes registered");
-} catch (err) {
-  console.warn(
-    `[bridge] Forms init failed (continuing without): ${(err as Error).message}`,
-  );
-}
-
-// ─── Push notifications (B2) — optional ──────────────────────────────────
-try {
-  if (!process.env.BRIDGE_DATABASE_URL) {
-    throw new PushConfigError(
-      "BRIDGE_DATABASE_URL missing — Push feature disabled",
-    );
-  }
-  const vapid = readVapidConfigFromEnv();
-  configureWebPush(vapid);
-  const prisma = getPrisma();
-
-  function requireAdminForPush(
-    req: Request,
-    res: Response,
-    next: NextFunction,
-  ): void {
-    const auth = req.header("authorization");
-    if (!auth?.startsWith("Bearer ")) {
-      res.status(401).json({ error: "missing_bearer" });
-      return;
-    }
-    const token = auth.slice("Bearer ".length).trim();
-    if (token !== cfg.veridianAdminApiKey) {
-      res.status(403).json({ error: "invalid_admin_key" });
-      return;
-    }
-    next();
-  }
-
-  registerPushRoutes(app, { prisma, requireAdmin: requireAdminForPush });
-  console.log("[bridge] Push routes registered");
-} catch (err) {
-  if (err instanceof PushConfigError) {
-    console.warn(`[bridge] Push disabled: ${err.message}`);
-  } else {
-    console.warn(
-      `[bridge] Push init failed (continuing without): ${(err as Error).message}`,
-    );
-  }
-}
+// ─── Push notifications (B2) — ARCHIVED 2026-05-23 ────────────────────────
+// Scope change : Web Push retiré du périmètre commercialisé. Code conservé
+// dans veridian-bridge/_archive/push/ pour réactivation future éventuelle.
+// Les tables PushSubscription/PushNotification restent en base (pas de drop),
+// cf. docs/ARCHIVED-FEATURES.md.
 
 // ─── Settings + credentials self-service (U8) — optional ────────────────────
 //

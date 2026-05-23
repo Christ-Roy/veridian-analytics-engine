@@ -1,7 +1,7 @@
 import { Sparkles, BarChart3, ShieldCheck, Megaphone, ArrowRight } from 'lucide-react';
-import { useAuth } from '../lib/useAuth';
-import { demoContactMailto } from '../lib/demo-config';
-import './theme.css';
+import { useAuth } from '../../lib/useAuth';
+import { demoContactMailto } from '../../lib/demo-config';
+import '../theme.css';
 
 /**
  * Demo-mode placeholder for the Veridian-flavored tabs.

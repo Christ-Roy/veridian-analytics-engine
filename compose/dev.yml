@@ -135,11 +135,7 @@ services:
       # passé pour tester la vraie signature si SKIP_HMAC=false.
       HUB_HMAC_SECRET: ${HUB_HMAC_SECRET:-dev-hmac-secret-not-for-prod-0000000000}
       SKIP_HMAC: ${SKIP_HMAC:-true}
-      # Push Notifications PWA (B2) : clés VAPID. En dev, valeurs vides
-      # tolérées (le code log un warn et /api/push/send échoue proprement).
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:contact@veridian.site}
+      # Push Notifications PWA (B2) — ARCHIVED 2026-05-23 (scope change Robert).
       # GSC integration (A4)
       BRIDGE_DATABASE_URL: postgresql://${BRIDGE_DB_USER:-bridge}:${BRIDGE_DB_PASSWORD:-bridge_pwd}@postgres-bridge:5432/${BRIDGE_DB_NAME:-veridian_bridge}
       BRIDGE_DB_HOST: postgres-bridge

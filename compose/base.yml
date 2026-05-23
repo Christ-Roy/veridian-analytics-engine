@@ -121,13 +121,10 @@ services:
       HUB_HMAC_SECRET: ${HUB_HMAC_SECRET:?HUB_HMAC_SECRET requis (32+ chars hex)}
       # Bypass HMAC : interdit en prod/staging (boot guard throw). dev.yml l'override.
       SKIP_HMAC: ${SKIP_HMAC:-false}
-      # ─── Push Notifications PWA (B2) ──────────────────────────────────────
-      # Clés VAPID Web Push. SANS elles, l'envoi de notifications échoue
-      # (subscriptions OK mais POST /api/push/send KO). Réutilise les clés
-      # legacy veridian-analytics pour ne PAS invalider les abonnements existants.
-      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:?VAPID_PUBLIC_KEY requis (Push B2)}
-      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:?VAPID_PRIVATE_KEY requis (Push B2)}
-      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:contact@veridian.site}
+      # ─── Push Notifications PWA (B2) — ARCHIVED 2026-05-23 ────────────────
+      # Scope change : VAPID retiré du périmètre. Code conservé dans
+      # veridian-bridge/_archive/push/. Re-définir VAPID_PUBLIC_KEY /
+      # VAPID_PRIVATE_KEY / VAPID_SUBJECT en cas de réactivation.
       # GSC integration (A4)
       BRIDGE_DATABASE_URL: postgresql://${BRIDGE_DB_USER:-bridge}:${BRIDGE_DB_PASSWORD:-bridge_pwd}@postgres-bridge:5432/${BRIDGE_DB_NAME:-veridian_bridge}
       BRIDGE_DB_HOST: postgres-bridge
