@@ -22,8 +22,8 @@ function WorkspacesPage() {
     >
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-sm">
         <img
-          src={isDemo ? '/veridian-logo.svg' : '/logo.svg'}
-          alt={isDemo ? 'Veridian Analytics' : 'Staminads'}
+          src="/veridian-logo.svg"
+          alt="Veridian Analytics"
           className="h-9 mx-auto mb-6"
         />
         <h2 className="text-center text-gray-600 mb-6">

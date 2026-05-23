@@ -164,8 +164,11 @@ function LiveView() {
       }))
     : []
 
-  // Calculate total live sessions
-  const totalSessions = mapData.reduce((sum, d) => sum + d.sessions, 0)
+  // Calculate total live sessions.
+  // BUG-06: `d.sessions` came through as a string from the API in some envs
+  // (ClickHouse JSON serialization of UInt64). String concat ("0" + "9" + "9"
+  // + "6"...) produced the garbage "099644222211 live now". Force Number().
+  const totalSessions = mapData.reduce((sum, d) => sum + Number(d.sessions || 0), 0)
 
   return (
     <div className="flex-1 p-6">

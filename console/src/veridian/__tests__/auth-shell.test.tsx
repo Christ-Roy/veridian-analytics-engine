@@ -4,13 +4,13 @@ import { AuthShell } from '../auth-shell';
 import { AuthContext, type AuthState } from '../../lib/AuthContext';
 
 /**
- * Tests Vitest pour AuthShell (ticket U9).
+ * Tests Vitest pour AuthShell.
  *
- * AuthShell est le chrome commun des pages d'auth. Il switche le logo
- * Veridian vs Staminads selon le flag runtime `isDemo` de `AuthContext`.
- * On vérifie que :
- *   - instance Veridian (isDemo=true)  → logo veridian-logo.svg + alt Veridian
- *   - instance Staminads (isDemo=false) → logo logo.svg + alt Staminads
+ * AuthShell est le chrome commun des pages d'auth. Depuis le fix
+ * upstream-branding-cleanup (2026-05-23, BUG-08/09), le branding est figé
+ * Veridian sur tous les déploiements — le flag `isDemo` ne pilote plus
+ * le logo. On vérifie donc que :
+ *   - le logo Veridian est rendu indépendamment de isDemo
  *   - le crédit photo Unsplash est toujours présent
  */
 
@@ -45,11 +45,11 @@ describe('AuthShell', () => {
     expect(logo).toHaveAttribute('alt', 'Veridian Analytics');
   });
 
-  it('renders the Staminads logo on the internal console (isDemo=false)', () => {
+  it('also renders the Veridian logo on non-demo instances (branding figé Veridian)', () => {
     renderWithAuth(false);
     const logo = screen.getByTestId('auth-logo');
-    expect(logo).toHaveAttribute('src', '/logo.svg');
-    expect(logo).toHaveAttribute('alt', 'Staminads');
+    expect(logo).toHaveAttribute('src', '/veridian-logo.svg');
+    expect(logo).toHaveAttribute('alt', 'Veridian Analytics');
   });
 
   it('renders its children', () => {

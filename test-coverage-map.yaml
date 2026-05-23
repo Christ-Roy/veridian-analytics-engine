@@ -521,6 +521,16 @@
     couvre la logique unitaire (mint JWT, 403/503).
 
 - sources:
+    - api/src/demo/robots.controller.ts
+  covered_by:
+    - api/src/demo/robots.controller.spec.ts
+  reason: |
+    Dynamic robots.txt (BUG-11). Controller trivial — un spec unitaire
+    valide les deux branches (IS_DEMO=true → policy démo, IS_DEMO unset →
+    Disallow: / pour les déploiements tenant). Pas d'e2e nécessaire :
+    pas de dépendance DB/ClickHouse.
+
+- sources:
     - api/src/health/health.controller.ts
   covered_by:
     - api/src/health/health.controller.spec.ts

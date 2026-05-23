@@ -352,7 +352,7 @@ function InviteAcceptPage() {
       }}
     >
       <div className="bg-white/95 backdrop-blur-sm p-8 rounded-lg shadow-xl w-full max-w-sm">
-        <img src="/logo.svg" alt="Staminads" className="h-8 mx-auto mb-8" />
+        <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-8 mx-auto mb-8" />
         {renderContent()}
       </div>
 
