@@ -23,6 +23,9 @@ import { FormsTabStub } from './dashboard-tabs/forms-tab';
 import { GscTabStub } from './dashboard-tabs/gsc-tab';
 import { PushTabStub } from './dashboard-tabs/push-tab';
 import { CallsTab } from './dashboard-tabs/calls-tab';
+import { useContext } from 'react';
+import { AuthContext } from '../../lib/AuthContext';
+import { VeridianDemoComingSoon } from '../demo-coming-soon';
 import '../theme.css';
 
 /**
@@ -79,11 +82,22 @@ export function VeridianDashboardPage({
   impersonating = false,
   impersonatedTenantName,
 }: VeridianDashboardPageProps) {
+  // Read context directly so the component works even when rendered without
+  // an AuthContext.Provider (legacy unit tests do that). useAuth() throws.
+  const authCtx = useContext(AuthContext);
+  const isDemo = authCtx?.isDemo ?? false;
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
   const [activeTab, setActiveTab] = useState<ActiveTab>('overview');
   const abortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(() => {
+    // Public demo: the veridian-bridge service that backs /api/admin/tenant/*
+    // is intentionally NOT deployed on the demo compose (see compose/demo.yml).
+    // The render path short-circuits to <VeridianDemoComingSoon /> below, but
+    // we also skip the fetch here as a defense-in-depth so the AbortController
+    // dance never fires in demo (would log a noisy network error in the
+    // console of every prospect).
+    if (isDemo) return;
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -96,12 +110,24 @@ export function VeridianDashboardPage({
         if (ctrl.signal.aborted) return;
         setState({ kind: 'error', error: err });
       });
-  }, [workspaceId]);
+  }, [workspaceId, isDemo]);
 
   useEffect(() => {
     load();
     return () => abortRef.current?.abort();
   }, [load]);
+
+  // Public demo: render a clean preview placeholder instead of "ERREUR 404
+  // NOT FOUND" coming from the unavailable bridge admin endpoints (BUG-02).
+  // Placed AFTER all hooks so the hook order is stable across renders.
+  if (isDemo) {
+    return (
+      <VeridianDemoComingSoon
+        tenantName={tenantName}
+        tenantDomain={tenantDomain}
+      />
+    );
+  }
 
   return (
     <div

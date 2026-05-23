@@ -37,11 +37,12 @@ function AccountPage() {
   const { section } = Route.useSearch()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { logout } = useAuth()
+  const { logout, isDemo, publicConfig } = useAuth()
 
   const { data: user } = useQuery({
     queryKey: ['user'],
     queryFn: api.auth.me,
+    enabled: !isDemo,
   })
 
   // Subscriptions query
@@ -450,6 +451,58 @@ function AccountPage() {
       )}
     </div>
   )
+
+  // Public demo: the account editor (profile, password, email, notifications)
+  // exposes write surfaces tied to the anonymous demo session that have no
+  // meaning for a prospect. Render a clean "not available in demo" panel
+  // instead — fixes BUG-12.
+  if (isDemo) {
+    const contactEmail = publicConfig?.contact_email ?? 'robert.brunon@veridian.site'
+    const subject = encodeURIComponent('Demande Veridian Analytics')
+    const body = encodeURIComponent(
+      "Bonjour,\n\nJ'ai vu la démo publique de Veridian Analytics et je souhaite " +
+        'en savoir plus / ouvrir un compte.\n\nMerci.',
+    )
+    const mailto = `mailto:${contactEmail}?subject=${subject}&body=${body}`
+    return (
+      <div className="flex-1 p-6" data-testid="account-demo-blocked">
+        <h1 className="hidden md:block text-2xl font-light text-gray-800 mb-6">Mon compte</h1>
+        <div className="bg-white p-8 rounded-lg shadow-sm max-w-2xl border border-gray-200">
+          <h2 className="text-xl font-semibold text-gray-800 mb-3">
+            Compte non disponible en démo
+          </h2>
+          <p className="text-gray-600 mb-4">
+            Vous explorez actuellement la démo publique de Veridian Analytics.
+            La gestion de compte (profil, mot de passe, email, notifications)
+            n'est disponible que sur un espace client réel.
+          </p>
+          <p className="text-gray-600 mb-6">
+            Pour ouvrir un compte gratuit en quelques minutes, écrivez-nous —
+            aucune carte bancaire n'est demandée.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <a
+              href={mailto}
+              className="inline-flex items-center px-4 py-2 rounded-md bg-[var(--primary)] text-white text-sm font-semibold hover:opacity-90 transition-opacity"
+              data-demo-cta="account-page"
+            >
+              Demander un compte gratuit →
+            </a>
+            <Button
+              onClick={() =>
+                navigate({
+                  to: '/workspaces/$workspaceId',
+                  params: { workspaceId },
+                })
+              }
+            >
+              Retour au dashboard
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex-1 p-6">
