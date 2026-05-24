@@ -1,22 +1,21 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { App, Form, Input, Button } from 'antd'
+import { shouldBlockSetupAccess } from '../veridian/setup-guard'
 
 export const Route = createFileRoute('/setup')({
+  // SECU P0 — fail-CLOSED : la page /setup est le bootstrap admin.
+  // Si setupCompleted=true (ou si on n'arrive pas à le vérifier), on
+  // redirect vers /login pour ne pas exposer le formulaire publiquement.
+  // Cf. `veridian/setup-guard.ts` pour la logique pure + ses tests.
+  //
+  // Bug d'origine (BUG-01, audit 2026-05-23) : la version précédente avait
+  // un try/catch qui swallow `throw redirect()` parce que les conditions du
+  // catch ne reconnaissaient pas l'objet redirect de TanStack Router → le
+  // form de bootstrap admin s'affichait publiquement même quand l'admin
+  // était déjà créé en prod.
   beforeLoad: async () => {
-    try {
-      const res = await fetch('/api/setup.status')
-      if (res.ok) {
-        const { setupCompleted } = await res.json()
-        if (setupCompleted) {
-          throw redirect({ to: '/login' })
-        }
-      }
-    } catch (e) {
-      // If we can't check status, allow access to setup page
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (e instanceof Response || (e as any)?.to === '/login') {
-        throw e
-      }
+    if (await shouldBlockSetupAccess()) {
+      throw redirect({ to: '/login' })
     }
   },
   component: SetupPage,
