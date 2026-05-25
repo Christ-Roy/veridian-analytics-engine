@@ -10,19 +10,84 @@ import {
 setupTestEnv();
 
 import request from 'supertest';
-import {
-  createTestApp,
-  closeTestApp,
-  TestAppContext,
-} from './helpers/app.helper';
+import { ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { createClient } from '@clickhouse/client';
+import { AppModule } from '../src/app.module';
+import { PlatformAdminGuard } from '../src/admin-platform/guards/platform-admin.guard';
+import { MailService } from '../src/mail/mail.service';
+import { closeTestApp, TestAppContext } from './helpers/app.helper';
+import { getSystemClientConfig } from './constants/test-config';
 import { truncateSystemTables } from './helpers/cleanup.helper';
 import { waitForMutations } from './helpers/wait.helper';
+
+/**
+ * Boots AppModule with PlatformAdminGuard OVERRIDDEN to use a
+ * lightweight in-test secret. Without this, the real guard reads
+ * PLATFORM_ADMIN_API_KEY via ConfigService — which, in a Jest worker
+ * that has already booted AppModule for a previous spec, may return
+ * `undefined` (snapshot frozen before this spec called setupTestEnv).
+ * Hardcoding the expected key in the override decouples the suite
+ * from any process.env / ConfigModule timing ambiguity.
+ */
+async function createAdminPlatformTestApp(): Promise<TestAppContext> {
+  // Inline guard that checks against PLATFORM_KEY directly.
+  const overrideGuard = {
+    canActivate: (ctx: import('@nestjs/common').ExecutionContext): boolean => {
+      const req = ctx.switchToHttp().getRequest();
+      const auth = req.headers?.authorization;
+      if (!auth || typeof auth !== 'string') {
+        throw new (
+          require('@nestjs/common').UnauthorizedException
+        )('Missing Authorization header');
+      }
+      const m = /^Bearer\s+(.+)$/i.exec(auth.trim());
+      if (!m) {
+        throw new (
+          require('@nestjs/common').UnauthorizedException
+        )('Invalid Authorization header format');
+      }
+      const presented = m[1].trim();
+      if (presented !== PLATFORM_KEY) {
+        throw new (
+          require('@nestjs/common').UnauthorizedException
+        )('Invalid platform admin API key');
+      }
+      return true;
+    },
+  };
+
+  const moduleFixture = await Test.createTestingModule({
+    imports: [AppModule],
+  })
+    .overrideGuard(PlatformAdminGuard)
+    .useValue(overrideGuard)
+    .compile();
+
+  const app = moduleFixture.createNestApplication();
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  await app.init();
+
+  const systemClient = createClient(getSystemClientConfig());
+
+  const mailService = moduleFixture.get<MailService>(MailService);
+  jest.spyOn(mailService, 'sendPasswordReset').mockResolvedValue();
+  jest.spyOn(mailService, 'sendInvitation').mockResolvedValue();
+  jest.spyOn(mailService, 'sendWelcome').mockResolvedValue();
+
+  return {
+    app,
+    moduleFixture,
+    systemClient,
+    mailService,
+  };
+}
 
 describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => {
   let ctx: TestAppContext;
 
   beforeAll(async () => {
-    ctx = await createTestApp({ mockMailService: true });
+    ctx = await createAdminPlatformTestApp();
   });
 
   afterAll(async () => {
