@@ -7,6 +7,8 @@
 #   - 16-security (headers, CORS, injection, secrets leak, HMAC timing, rate-limit)
 #   - 17-multi-tenant-isolation (cross-tenant rejection)
 #   - 18-api-contract (shape stable, version)
+#   - 21-anti-regression-2026-05-25 (setup-locked + helmet headers + FR
+#     anti-régression — sprint commercial 2026-05-25)
 #
 # Tourne UNIQUEMENT contre staging (jamais prod — éviter alertes CrowdSec).
 #
@@ -67,6 +69,7 @@ jobs:
             16-security/ \
             17-multi-tenant-isolation/ \
             18-api-contract/ \
+            21-anti-regression-2026-05-25/ \
             --project=chromium-desktop
 
       - name: Upload security report
