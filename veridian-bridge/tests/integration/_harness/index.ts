@@ -75,6 +75,7 @@ import { registerGscRoutes } from "../../../src/gsc/routes.js";
 // registerPushRoutes — ARCHIVED 2026-05-23 (veridian-bridge/_archive/push/)
 import { registerSettingsRoutes } from "../../../src/settings/routes.js";
 import { registerVoipRoutes } from "../../../src/voip/routes.js";
+import { registerPhoneNumbersRoutes } from "../../../src/voip/phone-numbers.routes.js";
 import { setPrismaClientForTests } from "../../../src/db/prisma.js";
 import type { Request, Response, NextFunction } from "express";
 import { PrismaTenantStore, ensureOwnerTable } from "./prisma-tenant-store.js";
@@ -328,6 +329,11 @@ export async function bootBridgeWithRealDB(
     requireAdmin,
     adminApiKey: TEST_ADMIN_KEY,
     encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
+  registerPhoneNumbersRoutes(app, {
+    prisma,
+    requireAdmin,
   });
 
   // 7. Listen sur port éphémère.

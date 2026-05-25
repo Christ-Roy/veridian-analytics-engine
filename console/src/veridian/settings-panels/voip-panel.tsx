@@ -2,10 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Hash,
   Loader2,
+  Pencil,
   Phone,
+  Plus,
   RefreshCw,
   Trash2,
+  X,
 } from 'lucide-react';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
@@ -17,13 +23,44 @@ import {
   testCredential,
   deleteCredential,
   fetchCalls,
+  fetchPhoneNumbers,
+  createPhoneNumber,
+  updatePhoneNumber,
+  deletePhoneNumber,
   BridgeApiError,
   type TenantSettingsResponse,
   type CredentialKind,
   type CredentialView,
   type CallsResponse,
+  type PhoneSource,
+  type TrackedPhoneNumber,
 } from '../api';
 import '../theme.css';
+
+/**
+ * Labels FR (vouvoiement) pour les 7 sources de trafic. La liste autorisée
+ * est définie par l'enum Prisma `PhoneNumberSource` côté bridge — on garde
+ * un fallback `direct` si une nouvelle valeur arrive non-mappée.
+ */
+const SOURCE_LABELS: Record<PhoneSource, string> = {
+  seo: 'SEO (référencement naturel)',
+  ads: 'Ads (Google / Bing / Meta)',
+  direct: 'Direct (saisi sur le site)',
+  email: 'Email / Newsletter',
+  social: 'Réseaux sociaux',
+  print: 'Print (flyers / cartes de visite)',
+  other: 'Autre',
+};
+
+const SOURCE_BADGE_TONE: Record<PhoneSource, string> = {
+  seo: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
+  ads: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
+  direct: 'border-sky-400/40 bg-sky-400/10 text-sky-300',
+  email: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
+  social: 'border-pink-400/40 bg-pink-400/10 text-pink-300',
+  print: 'border-orange-400/40 bg-orange-400/10 text-orange-300',
+  other: 'border-zinc-400/40 bg-zinc-400/10 text-zinc-300',
+};
 
 /**
  * VoIPSettingsPanel — onglet « Téléphonie / VoIP » dans Settings native.
@@ -199,11 +236,422 @@ function VoipContent({
         </div>
       </Section>
 
+      {/* Sous-section "Numéros trackés" — 1 numéro = 1 source de trafic */}
+      <TrackedNumbersSection workspaceId={workspaceId} />
+
       {/* Mini-récap appels — visible seulement si au moins un cred OK */}
       {hasConnectedCred && (
         <CallsRecap workspaceId={workspaceId} />
       )}
     </>
+  );
+}
+
+// ─── Numéros trackés (phone source dimension, 2026-05-25) ───────────────
+//
+// 1 numéro = 1 source de trafic. Le bridge enrichit chaque event `phone_call`
+// poussé vers staminads avec `properties.source` (SEO / Ads / direct / email
+// / social / print / other) après lookup `(tenantId, toNumber)`. Les appels
+// apparaissent dans Live/Explore/Goals staminads natifs, sans page custom.
+
+function TrackedNumbersSection({ workspaceId }: { workspaceId: string }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [state, setState] = useState<
+    | { kind: 'loading' }
+    | { kind: 'error'; error: Error }
+    | { kind: 'ready'; rows: TrackedPhoneNumber[]; allowedSources: PhoneSource[] }
+  >({ kind: 'loading' });
+  const [editing, setEditing] = useState<{
+    mode: 'create' | 'edit';
+    row?: TrackedPhoneNumber;
+  } | null>(null);
+
+  const load = useCallback(() => {
+    setState({ kind: 'loading' });
+    fetchPhoneNumbers(workspaceId)
+      .then((res) =>
+        setState({
+          kind: 'ready',
+          rows: res.phoneNumbers,
+          allowedSources: res.allowedSources,
+        }),
+      )
+      .catch((err: Error) => setState({ kind: 'error', error: err }));
+  }, [workspaceId]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  return (
+    <Card
+      className="veridian-fade-in-delay-1 border-border/60 bg-card/80"
+      data-testid="settings-section-phone-numbers"
+    >
+      <CardContent className="space-y-4 p-6 sm:p-7">
+        <button
+          type="button"
+          className="flex w-full items-start gap-3 text-left"
+          onClick={() => setCollapsed((c) => !c)}
+          data-testid="phone-numbers-toggle"
+        >
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
+            <Hash className="h-5 w-5" />
+          </div>
+          <div className="flex-1 space-y-0.5">
+            <h2 className="text-lg font-semibold tracking-tight">
+              Numéros trackés
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Associez chaque numéro de téléphone affiché sur vos supports à
+              sa source. Par exemple : votre numéro SEO sur le site web →
+              «&nbsp;SEO&nbsp;», votre numéro Google Ads → «&nbsp;Ads&nbsp;».
+              Chaque appel sera automatiquement attribué à sa source dans les
+              goals.
+            </p>
+          </div>
+          <div className="pt-1 text-muted-foreground">
+            {collapsed ? (
+              <ChevronRight className="h-5 w-5" />
+            ) : (
+              <ChevronDown className="h-5 w-5" />
+            )}
+          </div>
+        </button>
+
+        {!collapsed && (
+          <div className="space-y-4">
+            {state.kind === 'loading' && (
+              <div className="h-24 animate-pulse rounded-lg border border-border/50 bg-card/40" />
+            )}
+            {state.kind === 'error' && (
+              <PanelError error={state.error} onRetry={load} />
+            )}
+            {state.kind === 'ready' && (
+              <>
+                {state.rows.length === 0 ? (
+                  <EmptyTrackedNumbers
+                    onAdd={() => setEditing({ mode: 'create' })}
+                  />
+                ) : (
+                  <TrackedNumbersTable
+                    rows={state.rows}
+                    onEdit={(row) => setEditing({ mode: 'edit', row })}
+                    onDelete={async (row) => {
+                      try {
+                        await deletePhoneNumber(workspaceId, row.id);
+                        load();
+                      } catch {
+                        /* fail-soft : on garde la row, l'erreur s'affiche au prochain reload */
+                      }
+                    }}
+                  />
+                )}
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => setEditing({ mode: 'create' })}
+                    data-testid="phone-numbers-add-btn"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Ajouter un numéro
+                  </Button>
+                </div>
+              </>
+            )}
+
+            {editing && state.kind === 'ready' && (
+              <PhoneNumberModal
+                workspaceId={workspaceId}
+                mode={editing.mode}
+                row={editing.row}
+                allowedSources={state.allowedSources}
+                onClose={() => setEditing(null)}
+                onSaved={() => {
+                  setEditing(null);
+                  load();
+                }}
+              />
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function EmptyTrackedNumbers({ onAdd }: { onAdd: () => void }) {
+  return (
+    <div
+      className="rounded-lg border border-dashed border-border/60 bg-background/20 p-6 text-center"
+      data-testid="phone-numbers-empty"
+    >
+      <p className="text-sm text-muted-foreground">
+        Aucun numéro tracké pour le moment. Tant qu'un numéro n'est pas
+        associé à une source, ses appels seront comptabilisés comme
+        «&nbsp;direct&nbsp;».
+      </p>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="mt-3"
+        onClick={onAdd}
+      >
+        <Plus className="h-4 w-4" />
+        Ajouter votre premier numéro
+      </Button>
+    </div>
+  );
+}
+
+function TrackedNumbersTable({
+  rows,
+  onEdit,
+  onDelete,
+}: {
+  rows: TrackedPhoneNumber[];
+  onEdit: (row: TrackedPhoneNumber) => void;
+  onDelete: (row: TrackedPhoneNumber) => void;
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded-lg border border-border/50"
+      data-testid="phone-numbers-table"
+    >
+      <table className="w-full text-sm">
+        <thead className="bg-background/40 text-[11px] uppercase tracking-wider text-muted-foreground/70">
+          <tr>
+            <th className="px-4 py-2 text-left">Numéro</th>
+            <th className="px-4 py-2 text-left">Source</th>
+            <th className="px-4 py-2 text-left">Libellé</th>
+            <th className="px-4 py-2 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.id}
+              className="border-t border-border/40"
+              data-testid={`phone-numbers-row-${row.id}`}
+            >
+              <td className="px-4 py-2 font-mono text-sm tabular-nums">
+                {row.e164}
+              </td>
+              <td className="px-4 py-2">
+                <span
+                  className={cn(
+                    'inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium',
+                    SOURCE_BADGE_TONE[row.source] ??
+                      SOURCE_BADGE_TONE.other,
+                  )}
+                >
+                  {SOURCE_LABELS[row.source] ?? row.source}
+                </span>
+              </td>
+              <td className="px-4 py-2 text-muted-foreground">
+                {row.label ?? '—'}
+              </td>
+              <td className="px-4 py-2 text-right">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onEdit(row)}
+                  aria-label="Modifier"
+                  data-testid={`phone-numbers-edit-${row.id}`}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onDelete(row)}
+                  aria-label="Supprimer"
+                  data-testid={`phone-numbers-delete-${row.id}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PhoneNumberModal({
+  workspaceId,
+  mode,
+  row,
+  allowedSources,
+  onClose,
+  onSaved,
+}: {
+  workspaceId: string;
+  mode: 'create' | 'edit';
+  row?: TrackedPhoneNumber;
+  allowedSources: PhoneSource[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [e164, setE164] = useState(row?.e164 ?? '');
+  const [source, setSource] = useState<PhoneSource>(row?.source ?? 'seo');
+  const [label, setLabel] = useState(row?.label ?? '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSaving(true);
+      setError(null);
+      try {
+        if (mode === 'create') {
+          await createPhoneNumber(workspaceId, {
+            e164: e164.trim(),
+            source,
+            label: label.trim() || null,
+          });
+        } else if (row) {
+          await updatePhoneNumber(workspaceId, row.id, {
+            source,
+            label: label.trim() || null,
+          });
+        }
+        onSaved();
+      } catch (err) {
+        if (err instanceof BridgeApiError) {
+          if (err.message === 'invalid_e164') {
+            setError(
+              'Format de numéro invalide. Saisissez un numéro E.164, par exemple +33177123456.',
+            );
+          } else if (err.message === 'already_exists') {
+            setError('Ce numéro est déjà enregistré pour ce tenant.');
+          } else {
+            setError(err.message);
+          }
+        } else {
+          setError('Enregistrement impossible.');
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [mode, row, workspaceId, e164, source, label, onSaved],
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      data-testid="phone-numbers-modal"
+      role="dialog"
+      aria-modal="true"
+    >
+      <Card className="w-full max-w-md border-border/70 bg-card shadow-xl">
+        <CardContent className="space-y-4 p-6">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="text-lg font-semibold">
+              {mode === 'create'
+                ? 'Ajouter un numéro'
+                : 'Modifier le numéro'}
+            </h3>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              aria-label="Fermer"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+
+          <form onSubmit={submit} className="space-y-4">
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
+                Numéro (E.164)
+              </label>
+              <input
+                type="tel"
+                value={e164}
+                onChange={(e) => setE164(e.target.value)}
+                placeholder="+33177123456"
+                disabled={mode === 'edit'}
+                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 font-mono text-sm disabled:opacity-60"
+                data-testid="phone-numbers-field-e164"
+                required
+              />
+              {mode === 'edit' && (
+                <p className="mt-1 text-[11px] text-muted-foreground/70">
+                  Le numéro ne peut pas être modifié. Pour le changer,
+                  supprimez puis recréez l'entrée.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
+                Source
+              </label>
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value as PhoneSource)}
+                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
+                data-testid="phone-numbers-field-source"
+              >
+                {allowedSources.map((s) => (
+                  <option key={s} value={s}>
+                    {SOURCE_LABELS[s] ?? s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
+                Libellé (optionnel)
+              </label>
+              <input
+                type="text"
+                value={label}
+                onChange={(e) => setLabel(e.target.value)}
+                placeholder="Ligne SEO, campagne été…"
+                maxLength={120}
+                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
+                data-testid="phone-numbers-field-label"
+              />
+            </div>
+
+            {error && <InlineError message={error} />}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onClose}
+                disabled={saving}
+              >
+                Annuler
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={saving || (mode === 'create' && !e164.trim())}
+                data-testid="phone-numbers-save-btn"
+              >
+                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+                {mode === 'create' ? 'Ajouter' : 'Enregistrer'}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
