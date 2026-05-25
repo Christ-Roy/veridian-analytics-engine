@@ -7,7 +7,6 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { join } from 'path';
 import { validate } from './config/env.validation';
-import { AdminPlatformModule } from './admin-platform/admin-platform.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AssistantModule } from './assistant/assistant.module';
@@ -30,6 +29,19 @@ import { ToolsModule } from './tools/tools.module';
 import { UsersModule } from './users/users.module';
 import { WorkspacesModule } from './workspaces/workspaces.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+// IMPORTANT — AdminPlatformModule MUST stay LAST in this ES-module import
+// block. It imports several domain modules (Users/Workspaces/ApiKeys/Mail)
+// which themselves participate in forwardRef cycles with MembersModule /
+// AuthModule / SmtpModule. If `admin-platform.module.ts` is evaluated
+// BEFORE the other domain modules' files have finished loading,
+// `MembersModule.imports[0] = UsersModule` (non-forwardRef, see
+// members.module.ts) resolves to `undefined` due to ES-module TDZ →
+// Nest scanner crashes with "The module at index [0] … is undefined"
+// → all 444 e2e suites fall over. Keeping AdminPlatformModule last in
+// the import order forces the standard module graph to finish loading
+// first, then this orchestrator slots in cleanly. See CI run
+// 26391278819 for the original failure that proved this is load-bearing.
+import { AdminPlatformModule } from './admin-platform/admin-platform.module';
 
 @Module({
   imports: [
