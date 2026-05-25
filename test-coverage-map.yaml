@@ -136,11 +136,16 @@
     - veridian-bridge/src/index.ts
   covered_by:
     - veridian-bridge/tests/config.test.ts
+    - veridian-bridge/tests/integration/voip/phone-numbers.integration.test.ts
   reason: |
-    index.ts = entrypoint qui lit process.env et appelle createApp.
-    Toute la logique est dans app.ts (testée). config.test valide que
-    validateConfig() rejette bien les configs invalides — ce qui est
-    exactement ce que index.ts fait au boot.
+    index.ts = entrypoint qui lit process.env et appelle createApp + wire
+    les registerXxxRoutes (gsc/voip/settings/phone-numbers).
+    Toute la logique applicative est dans app.ts (testée) et les modules
+    dédiés. config.test valide que validateConfig() rejette bien les
+    configs invalides — ce qui est exactement ce que index.ts fait au boot.
+    Le wiring `registerPhoneNumbersRoutes` est couvert end-to-end par
+    l'integration test phone-numbers (HTTP réel via _harness/index.ts qui
+    reproduit le wiring de src/index.ts).
 
 # ─── Migration D2 (provision-existing-tenant + scripts de migration) ──────
 
@@ -971,12 +976,15 @@
     - veridian-bridge/src/voip/routes.ts
     - veridian-bridge/src/voip/providers/ovh.ts
     - veridian-bridge/src/voip/providers/telnyx.ts
+    - veridian-bridge/src/voip/phone-numbers.ts
+    - veridian-bridge/src/voip/phone-numbers.routes.ts
   covered_by:
     - veridian-bridge/tests/voip/match.test.ts
     - veridian-bridge/tests/voip/providers-ovh.test.ts
     - veridian-bridge/tests/voip/providers-telnyx.test.ts
   integration_covered_by:
     - veridian-bridge/tests/integration/voip/sync.integration.test.ts
+    - veridian-bridge/tests/integration/voip/phone-numbers.integration.test.ts
   reason: |
     Ingestion des logs d'appels VoIP (CDR) → table SipCall. Port de la
     logique `sipCall` du legacy veridian-analytics.

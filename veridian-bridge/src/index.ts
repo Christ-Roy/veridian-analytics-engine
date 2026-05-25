@@ -16,7 +16,10 @@ import {
   readEncryptionKeyFromEnv,
   CredentialCryptoError,
 } from "./credentials/index.js";
-import { registerVoipRoutes } from "./voip/index.js";
+import {
+  registerVoipRoutes,
+  registerPhoneNumbersRoutes,
+} from "./voip/index.js";
 import { getPrisma } from "./db/prisma.js";
 import { registerProvisionExistingRoutes } from "./admin/provision-existing-tenant.js";
 import type { Request, Response, NextFunction } from "express";
@@ -330,7 +333,11 @@ try {
     cronAllowedIps:
       voipCronAllowedIps.length > 0 ? voipCronAllowedIps : undefined,
   });
-  console.log("[bridge] VoIP routes registered");
+  registerPhoneNumbersRoutes(app, {
+    prisma,
+    requireAdmin: requireAdminForVoip,
+  });
+  console.log("[bridge] VoIP routes registered (incl. phone-numbers CRUD)");
 } catch (err) {
   if (err instanceof CredentialCryptoError) {
     console.warn(`[bridge] VoIP disabled: ${err.message}`);

@@ -45,3 +45,17 @@ export {
 export { listCalls, type CallRow, type CallsSummary } from "./query.js";
 
 export { registerVoipRoutes, type VoipRoutesDeps } from "./routes.js";
+
+export {
+  PHONE_NUMBER_SOURCES,
+  isPhoneSource,
+  toE164,
+  lookupTrackedNumbers,
+  type PhoneSource,
+  type TrackedNumberLookup,
+} from "./phone-numbers.js";
+
+export {
+  registerPhoneNumbersRoutes,
+  type PhoneNumbersRoutesDeps,
+} from "./phone-numbers.routes.js";

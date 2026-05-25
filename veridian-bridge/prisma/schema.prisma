@@ -58,6 +58,7 @@ model Tenant {
   credentials       TenantCredential[]
   settings          TenantSettings?
   sipCalls          SipCall[]
+  phoneNumbers      TenantPhoneNumber[]
 
   @@index([status])
   @@index([hubTenantId])
@@ -286,6 +287,48 @@ model PushNotification {
 //
 // `visitorId` : matché si l'appel provient d'un clic `tel:` tracké par le
 // tracker Veridian (relie l'appel téléphonique à la session web).
+
+// ─── TenantPhoneNumber (phone source dimension, 2026-05-25) ────────────────
+//
+// Mapping `numéro de téléphone → source de trafic` pour un tenant. Permet
+// d'enrichir les events `phone_call` poussés vers staminads avec la dimension
+// `properties.source` (seo / ads / direct / email / social / print / other).
+//
+// Vision Robert 2026-05-25 : 1 numéro par source — chaque support affiche
+// son propre numéro, le call log remonté du provider VoIP est mappé au numéro
+// appelé (`toNumber`), donc à la source. Les appels apparaissent
+// automatiquement dans Live/Explore/Goals staminads (filtre / split par
+// `source`) sans aucune page custom côté UI.
+//
+// Lookup côté sync : on cherche `(tenantId, e164 = toNumber)` après
+// normalisation E.164. Pas trouvé → `properties.source = 'direct'` (default
+// safe : un appel sur un numéro non trackcé reste comptabilisé, simplement
+// sans attribution fine).
+
+model TenantPhoneNumber {
+  id        String            @id @default(cuid())
+  tenantId  String
+  e164      String            // numéro E.164 normalisé, ex `+33177xxxxxxx`
+  source    PhoneNumberSource @default(direct)
+  label     String?           // libellé optionnel ("ligne fixe SEO")
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  tenant    Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, e164])
+  @@index([tenantId])
+}
+
+enum PhoneNumberSource {
+  seo
+  ads
+  direct
+  email
+  social
+  print
+  other
+}
 
 model SipCall {
   id            String   @id @default(cuid())
