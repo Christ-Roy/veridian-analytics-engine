@@ -1,11 +1,13 @@
 // Set env vars BEFORE any imports so ConfigModule picks them up.
-import { setupTestEnv } from './constants/test-config';
+// `setupTestEnv()` now also exports `PLATFORM_ADMIN_API_KEY` into
+// process.env (see test-config.ts) — needed because ConfigModule
+// snapshots env at compile time and previous suites may have already
+// booted AppModule before this file runs.
+import {
+  setupTestEnv,
+  PLATFORM_ADMIN_API_KEY as PLATFORM_KEY,
+} from './constants/test-config';
 setupTestEnv();
-
-// Inject the platform admin key BEFORE AppModule is imported, because
-// the guard reads it from ConfigService at request time but the module
-// is instantiated with whatever env is present at boot.
-process.env.PLATFORM_ADMIN_API_KEY = 'test-platform-admin-key-do-not-use';
 
 import request from 'supertest';
 import {
@@ -15,8 +17,6 @@ import {
 } from './helpers/app.helper';
 import { truncateSystemTables } from './helpers/cleanup.helper';
 import { waitForMutations } from './helpers/wait.helper';
-
-const PLATFORM_KEY = 'test-platform-admin-key-do-not-use';
 
 describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => {
   let ctx: TestAppContext;

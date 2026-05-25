@@ -23,6 +23,14 @@ export const ENCRYPTION_KEY = 'test-encryption-key-32-chars-ok!';
 // App constants
 export const APP_URL = 'http://localhost:5173';
 
+// Platform admin M2M shared secret (used by /api/admin/platform/* guard).
+// Set globally so the value is present BEFORE the first AppModule is
+// compiled — ConfigModule snapshots process.env at compile time, and
+// once a previous test file has booted AppModule, late writes to
+// process.env in another spec file are ignored. Hardcoding here keeps
+// the admin-platform e2e suite hermetic regardless of file load order.
+export const PLATFORM_ADMIN_API_KEY = 'test-platform-admin-key-do-not-use';
+
 // Pre-hashed password for 'testpass123' - avoids async hashing in tests
 export const TEST_PASSWORD = 'testpass123';
 export const TEST_PASSWORD_HASH =
@@ -51,6 +59,7 @@ export function setupTestEnv(options: { corsOrigins?: string[] } = {}): void {
   process.env.ENCRYPTION_KEY = ENCRYPTION_KEY;
   process.env.APP_URL = APP_URL;
   process.env.SMTP_HOST = '';
+  process.env.PLATFORM_ADMIN_API_KEY = PLATFORM_ADMIN_API_KEY;
 
   if (options.corsOrigins) {
     process.env.CORS_ALLOWED_ORIGINS = options.corsOrigins.join(',');
