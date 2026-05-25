@@ -11,7 +11,7 @@ export type ComparisonMode = 'previous_period' | 'previous_year' | 'none'
 export interface ColumnConfig {
   /** Metric field name (e.g., 'sessions', 'goals') */
   key: string
-  /** Column header label (e.g., 'Sessions', 'Count') */
+  /** Column header label (e.g., 'Visites uniques', 'Count') */
   label: string
   /** Value formatting type */
   format: 'number' | 'duration' | 'currency'
@@ -144,7 +144,7 @@ export interface KpiTotals {
 export const METRICS: MetricConfig[] = [
   {
     key: 'sessions',
-    label: 'Sessions',
+    label: 'Visites uniques',
     format: 'number',
     color: '#7763f1',
     previousColor: '#9ca3af',
@@ -155,7 +155,7 @@ export const METRICS: MetricConfig[] = [
     format: 'duration',
     color: '#10b981',
     previousColor: '#9ca3af',
-    tooltip: 'Le TimeScore correspond à la durée médiane des sessions',
+    tooltip: 'Le TimeScore correspond à la durée médiane des visites',
   },
   {
     key: 'bounce_rate',

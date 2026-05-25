@@ -96,7 +96,7 @@ export function ExploreSummary({
   const kpiItems = [
     <Statistic
       key="sessions"
-      title="Sessions"
+      title="Visites uniques"
       value={formatNumber(totals.sessions)}
       styles={statisticStyles}
       suffix={

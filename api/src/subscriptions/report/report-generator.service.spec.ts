@@ -232,7 +232,7 @@ describe('ReportGeneratorService', () => {
       const reportData = await service.generate(mockSubscription);
       const html = service.renderEmail(reportData, mockSubscription);
 
-      expect(html).toContain('Sessions');
+      expect(html).toContain('Visites uniques');
     });
 
     it('should include dimension tables', async () => {
@@ -314,7 +314,7 @@ describe('ReportGeneratorService', () => {
         metrics: [
           {
             key: 'sessions',
-            label: 'Sessions',
+            label: 'Visites uniques',
             current: 164.5,
             previous: 150,
             changePercent: 9.7,

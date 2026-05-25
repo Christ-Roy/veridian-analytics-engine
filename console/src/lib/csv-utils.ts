@@ -25,8 +25,8 @@ export function generateCSVHeaders(
 ): string[] {
   const headers = [
     ...dimensions.map(d => getDimensionLabel(d, customDimensionLabels)),
-    'Sessions',
-    'Sessions (%)',
+    'Visites uniques',
+    'Visites uniques (%)',
     'TimeScore',
     'TimeScore (seconds)',
     'Bounce Rate (%)',
@@ -35,8 +35,8 @@ export function generateCSVHeaders(
 
   if (showComparison) {
     headers.push(
-      'Sessions (Previous)',
-      'Sessions (Change %)',
+      'Visites uniques (Previous)',
+      'Visites uniques (Change %)',
       'TimeScore (Previous)',
       'TimeScore (Change %)',
       'Bounce Rate (Previous)',

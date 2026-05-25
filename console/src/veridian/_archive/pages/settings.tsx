@@ -794,7 +794,7 @@ function NotificationsSection({
       <div className="border-t border-border/50 pt-4">
         <ToggleRow
           label="Identifiant visiteur (visitor_id)"
-          hint="Relie les sessions d'un même visiteur entre elles."
+          hint="Relie les visites d'un même visiteur entre elles."
           checked={tracking.visitorIdEnabled}
           busy={saving === 'visitorIdEnabled'}
           onChange={(v) => patch('visitorIdEnabled', { visitorIdEnabled: v })}

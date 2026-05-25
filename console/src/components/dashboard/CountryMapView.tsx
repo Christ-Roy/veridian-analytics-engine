@@ -26,7 +26,7 @@ interface CountryMapViewProps {
   onCountryClick?: (countryCode: string) => void
   /** Metric key to use for values (default: 'sessions') */
   valueMetric?: string
-  /** Label for tooltip (default: 'sessions') */
+  /** Label for tooltip (default: 'visites uniques') */
   valueLabel?: string
 }
 
@@ -35,7 +35,7 @@ export function CountryMapView({
   loading,
   onCountryClick,
   valueMetric = 'sessions',
-  valueLabel = 'sessions',
+  valueLabel = 'visites uniques',
 }: CountryMapViewProps) {
   // Find max value for color scaling
   const maxValue = useMemo(() => {

@@ -12,7 +12,7 @@ export interface HeatmapTab {
 }
 
 const DEFAULT_TABS: HeatmapTab[] = [
-  { key: 'sessions', label: 'Sessions' },
+  { key: 'sessions', label: 'Visites uniques' },
   { key: 'median_duration', label: 'TimeScore' },
 ]
 
@@ -36,7 +36,7 @@ interface TrafficHeatmapWidgetProps {
   timescoreReference?: number
   emptyText?: string
   onCellClick?: (dayOfWeek: number, hour: number) => void
-  /** Custom tab configuration. Defaults to Sessions and TimeScore tabs. */
+  /** Custom tab configuration. Defaults to Visites uniques and TimeScore tabs. */
   tabs?: HeatmapTab[]
 }
 

@@ -15,7 +15,7 @@ const PAGE_SIZE = 20
 
 /** Default columns for backward compatibility (sessions tables) */
 const DEFAULT_COLUMNS: ColumnConfig[] = [
-  { key: 'sessions', label: 'Sessions', format: 'number' },
+  { key: 'sessions', label: 'Visites uniques', format: 'number' },
   { key: 'median_duration', label: 'TimeScore', format: 'duration', heatMap: true },
 ]
 
@@ -205,7 +205,7 @@ export function DimensionTableWidget({
             onRowClick?.({ dimension_value: countryCode }, activeTabKey)
           }}
           valueMetric={columns[0]?.key ?? 'sessions'}
-          valueLabel={columns[0]?.label?.toLowerCase() ?? 'sessions'}
+          valueLabel={columns[0]?.label?.toLowerCase() ?? 'visites uniques'}
         />
       ) : loading && data.length === 0 ? (
         <div className="flex items-center justify-center py-12">

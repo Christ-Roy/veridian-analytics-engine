@@ -163,7 +163,7 @@ function MobileExploreCard({
       {/* Expanded details */}
       {isExpanded && (
         <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
-          <MobileMetricRow label="Sessions" value={formatNumber(record.sessions)} change={record.sessions_change} showComparison={showComparison} />
+          <MobileMetricRow label="Visites uniques" value={formatNumber(record.sessions)} change={record.sessions_change} showComparison={showComparison} />
           <div className="flex justify-between items-center">
             <span className="text-gray-500 text-sm">TimeScore</span>
             <div className="flex items-center">
@@ -309,7 +309,7 @@ export function ExploreTable({
         width: 300
       },
       {
-        title: 'Sessions',
+        title: 'Visites uniques',
         dataIndex: 'sessions',
         key: 'sessions',
         align: 'right',
@@ -483,7 +483,7 @@ export function ExploreTable({
               // Show warning icon if children were filtered by min sessions
               if (expanded && record.childrenFilteredByMinSessions) {
                 return (
-                  <Tooltip title={`All sub-items have fewer than ${minSessions} sessions. Lower the threshold to see them.`}>
+                  <Tooltip title={`Tous les sous-éléments ont moins de ${minSessions} visites uniques. Abaissez le seuil pour les voir.`}>
                     <span className="mr-2 text-amber-500 cursor-help">
                       <TriangleAlert size={14} />
                     </span>

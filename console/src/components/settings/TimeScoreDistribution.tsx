@@ -139,7 +139,7 @@ export function TimeScoreDistribution({
   return (
     <div>
       <div className="text-xs text-gray-500 mb-2">
-        Session duration distribution (last 30 days)
+        Distribution de la durée des visites (30 derniers jours)
       </div>
       <ReactECharts option={option} style={{ height: 120 }} opts={{ renderer: 'svg' }} />
       <div className="flex items-center gap-4 text-xs text-gray-500 mt-1">
