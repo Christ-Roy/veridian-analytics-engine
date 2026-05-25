@@ -36,10 +36,6 @@ async function createAdminPlatformTestApp(): Promise<TestAppContext> {
     canActivate: (ctx: import('@nestjs/common').ExecutionContext): boolean => {
       const req = ctx.switchToHttp().getRequest();
       const auth = req.headers?.authorization;
-      // eslint-disable-next-line no-console
-      console.log(
-        `[OVERRIDE_GUARD_DIAG] auth="${auth}" PLATFORM_KEY="${PLATFORM_KEY}"`,
-      );
       if (!auth || typeof auth !== 'string') {
         throw new (
           require('@nestjs/common').UnauthorizedException

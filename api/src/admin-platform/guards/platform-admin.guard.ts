@@ -58,23 +58,6 @@ export class PlatformAdminGuard implements CanActivate {
     const fromEnv = process.env.PLATFORM_ADMIN_API_KEY;
     const expected = fromConfig || fromEnv || '';
 
-    // DIAG temporaire (à retirer une fois la CI verte) : log les valeurs
-    // pour comprendre pourquoi le guard rejette en e2e malgré
-    // setupTestEnv() + fallback process.env. Cf. CI run 26392963211.
-    // eslint-disable-next-line no-console
-    if (process.env.NODE_ENV === 'test') {
-      // eslint-disable-next-line no-console
-      console.log(
-        `[GUARD_DIAG] presented="${presented}" presented.length=${
-          presented.length
-        } fromConfig=${
-          fromConfig === undefined ? 'undef' : JSON.stringify(fromConfig)
-        } fromEnv=${
-          fromEnv === undefined ? 'undef' : JSON.stringify(fromEnv)
-        } NODE_ENV="${process.env.NODE_ENV}"`,
-      );
-    }
-
     if (!expected) {
       // Fail-closed: refuse if no secret configured. We log a warning so
       // an operator notices the misconfiguration (vs silently 401-ing).
