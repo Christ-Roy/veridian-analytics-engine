@@ -8,6 +8,9 @@
 #   - 01-smoke contre demo-prod (https://demo-analytics.veridian.site)
 #   - 06-hub-contract HMAC rejection (sans écrire, juste les rejets)
 #   - 11-demo-public accessible + restricted-guards
+#   - 21-anti-regression-2026-05-25 (setup-locked + helmet + FR — sprint
+#     commercial bétonnage : doit casser le déploiement si helmet/setup/FR
+#     régressent en prod)
 #
 # Bloquant : si fail, le job déclenche le workflow rollback-prod (déjà câblé
 # côté prod-ci.yml via re-run).
@@ -59,7 +62,7 @@ jobs:
           npx playwright install --with-deps chromium
 
       # ─── Prod target (BLOQUANT — un fail déclenche rollback) ───────
-      - name: Prod — Smoke 01 + bugs P0 02 + HMAC rejection 06
+      - name: Prod — Smoke 01 + bugs P0 02 + HMAC rejection 06 + anti-régression 21
         env:
           TARGET: prod
         run: |
@@ -67,6 +70,7 @@ jobs:
             01-smoke/ \
             02-bugs-regression/ \
             06-hub-contract/hmac-rejection.spec.ts \
+            21-anti-regression-2026-05-25/ \
             --project=chromium-desktop
 
       # Sauvegarder le report prod avant qu'il soit écrasé par le run démo
