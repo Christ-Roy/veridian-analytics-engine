@@ -2,12 +2,19 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { DemoService } from './demo.service';
 import { ClickHouseService } from '../database/clickhouse.service';
 import * as generators from './fixtures/generators';
+import * as voipCalls from './fixtures/voip-calls';
 
 // Mock generators module
 jest.mock('./fixtures/generators', () => ({
   generateEventsByDay: jest.fn(),
   getCachedFilters: jest.fn(),
   clearFilterCache: jest.fn(),
+}));
+
+// Mock VoIP seed module so demo.service tests stay deterministic (le seed
+// VoIP réel a sa propre couverture unitaire dans voip-calls.spec.ts).
+jest.mock('./fixtures/voip-calls', () => ({
+  generateVoipCalls: jest.fn(() => []),
 }));
 
 describe('DemoService', () => {
@@ -186,7 +193,84 @@ describe('DemoService', () => {
       expect(result.workspace_name).toBe('Veridian Analytics Demo');
       expect(result.events_count).toBe(20);
       expect(result.sessions_count).toBe(10);
+      expect(result.voip_calls_count).toBe(0); // mock retourne []
       expect(result.generation_time_seconds).toBeGreaterThanOrEqual(0);
+    });
+
+    it('seeds VoIP phone_call events and counts them in summary', async () => {
+      clickhouse.querySystem.mockResolvedValue([]);
+      clickhouse.createWorkspaceDatabase.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+      clickhouse.insertWorkspace.mockResolvedValue(undefined);
+
+      // Sessions normales : 10 events
+      (generators.generateEventsByDay as jest.Mock).mockReturnValue([
+        {
+          date: '2025-01-01',
+          events: Array(10).fill({ session_id: 'test', name: 'screen_view' }),
+          sessionCount: 5,
+        },
+      ]);
+
+      // VoIP seed : 7 events factices
+      const voipMockEvents = Array(7).fill({
+        session_id: 'voip:ovh:demo-call-0001',
+        name: 'goal',
+        goal_name: 'phone_call',
+        properties: { source: 'seo' },
+      });
+      (voipCalls.generateVoipCalls as jest.Mock).mockReturnValue(
+        voipMockEvents,
+      );
+
+      const result = await service.generate();
+
+      // generateVoipCalls appelée avec workspaceId démo
+      expect(voipCalls.generateVoipCalls).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspaceId: 'demo-apple',
+          callCount: 30,
+        }),
+      );
+
+      // insertWorkspace appelée pour les events VoIP
+      const voipInsertCall = clickhouse.insertWorkspace.mock.calls.find(
+        (c) =>
+          c[0] === 'demo-apple' &&
+          c[1] === 'events' &&
+          Array.isArray(c[2]) &&
+          (c[2] as Array<{ goal_name?: string }>).some(
+            (e) => e.goal_name === 'phone_call',
+          ),
+      );
+      expect(voipInsertCall).toBeDefined();
+
+      expect(result.voip_calls_count).toBe(7);
+      // Total = sessions normales (10) + VoIP (7)
+      expect(result.events_count).toBe(17);
+    });
+
+    it('skips VoIP insertWorkspace call when generator returns empty array', async () => {
+      clickhouse.querySystem.mockResolvedValue([]);
+      clickhouse.createWorkspaceDatabase.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+      clickhouse.insertWorkspace.mockResolvedValue(undefined);
+
+      (generators.generateEventsByDay as jest.Mock).mockReturnValue([]);
+      (voipCalls.generateVoipCalls as jest.Mock).mockReturnValue([]);
+
+      const result = await service.generate();
+
+      // Aucun appel insertWorkspace avec un payload de goal `phone_call`
+      const hasVoipInsert = clickhouse.insertWorkspace.mock.calls.some(
+        (c) =>
+          Array.isArray(c[2]) &&
+          (c[2] as Array<{ goal_name?: string }>).some(
+            (e) => e.goal_name === 'phone_call',
+          ),
+      );
+      expect(hasVoipInsert).toBe(false);
+      expect(result.voip_calls_count).toBe(0);
     });
   });
 

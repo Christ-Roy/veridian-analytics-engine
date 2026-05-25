@@ -13,10 +13,10 @@ import {
   Trash2,
   User,
 } from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { cn } from '../utils';
+import { Card, CardContent } from '../../ui/card';
+import { Badge } from '../../ui/badge';
+import { Button } from '../../ui/button';
+import { cn } from '../../utils';
 import {
   fetchTenantSettings,
   updateTenantSettings,
@@ -28,8 +28,8 @@ import {
   type SettingsUpdatePayload,
   type CredentialKind,
   type CredentialView,
-} from '../api';
-import '../theme.css';
+} from '../../api';
+import '../../theme.css';
 
 /**
  * VeridianSettingsPage — page Settings tenant self-service (U8).
@@ -365,7 +365,7 @@ function GscSection({
     setError(null);
     try {
       // POST oauth-begin renvoie l'URL Google consent à ouvrir.
-      const { fetchOauthBeginUrl } = await import('./settings-helpers');
+      const { fetchOauthBeginUrl } = await import('../../pages/settings-helpers');
       const url = await fetchOauthBeginUrl(workspaceId);
       window.location.href = url;
     } catch (err) {

@@ -519,11 +519,19 @@
   covered_by:
     - api/test/demo-mode.e2e-spec.ts
     - api/src/demo/demo.controller.spec.ts
+    - api/src/demo/fixtures/generators.spec.ts
+    - api/src/demo/fixtures/voip-calls.spec.ts
   reason: |
     Mode demo (génération de fake data + public demo instance E1).
     demo-mode.e2e-spec.ts couvre les endpoints publics (public-config,
     health, demo.login) contre une vraie ClickHouse ; demo.controller.spec.ts
     couvre la logique unitaire (mint JWT, 403/503).
+
+    voip-calls.spec.ts (2026-05-25) couvre le générateur de seed VoIP
+    (events `phone_call` avec dimension `source` — vision 2026-05-25). La
+    démo n'a pas de bridge Postgres, donc on insère directement les events
+    goal natifs staminads pour faire apparaître la feature Calls dans
+    Live / Explore / Goals.
 
 - sources:
     - api/src/demo/robots.controller.ts
@@ -679,24 +687,22 @@
     de retour dashboard, surfaçage du message d'erreur.
 
 - sources:
-    - console/src/veridian/pages/settings.tsx
+    - console/src/veridian/_archive/pages/settings.tsx
     - console/src/veridian/pages/settings-helpers.ts
     - console/src/veridian/api.ts
   covered_by:
-    - console/src/veridian/pages/__tests__/settings.test.tsx
+    - console/src/veridian/_archive/pages/__tests__/settings.test.tsx
   reason: |
     Page Settings Veridian self-service (ticket U8 — giga-sprint 2026-05-22).
-    5 sections : Compte, Site & tracking, GSC, VoIP, Notifications. Tests
-    Vitest + React Testing Library — loading/error/success, sections rendues,
-    siteKey copiable, GSC connecté/déconnecté, credentials VoIP masqués
-    (jamais en clair), formulaire d'ajout, toggles notifications déclenchant
-    PUT /settings. `api.ts` étendu (requestJson PUT/POST/DELETE + clients
-    settings/credentials) — couvert par ce test + dashboard.test.tsx.
-    Le mode `embedded` (UI-NATIVE-INTEGRATION 2026-05-23) est aussi couvert :
-    pas de header standalone, racine sans `min-h-screen`, sections internes
-    intactes. Ce mode est consommé par la sous-route native staminads
-    `console/src/routes/_authenticated/workspaces/$workspaceId/settings.tsx`
-    (section sidebar "Veridian"), thin wrapper non testé directement.
+    5 sections : Compte, Site & tracking, GSC, VoIP, Notifications.
+
+    Archivée 2026-05-25 (vision Veridian §UI-RULES) : l'onglet "Veridian"
+    custom dans Settings native a été retiré au profit des seuls onglets
+    feature (`voip`, `search-console`). La page reste dans `_archive/` pour
+    traçabilité mais n'est plus montée dans le routeur. Les tests Vitest sont
+    conservés pour préserver l'historique de couverture si un futur agent
+    propose de la réactiver. `settings-helpers.ts` reste actif (référencé
+    par `settings-panels/search-console-panel.tsx`).
 
 # ─── Intégration native dans le layout staminads (UI-NATIVE-INTEGRATION) ──
 
@@ -706,7 +712,7 @@
     - console/src/routes/_authenticated/workspaces/$workspaceId.tsx
   covered_by:
     - console/src/veridian/pages/__tests__/dashboard.test.tsx
-    - console/src/veridian/pages/__tests__/settings.test.tsx
+    - console/src/veridian/_archive/pages/__tests__/settings.test.tsx
   reason: |
     Sprint UI-NATIVE-INTEGRATION 2026-05-23. Suppression du tunnel parallèle
     `/veridian/dashboard/:wsId` + `/veridian/settings/:wsId` (qui contournait
@@ -714,11 +720,14 @@
     - sous-route native `/workspaces/:wsId/veridian` (thin wrapper TanStack
       autour de VeridianDashboardPage — couvert indirectement par
       dashboard.test.tsx)
-    - section "Veridian" dans la page Settings native staminads (thin wrapper
-      autour de VeridianSettingsPage en mode `embedded` — couvert indirectement
-      par settings.test.tsx, qui ajoute 2 tests dédiés au mode embedded)
     - update du menu nav workspaces/$workspaceId.tsx (Veridian pointe sur la
       nouvelle sous-route) — couverture e2e Playwright suffit (rendu visuel).
+
+    Note 2026-05-25 : l'onglet "Veridian" dans Settings (qui montait
+    `VeridianSettingsPage` en mode embedded) a été retiré au profit des seuls
+    onglets feature dédiés (`voip`, `search-console`). Voir vision §UI-RULES
+    dans le CLAUDE.md de l'engine. La page archive vit dans
+    `_archive/pages/settings.tsx` (tests conservés à titre historique).
 
     Les thin wrappers de routes TanStack (`*.tsx` dans
     routes/_authenticated/workspaces/$workspaceId/) sont systématiquement
