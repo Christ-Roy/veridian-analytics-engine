@@ -180,10 +180,19 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     expect(ctx.mailService?.sendPasswordReset).toHaveBeenCalledTimes(1);
 
     // Persistence checks.
+    // NOTE: `workspaces` table uses plain MergeTree (NOT ReplacingMergeTree),
+    // so `FINAL` is rejected by ClickHouse. Use the dedupe pattern the
+    // production code uses everywhere (see WorkspacesService.list/get and
+    // AdminPlatformService.workspaceExists).
     await waitForMutations(ctx.systemClient, 'workspaces');
     const wsRows = await ctx.systemClient
       .query({
-        query: `SELECT id FROM workspaces FINAL WHERE id = {id:String}`,
+        query: `SELECT id FROM workspaces
+                WHERE id = {id:String}
+                  AND (id, updated_at) IN (
+                    SELECT id, max(updated_at) FROM workspaces GROUP BY id
+                  )
+                LIMIT 1`,
         query_params: { id: response.body.workspace_id },
         format: 'JSONEachRow',
       })
