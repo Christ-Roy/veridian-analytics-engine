@@ -44,8 +44,20 @@ export class PlatformAdminGuard implements CanActivate {
     }
 
     const presented = match[1].trim();
+    // Read from BOTH ConfigService and process.env to be robust against:
+    //   (a) NestJS ConfigModule snapshot timing in Jest (the first
+    //       AppModule compiled in a worker may snapshot process.env
+    //       BEFORE a late `setupTestEnv()` write — subsequent specs in
+    //       the same worker see stale config)
+    //   (b) deploys where the env var was injected late (e.g. Dokploy
+    //       ENV patched without container restart — process.env updated
+    //       but ConfigModule not re-read)
+    // process.env is the freshest source; ConfigService is the
+    // canonical NestJS path. Either matches → accept.
     const expected =
-      this.configService.get<string>('PLATFORM_ADMIN_API_KEY') || '';
+      this.configService.get<string>('PLATFORM_ADMIN_API_KEY') ||
+      process.env.PLATFORM_ADMIN_API_KEY ||
+      '';
 
     if (!expected) {
       // Fail-closed: refuse if no secret configured. We log a warning so
