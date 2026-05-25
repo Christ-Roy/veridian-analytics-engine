@@ -25,20 +25,20 @@ interface GoalMetricConfig {
 }
 
 const GOAL_METRICS: GoalMetricConfig[] = [
-  { key: 'goals', label: 'Count', format: 'number', color: '#10b981', previousColor: '#9ca3af' },
-  { key: 'sum_goal_value', label: 'Total Value', format: 'currency', color: '#7763f1', previousColor: '#9ca3af' },
-  { key: 'median_goal_value', label: 'Median Value', format: 'currency', color: '#3b82f6', previousColor: '#9ca3af' },
+  { key: 'goals', label: 'Nombre', format: 'number', color: '#10b981', previousColor: '#9ca3af' },
+  { key: 'sum_goal_value', label: 'Valeur totale', format: 'currency', color: '#7763f1', previousColor: '#9ca3af' },
+  { key: 'median_goal_value', label: 'Valeur médiane', format: 'currency', color: '#3b82f6', previousColor: '#9ca3af' },
 ]
 
 // Widget columns configuration for goals
 const GOAL_COLUMNS: ColumnConfig[] = [
-  { key: 'goals', label: 'Count', format: 'number' },
-  { key: 'sum_goal_value', label: 'Value', format: 'currency' },
+  { key: 'goals', label: 'Nombre', format: 'number' },
+  { key: 'sum_goal_value', label: 'Valeur', format: 'currency' },
 ]
 
 // Heatmap tabs for goals - only show goals count, no TimeScore
 const GOAL_HEATMAP_TABS: HeatmapTab[] = [
-  { key: 'sessions', label: 'Goals' }, // Uses 'sessions' key since HeatmapDataPoint.sessions holds goals count
+  { key: 'sessions', label: 'Objectifs' }, // Uses 'sessions' key since HeatmapDataPoint.sessions holds goals count
 ]
 
 interface GoalDashboardDrawerProps {
@@ -188,25 +188,25 @@ export function GoalDashboardDrawer({
 
   // Tab configurations for dimension widgets
   const sourcesTabConfig: DimensionTabConfig[] = [
-    { key: 'referrers', label: 'Referrers', dimensionLabel: 'Referrer', dimension: 'referrer_domain', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
-    { key: 'channels', label: 'Channels', dimensionLabel: 'Channel', dimension: 'channel', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
-    { key: 'channel_groups', label: 'Channel Groups', dimensionLabel: 'Group', dimension: 'channel_group', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'referrers', label: 'Référents', dimensionLabel: 'Référent', dimension: 'referrer_domain', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'channels', label: 'Canaux', dimensionLabel: 'Canal', dimension: 'channel', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'channel_groups', label: 'Groupes de canaux', dimensionLabel: 'Groupe', dimension: 'channel_group', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
   ]
 
   const campaignsTabConfig: DimensionTabConfig[] = [
-    { key: 'campaign', label: 'Campaigns', dimensionLabel: 'Campaign', dimension: 'utm_campaign', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, filters: [{ dimension: 'utm_campaign', operator: 'isNotEmpty' }] },
+    { key: 'campaign', label: 'Campagnes', dimensionLabel: 'Campagne', dimension: 'utm_campaign', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, filters: [{ dimension: 'utm_campaign', operator: 'isNotEmpty' }] },
     { key: 'source', label: 'Sources', dimensionLabel: 'Source', dimension: 'utm_source', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, filters: [{ dimension: 'utm_source', operator: 'isNotEmpty' }] },
-    { key: 'medium', label: 'Mediums', dimensionLabel: 'Medium', dimension: 'utm_medium', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, filters: [{ dimension: 'utm_medium', operator: 'isNotEmpty' }] },
+    { key: 'medium', label: 'Supports', dimensionLabel: 'Support', dimension: 'utm_medium', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, filters: [{ dimension: 'utm_medium', operator: 'isNotEmpty' }] },
   ]
 
   const countriesTabConfig: DimensionTabConfig[] = [
-    { key: 'map', label: 'Map', dimensionLabel: 'Country', dimension: 'country', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, type: 'country_map', limit: 100 },
-    { key: 'list', label: 'List', dimensionLabel: 'Country', dimension: 'country', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'map', label: 'Carte', dimensionLabel: 'Pays', dimension: 'country', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' }, type: 'country_map', limit: 100 },
+    { key: 'list', label: 'Liste', dimensionLabel: 'Pays', dimension: 'country', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
   ]
 
   const devicesTabConfig: DimensionTabConfig[] = [
-    { key: 'device', label: 'Devices', dimensionLabel: 'Device', dimension: 'device', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
-    { key: 'browser', label: 'Browsers', dimensionLabel: 'Browser', dimension: 'browser', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'device', label: 'Appareils', dimensionLabel: 'Appareil', dimension: 'device', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
+    { key: 'browser', label: 'Navigateurs', dimensionLabel: 'Navigateur', dimension: 'browser', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
     { key: 'os', label: 'OS', dimensionLabel: 'OS', dimension: 'os', table: 'goals', metrics: ['goals', 'sum_goal_value'], order: { goals: 'desc' } },
   ]
 
@@ -230,7 +230,7 @@ export function GoalDashboardDrawer({
         <div className="flex items-center gap-2">
           <Tag color="green" className="m-0">{goalName}</Tag>
           <span className="text-gray-400">-</span>
-          <span className="text-gray-500 font-normal">Goal Dashboard</span>
+          <span className="text-gray-500 font-normal">Tableau de bord d'objectif</span>
         </div>
       }
       placement="right"

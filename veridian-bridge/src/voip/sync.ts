@@ -27,6 +27,11 @@ import {
 import { fetchOvhCdr } from "./providers/ovh.js";
 import { fetchTelnyxCdr } from "./providers/telnyx.js";
 import { resolveVisitorIds } from "./match.js";
+import {
+  lookupTrackedNumbers,
+  toE164,
+  type TrackedNumberLookup,
+} from "./phone-numbers.js";
 import { VoipApiError, type NormalizedCall } from "./types.js";
 
 /** Fenêtre de sync par défaut : 30 jours en arrière. */
@@ -165,6 +170,7 @@ async function pushStaminadsEvents(
   provider: VoipProvider,
   calls: NormalizedCall[],
   visitorIds: Map<string, string>,
+  trackedNumbers: Map<string, TrackedNumberLookup>,
   fetchImpl: typeof fetch,
   now: Date,
 ): Promise<{ ok: number; failed: number }> {
@@ -176,6 +182,16 @@ async function pushStaminadsEvents(
     const startedAtMs = call.startedAt.getTime();
     const goalTs = startedAtMs;
     const sessionId = `voip:${provider}:${call.externalId}`;
+
+    // Dimension `source` (vision 2026-05-25) : lookup du `toNumber` normalisé
+    // E.164 dans les TenantPhoneNumber. Match → source du mapping. Pas de
+    // match → 'direct' (default safe : on ne perd jamais l'appel, on le
+    // comptabilise sans attribution fine).
+    const toE164Norm = toE164(call.toNumber);
+    const tracked = toE164Norm ? trackedNumbers.get(toE164Norm) : undefined;
+    const source = tracked?.source ?? "direct";
+    const trackedNumberId = tracked?.id ?? null;
+
     const payload = {
       workspace_id: workspaceId,
       session_id: sessionId,
@@ -199,6 +215,8 @@ async function pushStaminadsEvents(
             to_number: call.toNumber,
             provider,
             external_id: call.externalId,
+            source,
+            ...(trackedNumberId ? { tracked_number_id: trackedNumberId } : {}),
           },
         },
       ],
@@ -286,11 +304,20 @@ export async function syncCallLogs(
       // Push événements `phone_call` → staminads /api/track (best-effort).
       // Pas de throw si staminads est down : on n'invalide pas le sync DB.
       if (calls.length > 0 && tenant.workspaceId) {
+        // Lookup tracked numbers UNE seule fois pour tout le batch (1 query
+        // au lieu de N). Le push enrichit chaque event `phone_call` avec
+        // `properties.source` (vision 2026-05-25 : 1 numéro = 1 source).
+        const trackedNumbers = await lookupTrackedNumbers(
+          prisma,
+          tenantId,
+          calls.map((c) => c.toNumber),
+        );
         const pushResult = await pushStaminadsEvents(
           tenant.workspaceId,
           cred.provider,
           calls,
           visitorIds,
+          trackedNumbers,
           fetchImpl,
           now,
         );

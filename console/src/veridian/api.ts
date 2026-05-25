@@ -439,3 +439,76 @@ export function deleteCredential(
     { method: 'DELETE', requireAdmin: true },
   );
 }
+
+// ─── TenantPhoneNumber (phone source dimension, 2026-05-25) ───────────────
+//
+// Mapping `numéro de téléphone → source de trafic`. Le bridge enrichit chaque
+// event `phone_call` poussé vers staminads avec `properties.source`
+// (seo / ads / direct / email / social / print / other) après lookup E.164.
+//
+// Pas de page custom : les appels apparaissent dans Live/Explore/Goals
+// staminads natifs, filtrables par dimension `source`.
+
+export type PhoneSource =
+  | 'seo'
+  | 'ads'
+  | 'direct'
+  | 'email'
+  | 'social'
+  | 'print'
+  | 'other';
+
+export interface TrackedPhoneNumber {
+  id: string;
+  e164: string;
+  source: PhoneSource;
+  label: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PhoneNumbersListResponse {
+  phoneNumbers: TrackedPhoneNumber[];
+  allowedSources: PhoneSource[];
+}
+
+export function fetchPhoneNumbers(
+  workspaceId: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<PhoneNumbersListResponse> {
+  return requestJson<PhoneNumbersListResponse>(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/phone-numbers`,
+    { method: 'GET', requireAdmin: true, signal: opts.signal },
+  );
+}
+
+export function createPhoneNumber(
+  workspaceId: string,
+  body: { e164: string; source: PhoneSource; label?: string | null },
+): Promise<{ ok: true; phoneNumber: TrackedPhoneNumber }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/phone-numbers`,
+    { method: 'POST', requireAdmin: true, body },
+  );
+}
+
+export function updatePhoneNumber(
+  workspaceId: string,
+  id: string,
+  patch: { source?: PhoneSource; label?: string | null },
+): Promise<{ ok: true; phoneNumber: TrackedPhoneNumber }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/phone-numbers/${encodeURIComponent(id)}`,
+    { method: 'PUT', requireAdmin: true, body: patch },
+  );
+}
+
+export function deletePhoneNumber(
+  workspaceId: string,
+  id: string,
+): Promise<{ ok: true; deleted: boolean }> {
+  return requestJson(
+    `/api/admin/tenant/${encodeURIComponent(workspaceId)}/phone-numbers/${encodeURIComponent(id)}`,
+    { method: 'DELETE', requireAdmin: true },
+  );
+}
