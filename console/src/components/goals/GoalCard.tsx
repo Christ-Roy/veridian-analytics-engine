@@ -56,7 +56,7 @@ const METRIC_CONFIG: {
     key: 'conversion_rate',
     label: 'Taux de conv.',
     format: 'percent',
-    tooltip: 'Not all visitors come with the same intent. This rate should be interpreted with caution as it includes all traffic regardless of purpose.',
+    tooltip: 'Tous les visiteurs n\'ont pas la même intention. Ce taux doit être interprété avec prudence car il inclut l\'ensemble du trafic indépendamment de son objectif.',
   },
   { key: 'sum_goal_value', label: 'Valeur', format: 'currency' },
   { key: 'median_goal_value', label: 'Médiane', format: 'currency' },
@@ -346,11 +346,11 @@ export function GoalCard({
           />
         ) : selectedMetric === 'conversion_rate' ? (
           <div className="h-[80px] flex items-center justify-center text-gray-400 text-xs">
-            Select another metric to view chart
+            Sélectionnez une autre métrique pour afficher le graphique
           </div>
         ) : (
           <div className="h-[80px] flex items-center justify-center text-gray-400 text-xs">
-            No chart data
+            Aucune donnée de graphique
           </div>
         )}
       </div>

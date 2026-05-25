@@ -527,7 +527,7 @@ function Settings() {
               <Input
                 value={newLabel}
                 onChange={(e) => setNewLabel(e.target.value)}
-                placeholder="Enter dimension label (leave empty to clear)"
+                placeholder="Saisissez le libellé de la dimension (laissez vide pour effacer)"
               />
             </div>
           </div>

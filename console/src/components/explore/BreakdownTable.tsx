@@ -39,8 +39,8 @@ export function BreakdownTableView({
       dataIndex: dimension,
       ellipsis: true,
       render: (value: unknown) => {
-        if (value === null) return <span className="text-gray-400">(not set)</span>
-        if (value === '') return <span className="text-gray-400">(empty)</span>
+        if (value === null) return <span className="text-gray-400">(non défini)</span>
+        if (value === '') return <span className="text-gray-400">(vide)</span>
         if (dimension === 'day_of_week' && typeof value === 'number') {
           return DaysOfWeek[value] ?? String(value)
         }
@@ -66,7 +66,7 @@ export function BreakdownTableView({
       render: (v: number) => <HeatMapCell value={v} bestValue={maxMedian} referenceValue={timescoreReference} />,
     },
     {
-      title: 'Bounce',
+      title: 'Rebond',
       dataIndex: 'bounce_rate',
       width: 70,
       align: 'right' as const,
@@ -77,7 +77,7 @@ export function BreakdownTableView({
   if (error) {
     return (
       <div className="p-4 bg-red-50 rounded text-red-600 text-sm">
-        Error loading breakdown data
+        Erreur lors du chargement de la décomposition
       </div>
     )
   }
