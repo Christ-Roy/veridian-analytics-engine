@@ -7,6 +7,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ScheduleModule } from '@nestjs/schedule';
 import { join } from 'path';
 import { validate } from './config/env.validation';
+import { AdminPlatformModule } from './admin-platform/admin-platform.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { AssistantModule } from './assistant/assistant.module';
@@ -93,6 +94,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     AnalyticsModule,
     AssistantModule,
     SubscriptionsModule,
+    AdminPlatformModule,
   ],
 })
 export class AppModule implements NestModule {
