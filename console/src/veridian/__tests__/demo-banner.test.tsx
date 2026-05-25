@@ -69,7 +69,7 @@ describe('DemoFooter', () => {
     render(withAuth(DEMO_CFG, <DemoFooter />))
     const footer = screen.getByTestId('demo-footer')
     expect(footer).toHaveTextContent('Hébergé en France')
-    expect(footer).toHaveTextContent('200 000 sessions')
+    expect(footer).toHaveTextContent('200 000 visites uniques')
     expect(screen.getByText('veridian.site')).toHaveAttribute(
       'href',
       'https://veridian.site',

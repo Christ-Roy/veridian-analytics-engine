@@ -48,7 +48,7 @@ export function BreakdownTableView({
       },
     },
     {
-      title: 'Sessions',
+      title: 'Visites uniques',
       dataIndex: 'sessions',
       width: 80,
       align: 'right' as const,

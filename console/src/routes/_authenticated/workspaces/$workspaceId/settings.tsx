@@ -374,7 +374,7 @@ function Settings() {
           <Form.Item
             name="timescore_reference"
             label="Référence TimeScore (secondes)"
-            tooltip="Durée médiane cible des sessions pour la coloration de la heat map dans Explorer. Une valeur plus élevée = barre plus haute pour l'engagement « vert »."
+            tooltip="Durée médiane cible des visites pour la coloration de la heat map dans Explorer. Une valeur plus élevée = barre plus haute pour l'engagement « vert »."
           >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>
@@ -389,7 +389,7 @@ function Settings() {
           <Form.Item
             name="bounce_threshold"
             label="Seuil de rebond (secondes)"
-            tooltip="Les sessions plus courtes que cette durée sont comptées comme rebonds. Valeur par défaut : 10 secondes."
+            tooltip="Les visites plus courtes que cette durée sont comptées comme rebonds. Valeur par défaut : 10 secondes."
           >
             <InputNumber min={1} style={{ width: '100%' }} />
           </Form.Item>

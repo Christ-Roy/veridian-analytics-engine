@@ -87,7 +87,7 @@ const METRICS_ORDER = [
 ] as const;
 
 const METRIC_LABELS: Record<string, string> = {
-  sessions: 'Sessions',
+  sessions: 'Visites uniques',
   median_duration: 'TimeScore',
   bounce_rate: 'Bounce Rate',
   median_scroll: 'Scroll Depth',
@@ -586,7 +586,7 @@ export class ReportGeneratorService {
         // Calculate max metric value for heat map coloring
         const maxMetric = Math.max(...dim.rows.map((r) => r.metric), 0);
         const isGoals = dim.dimension === 'goal_name';
-        const col1Label = isGoals ? 'Count' : 'Sessions';
+        const col1Label = isGoals ? 'Count' : 'Visites uniques';
         const col2Label = isGoals ? 'Value Sum' : 'TimeScore';
 
         return `

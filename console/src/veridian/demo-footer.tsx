@@ -23,7 +23,7 @@ export function DemoFooter() {
     >
       <span>
         Hébergé en France · Pas de cookies tiers · Démo générée à partir de
-        200 000 sessions
+        200 000 visites uniques
       </span>
       <span className="mx-2 text-slate-600">·</span>
       <a

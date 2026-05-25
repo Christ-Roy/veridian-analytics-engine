@@ -38,16 +38,16 @@ export function MinSessionsInput({ value, onChange }: MinSessionsInputProps) {
         className="w-full mb-2"
       />
       <Button type="primary" onClick={applyChange} block>
-        Apply
+        Appliquer
       </Button>
     </div>
   )
 
   return (
-    <Tooltip title="Set minimum sessions threshold">
+    <Tooltip title="Définir le seuil minimum de visites uniques">
       <Popover
         content={popoverContent}
-        title="Minimum sessions"
+        title="Visites uniques minimum"
         trigger="click"
         open={isPopoverVisible}
         onOpenChange={handleOpenChange}
@@ -55,11 +55,11 @@ export function MinSessionsInput({ value, onChange }: MinSessionsInputProps) {
       >
         <Button type="text" size="small">
           <Space>
-            Having
+            Avec au moins
             <Tag color="purple" style={{ marginRight: 0 }}>
               {value}
             </Tag>
-            sessions at least
+            visites uniques
           </Space>
         </Button>
       </Popover>
