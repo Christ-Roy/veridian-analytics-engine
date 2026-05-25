@@ -7,6 +7,7 @@ import {
   getCachedFilters,
   clearFilterCache,
 } from './fixtures/generators';
+import { generateVoipCalls } from './fixtures/voip-calls';
 import { TrackingEvent } from '../events/entities/event.entity';
 import { DEMO_CUSTOM_DIMENSION_LABELS } from './fixtures/demo-filters';
 import { BackfillTask } from '../filters/backfill/backfill-task.entity';
@@ -127,6 +128,17 @@ export class DemoService {
       }
     }
 
+    // Seed fake VoIP calls (vision Veridian 2026-05-25). On insère des
+    // events `phone_call` (goals natifs staminads) avec `properties.source`
+    // pour que la démo affiche la feature Calls dans Live / Explore / Goals.
+    // Le seed est gated implicitement par le scope de `demo.generate()` —
+    // l'endpoint exige `DEMO_SECRET` et n'est armé que sur `IS_DEMO=true`.
+    const voipEventsCount = await this.seedVoipCalls(
+      DEMO_WORKSPACE_ID,
+      endDate,
+    );
+    totalEvents += voipEventsCount;
+
     const duration = ((Date.now() - startTime) / 1000).toFixed(2);
     this.logger.log(`Demo generation completed in ${duration}s`);
 
@@ -146,12 +158,45 @@ export class DemoService {
       workspace_name: DEMO_WORKSPACE_NAME,
       events_count: totalEvents,
       sessions_count: totalSessions,
+      voip_calls_count: voipEventsCount,
       date_range: {
         start: startDate.toISOString().split('T')[0],
         end: endDate.toISOString().split('T')[0],
       },
       generation_time_seconds: parseFloat(duration),
     };
+  }
+
+  /**
+   * Génère ~30 appels VoIP factices (events `phone_call`) répartis sur 30j
+   * et les insère dans ClickHouse. Conçu pour la démo publique : le bridge
+   * Postgres n'existe pas dans `compose/demo.yml`, donc on contourne en
+   * insérant les events directement (comme le ferait `voip/sync.ts` côté
+   * prod via `POST /api/track`).
+   *
+   * Idempotent : un re-seed (cron nuit) écrase les events précédents grâce
+   * aux `dedup_token` natifs staminads.
+   *
+   * @returns nombre d'événements insérés.
+   */
+  private async seedVoipCalls(
+    workspaceId: string,
+    endDate: Date,
+  ): Promise<number> {
+    const voipEvents = generateVoipCalls({
+      workspaceId,
+      endDate,
+      daysRange: DAYS_RANGE,
+      callCount: 30,
+    });
+    if (voipEvents.length === 0) {
+      return 0;
+    }
+    await this.clickhouse.insertWorkspace(workspaceId, 'events', voipEvents);
+    this.logger.log(
+      `Seeded ${voipEvents.length} VoIP phone_call events for demo`,
+    );
+    return voipEvents.length;
   }
 
   async delete() {

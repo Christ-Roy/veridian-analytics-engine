@@ -12,13 +12,17 @@ import { TeamSettings } from '../../../../components/settings/TeamSettings'
 import { CodeSnippet } from '../../../../components/setup/CodeSnippet'
 import { SmtpPage } from '../../../../pages/settings/smtp'
 import { ApiKeysPage } from '../../../../pages/settings/api-keys'
-import { VeridianSettingsPage } from '../../../../veridian/pages/settings'
 import { VoIPSettingsPanel } from '../../../../veridian/settings-panels/voip-panel'
 import { SearchConsoleSettingsPanel } from '../../../../veridian/settings-panels/search-console-panel'
 import { z } from 'zod'
 
+// Vision Veridian 2026-05-25 : pas de sous-route/onglet "Veridian" custom.
+// Les seules extensions autorisées dans Settings sont les onglets feature
+// dédiés (`voip`, `search-console`). Tout autre onglet "Veridian" générique
+// est interdit — l'ancien onglet `veridian` (page settings tenant) a été
+// retiré, sa page React archivée dans `console/src/veridian/_archive/`.
 const settingsSearchSchema = z.object({
-  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'veridian', 'voip', 'search-console', 'danger']).optional().default('workspace'),
+  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'voip', 'search-console', 'danger']).optional().default('workspace'),
 })
 
 export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/settings')({
@@ -59,7 +63,7 @@ const currencyOptions = [
   { value: 'BRL', label: 'BRL - Real brésilien' },
 ]
 
-type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'veridian' | 'voip' | 'search-console' | 'danger'
+type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'voip' | 'search-console' | 'danger'
 
 type MenuItem = {
   key: SettingsSection
@@ -77,7 +81,6 @@ const menuItems: MenuItem[] = [
   { key: 'api-keys', label: 'Clés API' },
   { key: 'privacy', label: 'Confidentialité' },
   { key: 'sdk', label: 'Installer le SDK' },
-  { key: 'veridian', label: 'Veridian' },
   { key: 'voip', label: 'Téléphonie / VoIP', icon: PhoneCall },
   { key: 'search-console', label: 'Search Console', icon: SearchIcon },
   { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
@@ -722,14 +725,6 @@ window.StaminadsConfig = {
           {section === 'api-keys' && <ApiKeysPage workspaceId={workspaceId} />}
           {section === 'privacy' && privacyContent}
           {section === 'sdk' && sdkContent}
-          {section === 'veridian' && (
-            <VeridianSettingsPage
-              workspaceId={workspaceId}
-              accountEmail={currentUser?.email}
-              accountSettingsUrl={`/workspaces/${workspaceId}/account`}
-              embedded
-            />
-          )}
           {section === 'voip' && (
             <VoIPSettingsPanel workspaceId={workspaceId} />
           )}
