@@ -22,6 +22,7 @@ import { HealthModule } from './health/health.module';
 import { InvitationsModule } from './invitations/invitations.module';
 import { MailModule } from './mail/mail.module';
 import { MembersModule } from './members/members.module';
+import { SdkModule } from './sdk/sdk.module';
 import { SetupModule } from './setup/setup.module';
 import { SetupMiddleware } from './setup/setup.middleware';
 import { SmtpModule } from './smtp/smtp.module';
@@ -51,7 +52,10 @@ import { AdminPlatformModule } from './admin-platform/admin-platform.module';
     }),
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, 'public'),
-      exclude: ['/api/{*path}', '/health'],
+      // `/sdk/*` is owned by SdkController (explicit Cache-Control + CORS).
+      // Without this exclude, ServeStatic would shadow the controller and
+      // serve the raw file without the headers integrators need.
+      exclude: ['/api/{*path}', '/health', '/sdk/{*path}'],
     }),
     CacheModule.register({
       isGlobal: true,
@@ -106,6 +110,7 @@ import { AdminPlatformModule } from './admin-platform/admin-platform.module';
     AnalyticsModule,
     AssistantModule,
     SubscriptionsModule,
+    SdkModule,
     AdminPlatformModule,
   ],
 })

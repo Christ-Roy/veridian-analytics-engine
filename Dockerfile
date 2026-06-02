@@ -66,6 +66,13 @@ COPY --from=api-builder /app/api/dist ./dist
 # Copy built frontend to API public folder
 COPY --from=frontend-builder /app/console/dist ./dist/public
 
+# Copy SDK build artifacts to /sdk/v1/ so SdkController can stream them.
+# Renamed to the public URL contract (tracker.js / tracker.esm.js / tracker.d.ts)
+# rather than exposing the internal rollup filenames.
+COPY --from=sdk-builder /app/sdk/dist/staminads.min.js ./dist/public/sdk/v1/staminads.min.js
+COPY --from=sdk-builder /app/sdk/dist/staminads.esm.js ./dist/public/sdk/v1/staminads.esm.js
+COPY --from=sdk-builder /app/sdk/dist/staminads.d.ts  ./dist/public/sdk/v1/staminads.d.ts
+
 # Copy GeoIP database (optional - mount as volume if not bundled)
 COPY api/data/GeoLite2-City.mmdb ./data/GeoLite2-City.mmdb
 
