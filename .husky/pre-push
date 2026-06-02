@@ -18,6 +18,16 @@
 #   trop lents (vrai Postgres/staminads), c'est le job CI `integration-tests`
 #   qui les exécute. Le pre-push VÉRIFIE seulement qu'ils EXISTENT pour les
 #   fichiers critiques touchés (étape 4). Cf. docs/CI-ARCHITECTURE.md §2.
+#
+# Fast-path SDK-only (2026-06-02) :
+#   Si le diff vs BASE_REF ne touche QUE des fichiers sous sdk/ (+ .husky/,
+#   docs/, *.md racine), on bypass les étapes 4, 7, 8 (toutes scopées sur
+#   veridian-bridge/) et on lance à la place tsc + vitest + npm audit
+#   DANS sdk/ qui est un sous-projet npm autonome. Gain ~5-10 min sur les
+#   commits SDK purs. Fallback safe : faux négatif (mode complet inutile)
+#   = ralentissement OK, faux positif (mode SDK-only à tort) = bug shippé
+#   pas OK → la logique de détection est volontairement stricte.
+#   Override : SDK_ONLY=0 ou SDK_ONLY=1.
 
 set -e
 
@@ -43,6 +53,63 @@ if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
 fi
 export BASE_REF
 
+# ─── Détection mode SDK-only ──────────────────────────────────────
+# Si le diff vs BASE_REF ne touche QUE des fichiers sous sdk/ (ou des
+# fichiers neutres : .husky/, docs/, *.md racine), on bypass les checks
+# bridge/engine non pertinents (étapes 4, 7, 8) et on lance à la place
+# la suite SDK native (type-check + vitest + npm audit dans sdk/).
+#
+# Logique conservatrice : tout fichier non whitelisté → mode complet
+# (fallback safe). Faux négatif = ralentissement, faux positif = bug shippé.
+#
+# Override : SDK_ONLY=0 force le mode complet quoi qu'il arrive.
+#            SDK_ONLY=1 force le mode SDK-only (à utiliser avec parcimonie,
+#            pour debug du hook lui-même).
+SDK_ONLY="${SDK_ONLY:-auto}"
+if [ "$SDK_ONLY" = "auto" ]; then
+  CHANGED_FILES="$(git diff --name-only "$BASE_REF"..HEAD 2>/dev/null || true)"
+  if [ -z "$CHANGED_FILES" ]; then
+    # Diff vide ou base-ref pétée → fallback safe
+    SDK_ONLY=0
+  else
+    SDK_ONLY=1
+    HAS_SDK_FILE=0
+    while IFS= read -r f; do
+      [ -z "$f" ] && continue
+      case "$f" in
+        sdk/*)        HAS_SDK_FILE=1 ;;
+        .husky/*)     : ;;  # hooks eux-mêmes — neutre
+        docs/*)       : ;;  # docs cross-app — neutre
+        *)
+          # Markdown à la racine uniquement (CHANGELOG, README, etc.)
+          case "$f" in
+            *.md)
+              # accepter uniquement si pas de slash (= racine)
+              case "$f" in
+                */*) SDK_ONLY=0 ;;
+              esac
+              ;;
+            *) SDK_ONLY=0 ;;
+          esac
+          ;;
+      esac
+      [ "$SDK_ONLY" = "0" ] && break
+    done <<EOF
+$CHANGED_FILES
+EOF
+    # Il faut au moins UN fichier sdk/ pour activer le mode (sinon un push
+    # qui ne touche QUE docs/*.md passerait en SDK-only et ne lancerait
+    # même pas la suite SDK — pas utile)
+    [ "$HAS_SDK_FILE" = "0" ] && SDK_ONLY=0
+  fi
+fi
+
+if [ "$SDK_ONLY" = "1" ]; then
+  echo "─── Pre-push : mode SDK-only détecté (diff sous sdk/ uniquement) ───"
+else
+  echo "─── Pre-push : mode complet ───"
+fi
+
 # ─── 2. Conventional Commits ──────────────────────────────────────
 if [ -x "$REPO_ROOT/scripts/ci/check-conventional-commits.sh" ]; then
   echo "─── Pre-push : conventional commits (vs $BASE_REF) ───"
@@ -59,7 +126,9 @@ fi
 # Vérifie que les fichiers CRITIQUES touchés ont un test *.integration.test.ts.
 # NE lance PAS les tests d'intégration (la CI s'en charge) — vérifie juste
 # qu'ils existent. Mode warn/allowlist tant que T2-T5 montent la couverture.
-if [ -x "$REPO_ROOT/scripts/ci/check-integration-coverage.sh" ]; then
+# Skip en mode SDK-only : les fichiers critiques sont tous sous
+# veridian-bridge/src/ — aucun chevauchement possible avec sdk/.
+if [ "$SDK_ONLY" != "1" ] && [ -x "$REPO_ROOT/scripts/ci/check-integration-coverage.sh" ]; then
   echo "─── Pre-push : integration-coverage (fichiers critiques) ───"
   "$REPO_ROOT/scripts/ci/check-integration-coverage.sh"
 fi
@@ -79,7 +148,9 @@ fi
 # ─── 7. Bridge typecheck + tests unitaires ────────────────────────
 # test:ci exclut les *.integration.test.ts (trop lents pour le pre-push —
 # c'est le job CI `integration-tests` qui les lance contre un vrai Postgres).
-if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
+# Skip en mode SDK-only : aucun fichier bridge dans le diff = exécuter
+# tsc/vitest sur le bridge ne ferait que rallumer node_modules pour rien.
+if [ "$SDK_ONLY" != "1" ] && [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
   echo "─── Pre-push : bridge typecheck + tests unitaires ───"
   cd "$REPO_ROOT/veridian-bridge"
   if [ ! -d node_modules ]; then
@@ -99,6 +170,32 @@ if [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; then
     exit 1
   fi
 
+  cd "$REPO_ROOT"
+fi
+
+# ─── 7-SDK / 8-SDK. SDK type-check + vitest + audit (mode SDK-only) ──
+# Mirroir des étapes 7/8 mais scopé sur le sous-projet sdk/ qui a son
+# propre package.json / package-lock.json / rollup / vitest.
+# Cf. .github/workflows/dev-checks.yml job `sdk-checks` qui fait la
+# même chose en CI (npm ci → npm run build → npm test).
+if [ "$SDK_ONLY" = "1" ] && [ -f "$REPO_ROOT/sdk/package.json" ]; then
+  echo "─── Pre-push : SDK type-check + tests + audit ───"
+  cd "$REPO_ROOT/sdk"
+  if [ ! -d node_modules ]; then
+    echo "  installing sdk deps (first run)..."
+    npm install --no-audit --no-fund --silent
+  fi
+  # 1) type-check (script `type-check` du sdk/package.json = tsc --noEmit)
+  npm run type-check
+  # 2) tests vitest natifs (src/**/*.test.ts + tests/**/*.test.ts)
+  npm test
+  # 3) audit CVE prod-only (high+critical bloquant) — symétrique étape 8
+  if ! npm audit --omit=dev --audit-level=high 2>&1; then
+    echo ""
+    echo "✗ CVE high/critical détectée dans sdk/"
+    echo "  Fix avant push. Cf. CLAUDE.md 'Sécurité — règles non négociables'."
+    exit 1
+  fi
   cd "$REPO_ROOT"
 fi
 

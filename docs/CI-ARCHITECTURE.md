@@ -94,12 +94,48 @@ Pipeline complet avant push, **dans cet ordre exact** :
    (exclut les `*.integration.test.ts` — cf. §2.5).
 8. **`npm audit --omit=dev --audit-level=high`** sur veridian-bridge — bloquant.
 
+#### §2.3.1 Fast-path SDK-only (2026-06-02)
+
+Le sous-projet `sdk/` (= `@staminads/sdk`) est un **package npm autonome** :
+son propre `package.json`, son propre `package-lock.json`, son propre rollup,
+sa propre suite vitest + Playwright. Quand un commit ne touche QUE des
+fichiers sous `sdk/` (+ optionnellement `.husky/`, `docs/`, `*.md` racine),
+le pre-push détecte ce cas et bascule en **mode SDK-only** :
+
+- **Skip** des étapes 4, 7, 8 (toutes scopées sur `veridian-bridge/`)
+- **Ajoute** un bloc équivalent dans `sdk/` :
+  - `npm run type-check` (= `tsc --noEmit`)
+  - `npm test` (vitest sur `src/**/*.test.ts` + `tests/**/*.test.ts`)
+  - `npm audit --omit=dev --audit-level=high` (bloquant high+critical)
+- **Garde** les étapes 1, 2, 3, 5, 6 (branche protégée, conventional
+  commits, test-mapping qui couvre déjà `sdk/src/*.ts`, static audit
+  TS-wide qui catch `it.only` côté SDK aussi, env sync no-op vu que les
+  fichiers `veridian-bridge/` ne sont pas touchés)
+
+Gain mesuré : **~5-10 min → < 1 min** pour un commit SDK pur sur machine
+qui n'a pas encore installé `veridian-bridge/node_modules`.
+
+Logique de détection **volontairement conservatrice** :
+faux négatif (mode complet à tort sur un commit SDK pur) = ralentissement
+acceptable. Faux positif (SDK-only à tort sur un commit qui touche aussi
+au bridge) = bug shippé inacceptable. Tout fichier non-whitelisté en dehors
+de `sdk/`, `.husky/`, `docs/`, `*.md` racine → fallback mode complet.
+
+Override par variable d'env :
+- `SDK_ONLY=0` — force le mode complet quoi qu'il arrive
+- `SDK_ONLY=1` — force le mode SDK-only (debug du hook uniquement)
+- `SDK_ONLY=auto` (défaut) — détection automatique sur le diff
+
+CI miroir : `.github/workflows/dev-checks.yml` job `sdk-checks`
+(`cd sdk && npm ci && npm run build && npm test`).
+
 ### §2.4 Exception : skip d'urgence
 
 Variables d'env :
 - `SKIP_ENV_SYNC=1` — désactive le check ENV sync (rare, dette éphémère).
 - `BASE_REF=<ref>` — override la branche de référence (par défaut `origin/<branche>`).
 - `INTEGRATION_GATE=block|warn` — force le mode du gate intégration (cf. §2.5).
+- `SDK_ONLY=0|1|auto` — force/désactive le fast-path SDK-only (cf. §2.3.1).
 
 Toute utilisation = à éviter et expliquer dans le message de commit.
 **`--no-verify` reste strictement interdit (Constitution CI §3).**
