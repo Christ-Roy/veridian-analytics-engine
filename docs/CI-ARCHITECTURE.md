@@ -105,6 +105,8 @@ le pre-push détecte ce cas et bascule en **mode SDK-only** :
 - **Skip** des étapes 4, 7, 8 (toutes scopées sur `veridian-bridge/`)
 - **Ajoute** un bloc équivalent dans `sdk/` :
   - `npm run type-check` (= `tsc --noEmit`)
+  - `npm run build` (rollup — requis avant `npm test` parce que
+    `tests/scripts/build-version.test.ts` inspecte `dist/staminads*.js`)
   - `npm test` (vitest sur `src/**/*.test.ts` + `tests/**/*.test.ts`)
   - `npm audit --omit=dev --audit-level=high` (bloquant high+critical)
 - **Garde** les étapes 1, 2, 3, 5, 6 (branche protégée, conventional

@@ -179,7 +179,7 @@ fi
 # Cf. .github/workflows/dev-checks.yml job `sdk-checks` qui fait la
 # même chose en CI (npm ci → npm run build → npm test).
 if [ "$SDK_ONLY" = "1" ] && [ -f "$REPO_ROOT/sdk/package.json" ]; then
-  echo "─── Pre-push : SDK type-check + tests + audit ───"
+  echo "─── Pre-push : SDK type-check + build + tests + audit ───"
   cd "$REPO_ROOT/sdk"
   if [ ! -d node_modules ]; then
     echo "  installing sdk deps (first run)..."
@@ -187,9 +187,15 @@ if [ "$SDK_ONLY" = "1" ] && [ -f "$REPO_ROOT/sdk/package.json" ]; then
   fi
   # 1) type-check (script `type-check` du sdk/package.json = tsc --noEmit)
   npm run type-check
-  # 2) tests vitest natifs (src/**/*.test.ts + tests/**/*.test.ts)
+  # 2) build rollup — REQUIS avant npm test parce que les tests
+  #    tests/scripts/build-version.test.ts inspectent dist/staminads*.js
+  #    (vérifient l'injection __SDK_VERSION__ dans les bundles). Sans
+  #    build préalable, ce test échoue avec "expected 0 to be greater than 0".
+  #    Mirroir exact du workflow CI sdk-checks (build avant test).
+  npm run build
+  # 3) tests vitest natifs (src/**/*.test.ts + tests/**/*.test.ts)
   npm test
-  # 3) audit CVE prod-only (high+critical bloquant) — symétrique étape 8
+  # 4) audit CVE prod-only (high+critical bloquant) — symétrique étape 8
   if ! npm audit --omit=dev --audit-level=high 2>&1; then
     echo ""
     echo "✗ CVE high/critical détectée dans sdk/"
