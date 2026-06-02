@@ -193,3 +193,51 @@ Le SDK DOIT couvrir nativement ces besoins (cf `TUNNEL-DE-VENTE.md` §2 et §6) 
   parfait.
 - Ne touche pas au repo `veridian-site` toi-même : envoie le ticket
   cousin (déjà déposé : `veridian-site/todo/2026-06-02-cabler-tracker-engine.md`).
+
+---
+
+## Résolution — 2026-06-02 14:56Z
+
+Livré côté **STAGING** par agent SDK-publish (commit `51cbe32`).
+
+### Livrables
+
+| # | Livrable | Statut | Notes |
+|---|---|---|---|
+| L1.1 | Snippet `<script>` servant `/sdk/v1/tracker.js` | ✅ | 200, MIME `application/javascript`, Cache-Control 1h immutable, CORS `*`, **20.5 KB gzip** (cible <30 KB) |
+| L1.2 | Package npm `@veridian/analytics-tracker` | ⏳ | Org npm pas créée → reporté. Le snippet HTTP couvre 100% des sites client static + Next.js. Le bundle ESM est servi à `/sdk/v1/tracker.esm.js` pour les imports dynamiques. |
+| L2 | Endpoint `/api/track` confirmé en staging | ✅ | 400 sur payload vide (DTO validé), 400 "Invalid workspace_id" sur ws inexistant (lookup tenant OK). Prêt à accepter du trafic réel. |
+| L3 | Husky pre-push fast-path SDK-only | ✅ | Déjà livré par #1d97aca et #55f4642 upstream avant mon push. Mon diff (qui touche `api/`) ne déclenche pas le fast-path → mode complet → pre-push 5 min OK. |
+| L4 | `sdk/README.md` quickstart Veridian | ✅ | Snippet + npm + API minimum tunnel de vente + consent gating ePrivacy + CSP + SRI + troubleshooting + 4 endpoints publics documentés. Doc upstream staminads préservée en référence. |
+| L5 | Audit `sdk-api-analysis-report.md` (3 bugs CRITICAL) | ⏳ | Rapport daté 2026-01-08, recommandations API-side (ajout colonnes ClickHouse `entered_at`/`exited_at`/`goal_timestamp`). **Hors scope publication SDK** : ces bugs concernent le handler côté API, pas le bundle SDK. À traiter quand le tunnel scoring en aura besoin. Ticket dédié à ouvrir. |
+
+### Smoke test live (2026-06-02 14:56Z)
+
+```
+GET /sdk/v1/tracker.js          → 200, app/javascript, 20.5 KB gzip
+GET /sdk/v1/tracker.esm.js      → 200, app/javascript
+GET /sdk/v1/tracker.d.ts        → 200, text/plain
+GET /sdk/v1/manifest.json       → 200, {"sdk":"@veridian/analytics-tracker",...}
+POST /api/track (empty)         → 400 Bad Request (DTO validation OK)
+```
+
+### Statut production
+
+❌ **Pas encore en prod** — le ticket parlait de `analytics-engine.app.veridian.site`
+(prod) mais Robert a expressément demandé "STAGING d'abord". Promotion main = arbitrage
+ultérieur. La même image staging + le même Dockerfile shipperont en prod sans
+modification au moment de la promotion (pas de bascule d'env nécessaire).
+
+### Notification
+
+Le repo `veridian-site` peut maintenant intégrer le snippet staging :
+
+```html
+<script
+  src="https://analytics-engine.staging.veridian.site/sdk/v1/tracker.js"
+  defer
+></script>
+```
+
+→ ticket cousin `veridian-site/todo/2026-06-02-cabler-tracker-engine.md` à
+notifier.
