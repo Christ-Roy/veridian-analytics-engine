@@ -199,6 +199,51 @@ export const SYSTEM_SCHEMAS: Record<string, string> = {
     ) ENGINE = ReplacingMergeTree(updated_at)
     ORDER BY (user_id, workspace_id, id)
   `,
+
+  webhook_definitions: `
+    CREATE TABLE IF NOT EXISTS {database}.webhook_definitions (
+      id String,
+      workspace_id String,
+      name String,
+      url String,
+      active UInt8 DEFAULT 1,
+      auth_type Enum8('none' = 0, 'bearer' = 1, 'basic' = 2, 'hmac' = 3) DEFAULT 'none',
+      auth_secret String DEFAULT '',
+      events String DEFAULT '[]',
+      filters String DEFAULT '[]',
+      transform String DEFAULT '',
+      retry_config String DEFAULT '',
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3),
+      deleted_at Nullable(DateTime64(3))
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY (workspace_id, id)
+  `,
+
+  webhook_deliveries: `
+    CREATE TABLE IF NOT EXISTS {database}.webhook_deliveries (
+      id String,
+      webhook_id String,
+      workspace_id String,
+      event_id String,
+      event_type String,
+      attempt UInt8 DEFAULT 1,
+      scheduled_at DateTime64(3),
+      sent_at Nullable(DateTime64(3)),
+      status Enum8('pending' = 0, 'success' = 1, 'failed' = 2, 'retrying' = 3, 'gave_up' = 4) DEFAULT 'pending',
+      http_status Nullable(UInt16),
+      latency_ms Nullable(UInt32),
+      request_url String DEFAULT '',
+      request_body String DEFAULT '',
+      response_body String DEFAULT '',
+      error_message String DEFAULT '',
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    PARTITION BY toYYYYMM(created_at)
+    ORDER BY (workspace_id, webhook_id, id)
+    TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE
+  `,
 };
 
 // Workspace schemas - stored in staminads_ws_{workspace_id} databases

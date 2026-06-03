@@ -21,6 +21,12 @@ export const PERMISSIONS = {
   'apiKeys.view': ['owner', 'admin'],
   'apiKeys.manage': ['owner', 'admin'],
 
+  // Webhooks (Phase 1 — cf todo/PATTERNS-WEBHOOKS.md §1)
+  'webhook.read': ['owner', 'admin', 'editor', 'viewer'],
+  'webhook.write': ['owner', 'admin'],
+  'webhook.delete': ['owner', 'admin'],
+  'webhook.test': ['owner', 'admin', 'editor'],
+
   // Team management
   'members.invite': ['owner', 'admin'],
   'members.manage': ['owner', 'admin'],

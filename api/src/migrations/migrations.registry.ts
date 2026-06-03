@@ -2,6 +2,7 @@ import { MajorMigration } from './migration.interface';
 import { V4ResetMigration } from './v4-reset-migration';
 import { V5SubscriptionsMigration } from './v5-subscriptions-migration';
 import { V6UserIdMigration } from './v6-user-id-migration';
+import { V7WebhooksMigration } from './v7-webhooks-migration';
 
 /**
  * Registry of all major migrations.
@@ -11,4 +12,5 @@ export const MIGRATIONS: MajorMigration[] = [
   V4ResetMigration,
   V5SubscriptionsMigration,
   V6UserIdMigration,
+  V7WebhooksMigration,
 ];

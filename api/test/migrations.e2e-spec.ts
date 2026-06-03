@@ -579,4 +579,39 @@ describe('Migrations E2E', () => {
       await truncateSystemTables(systemClient, ['workspaces']);
     });
   });
+
+  describe('V7 Webhooks Migration', () => {
+    // Static import here on purpose: the migrations runner is mocked above,
+    // we test the migration object in isolation against a real ClickHouse.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { V7WebhooksMigration } = require('../src/migrations/v7-webhooks-migration');
+
+    it('creates webhook_definitions and webhook_deliveries tables', async () => {
+      // Drop the tables first to ensure migrateSystem creates them.
+      await systemClient.command({ query: `DROP TABLE IF EXISTS webhook_definitions` });
+      await systemClient.command({ query: `DROP TABLE IF EXISTS webhook_deliveries` });
+
+      await V7WebhooksMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+
+      const result = await systemClient.query({
+        query: `SELECT name FROM system.tables WHERE database = {db:String} AND name IN ('webhook_definitions', 'webhook_deliveries') ORDER BY name`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      const tables = (await result.json<{ name: string }>()).map((r) => r.name);
+      expect(tables).toContain('webhook_definitions');
+      expect(tables).toContain('webhook_deliveries');
+    });
+
+    it('is idempotent (running twice does not throw)', async () => {
+      await V7WebhooksMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+      await V7WebhooksMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+    });
+
+    it('declares system-only migration (no workspace iteration)', () => {
+      expect(V7WebhooksMigration.majorVersion).toBe(7);
+      expect(V7WebhooksMigration.hasSystemMigration()).toBe(true);
+      expect(V7WebhooksMigration.hasWorkspaceMigration()).toBe(false);
+    });
+  });
 });
