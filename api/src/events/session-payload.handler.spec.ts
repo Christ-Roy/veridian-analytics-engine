@@ -5,6 +5,7 @@ import { EventBufferService } from './event-buffer.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { GeoService } from '../geo/geo.service';
 import { EMPTY_GEO } from '../geo/geo.interface';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   SessionPayloadDto,
   PageviewActionDto,
@@ -90,6 +91,10 @@ describe('SessionPayloadHandler', () => {
           useValue: {
             lookupWithSettings: jest.fn().mockReturnValue(EMPTY_GEO),
           },
+        },
+        {
+          provide: EventEmitter2,
+          useValue: { emit: jest.fn() },
         },
       ],
     }).compile();

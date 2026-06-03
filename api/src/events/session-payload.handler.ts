@@ -1,5 +1,5 @@
 import { Injectable, BadRequestException, Logger } from '@nestjs/common';
-import { OnEvent } from '@nestjs/event-emitter';
+import { EventEmitter2, OnEvent } from '@nestjs/event-emitter';
 import { EventBufferService } from './event-buffer.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { GeoService, GeoLocation } from '../geo';
@@ -41,6 +41,7 @@ export class SessionPayloadHandler {
     private readonly buffer: EventBufferService,
     private readonly workspacesService: WorkspacesService,
     private readonly geoService: GeoService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async handle(
@@ -124,7 +125,68 @@ export class SessionPayloadHandler {
     // 10. Add to buffer
     await this.buffer.addBatch(events);
 
+    // 11. Fan-out webhooks (best-effort, never blocks ingestion).
+    //     Cf todo/PATTERNS-WEBHOOKS.md §4.
+    for (const event of events) {
+      this.emitTracked(event);
+    }
+
     return { success: true };
+  }
+
+  /**
+   * Emit `event.tracked` for the webhooks dispatcher.
+   * Errors here MUST never propagate to the ingestion pipeline.
+   */
+  private emitTracked(event: TrackingEvent): void {
+    try {
+      const rec = event as unknown as Record<string, unknown>;
+      const payload = {
+        workspace_id: event.workspace_id,
+        event_type: event.name ?? 'unknown',
+        event_id:
+          (rec.dedup_token as string | undefined) ??
+          `${event.session_id}_${event.name}_${Date.now()}`,
+        payload: {
+          session_id: event.session_id,
+          path: rec.path,
+          page_number: rec.page_number,
+          previous_path: rec.previous_path,
+          goal_name: rec.goal_name,
+          goal_value: rec.goal_value,
+          properties: rec.properties,
+          utm: {
+            source: rec.utm_source,
+            medium: rec.utm_medium,
+            campaign: rec.utm_campaign,
+            term: rec.utm_term,
+            content: rec.utm_content,
+            id: rec.utm_id,
+            id_from: rec.utm_id_from,
+          },
+          referrer: rec.referrer,
+          referrer_domain: rec.referrer_domain,
+          referrer_path: rec.referrer_path,
+          landing_page: rec.landing_page,
+          landing_domain: rec.landing_domain,
+          landing_path: rec.landing_path,
+          country: rec.country,
+          region: rec.region,
+          city: rec.city,
+          device: rec.device,
+          browser: rec.browser,
+          os: rec.os,
+          language: rec.language,
+          timezone: rec.timezone,
+          user_id: event.user_id ?? null,
+        },
+      };
+      this.eventEmitter.emit('event.tracked', payload);
+    } catch (err) {
+      this.logger.warn(
+        `emitTracked failed for ws=${event.workspace_id}: ${(err as Error).message}`,
+      );
+    }
   }
 
   private async getWorkspace(workspaceId: string): Promise<Workspace> {

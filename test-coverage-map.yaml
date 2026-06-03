@@ -489,12 +489,14 @@
     - api/src/migrations/migrations.service.ts
     - api/src/migrations/migrations.registry.ts
     - api/src/migrations/v6-user-id-migration.ts
+    - api/src/migrations/v7-webhooks-migration.ts
   covered_by:
     - api/test/migrations.e2e-spec.ts
   reason: |
-    Migration system ClickHouse (V4/V5/V6). CRITIQUE : toute nouvelle
-    migration (ex: V7VisitorIdMigration Phase 2) DOIT ajouter un test ici
-    sinon le pre-push refuse.
+    Migration system ClickHouse (V4/V5/V6/V7). CRITIQUE : toute nouvelle
+    migration DOIT ajouter un test ici sinon le pre-push refuse.
+    V7 (webhooks) couverte par le describe "V7 Webhooks Migration" qui
+    teste CREATE + idempotence + flags hasSystemMigration/hasWorkspaceMigration.
 
 - sources:
     - api/src/database/schemas.ts
@@ -1043,6 +1045,58 @@
     - endpoints HTTP : auth Bearer, 404 tenant inconnu, fail-soft réseau.
     Suite SÉRIALISÉE + fichier auto-isolant (Tenant à id unique
     cross-process, assertions scopées) → déterministe.
+
+# ─── WEBHOOKS Phase 1 (todo/2026-06-02-webhooks-destinations-multi-tenant.md) ──
+
+- sources:
+    - api/src/webhooks/webhooks.controller.ts
+    - api/src/webhooks/webhook-dispatcher.service.ts
+  covered_by:
+    - api/test/webhooks.e2e-spec.ts
+    - api/test/webhook-ssrf.e2e-spec.ts
+  reason: |
+    Webhooks REST CRUD + dispatch + multi-tenant isolation.
+    webhooks.e2e couvre CRUD complet, dispatch après /api/track, multi-tenant.
+    webhook-ssrf.e2e couvre les 9 URL malicieuses (loopback/RFC1918/cloud
+    metadata/engine-self loop) + acceptation https valide.
+
+- sources:
+    - api/src/webhooks/webhook-filter-engine.ts
+    - api/src/webhooks/webhook-transform-engine.ts
+    - api/src/webhooks/webhook-crypto.ts
+    - api/src/webhooks/webhook-ssrf-guard.ts
+    - api/src/webhooks/webhook-delivery-worker.service.ts
+    - api/src/webhooks/webhooks.service.ts
+  covered_by:
+    - api/src/webhooks/webhook-filter-engine.spec.ts
+    - api/src/webhooks/webhook-transform-engine.spec.ts
+    - api/src/webhooks/webhook-crypto.spec.ts
+    - api/src/webhooks/webhook-ssrf-guard.spec.ts
+    - api/src/webhooks/webhook-delivery-worker.service.spec.ts
+    - api/src/webhooks/webhook-dispatcher.service.spec.ts
+    - api/src/webhooks/webhooks.service.spec.ts
+  reason: |
+    Composants purs / NestJS service du module webhooks. Tests Jest unitaires
+    colocalisés (*.spec.ts). Les tests E2E (api/test/webhooks*.e2e-spec.ts)
+    couvrent l'intégration HTTP + ClickHouse réelle.
+
+- sources:
+    - api/src/webhooks/dto/create-webhook.dto.ts
+    - api/src/webhooks/entities/webhook-definition.entity.ts
+    - api/src/webhooks/entities/webhook-delivery.entity.ts
+  covered_by:
+    - api/test/webhooks.e2e-spec.ts
+  reason: |
+    DTOs class-validator + entities, couverts via les tests E2E qui exercent
+    chaque champ (validation, masquage du secret, multi-tenant).
+
+- sources:
+    - api/test/utils/mock-webhook-target.ts
+  covered_by:
+    - api/test/webhooks.e2e-spec.ts
+  reason: |
+    Mock HTTP server réutilisable pour les e2e webhooks (port aléatoire,
+    behavior configurable 200/4xx/5xx/timeout, log des reqs reçues).
 
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #
