@@ -18,6 +18,9 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_test_ws_user_id',
   'staminads_ws_api_key_auth_test_ws',
   'staminads_ws_api_key_auth_other_ws',
+  // Webhooks e2e (webhooks.e2e-spec.ts) — multi-tenant fixture
+  'staminads_ws_test_ws_webhooks_a',
+  'staminads_ws_test_ws_webhooks_b',
 ];
 
 let client: ClickHouseClient;

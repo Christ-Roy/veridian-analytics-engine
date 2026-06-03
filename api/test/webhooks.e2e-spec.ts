@@ -86,24 +86,10 @@ describe('Webhooks CRUD + dispatch + multi-tenant', () => {
       expect(res.body.url).toBe(`${mock.url}/hook`);
     });
 
-    it('rejects SSRF (loopback when WEBHOOK_ALLOW_HTTP=true means we still bar private IPs at validate time)', async () => {
-      // Even with WEBHOOK_ALLOW_HTTP=true, a private IP literal like
-      // 127.0.0.0/8 ranges other than 127.0.0.1 + non-127 hosts are
-      // banned. We pick localhost explicitly so the check fires regardless
-      // of the mock's 127.0.0.1 (mock URL uses the literal IP).
-      const res = await request(ctx.app.getHttpServer())
-        .post('/api/webhooks.create')
-        .set('Authorization', `Bearer ${authToken}`)
-        .send({
-          workspace_id: WS_A,
-          name: 'evil',
-          url: 'https://localhost/hook',
-          events: ['screen_view'],
-          auth: { type: 'none' },
-        })
-        .expect(403);
-      expect(res.body.code ?? res.body.message?.code).toBe('FORBIDDEN_TARGET');
-    });
+    // Note: SSRF allowlist coverage lives in `webhook-ssrf.e2e-spec.ts`
+    // which sets WEBHOOK_ALLOW_PRIVATE_IPS=false. Duplicating the test here
+    // is impossible because this suite relaxes private IPs globally so the
+    // mock target on 127.0.0.1 is reachable.
 
     it('rejects duplicate names (409)', async () => {
       const payload = {
