@@ -51,9 +51,9 @@ describe('WebhookTransformEngine', () => {
       expect(out).toBe('robert@veridian.site');
     });
 
-    it('throws BadRequestException(INVALID_TRANSFORM) on a mismatched block close', () => {
-      // {{/foo}} closes a block that was never opened — Handlebars throws.
-      const broken = { type: 'template' as const, template: '{{/foo}}' };
+    it('throws BadRequestException(INVALID_TRANSFORM) on malformed template syntax', () => {
+      // Unclosed mustache statement — Handlebars throws a Parse error.
+      const broken = { type: 'template' as const, template: '{{unclosed' };
       expect(() => engine.render(broken, {})).toThrow(BadRequestException);
     });
   });
@@ -72,7 +72,7 @@ describe('WebhookTransformEngine', () => {
 
     it('throws on a malformed template', () => {
       expect(() =>
-        engine.assertCompilable({ type: 'template', template: '{{/foo}}' }),
+        engine.assertCompilable({ type: 'template', template: '{{unclosed' }),
       ).toThrow(BadRequestException);
     });
   });
