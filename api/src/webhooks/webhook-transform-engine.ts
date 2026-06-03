@@ -68,10 +68,16 @@ export class WebhookTransformEngine {
   /**
    * Throw BadRequestException(INVALID_TRANSFORM) if the template cannot
    * be compiled. Used by the CRUD endpoints to catch typos before write.
+   *
+   * We force the parse step explicitly because Handlebars.compile() is
+   * lazy — parse errors fire on execute, not on compile. Calling parse()
+   * up front catches syntax errors at CRUD time instead of at first
+   * delivery (when it would surface as a transform_failed delivery).
    */
   assertCompilable(transform: WebhookTransform): void {
     if (!transform || transform.type !== 'template') return;
     try {
+      this.handlebars.parse(transform.template);
       this.handlebars.compile(transform.template, { strict: false });
     } catch (err) {
       throw new BadRequestException({
