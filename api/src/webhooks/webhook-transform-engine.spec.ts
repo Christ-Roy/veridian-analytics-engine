@@ -51,10 +51,9 @@ describe('WebhookTransformEngine', () => {
       expect(out).toBe('robert@veridian.site');
     });
 
-    it('throws BadRequestException(INVALID_TRANSFORM) on bad helper invocation', () => {
-      // Handlebars by default tolerates missing variables (renders ''); we test a
-      // truly broken template instead.
-      const broken = { type: 'template' as const, template: '{{#each x' };
+    it('throws BadRequestException(INVALID_TRANSFORM) on a mismatched block close', () => {
+      // {{/foo}} closes a block that was never opened — Handlebars throws.
+      const broken = { type: 'template' as const, template: '{{/foo}}' };
       expect(() => engine.render(broken, {})).toThrow(BadRequestException);
     });
   });
@@ -73,7 +72,7 @@ describe('WebhookTransformEngine', () => {
 
     it('throws on a malformed template', () => {
       expect(() =>
-        engine.assertCompilable({ type: 'template', template: '{{#if x' }),
+        engine.assertCompilable({ type: 'template', template: '{{/foo}}' }),
       ).toThrow(BadRequestException);
     });
   });

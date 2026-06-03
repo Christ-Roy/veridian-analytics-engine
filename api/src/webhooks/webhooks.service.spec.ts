@@ -259,6 +259,140 @@ describe('WebhooksService', () => {
       expect(delivery.id).toMatch(/^del_/);
     });
   });
+
+  describe('list with active filter', () => {
+    it('filters by active=true', async () => {
+      await service.create({
+        workspace_id: 'ws_a',
+        name: 'a',
+        url: 'https://x.example.com',
+        auth: { type: 'none' },
+        events: ['screen_view'],
+        active: true,
+      });
+      await service.create({
+        workspace_id: 'ws_a',
+        name: 'b',
+        url: 'https://y.example.com',
+        auth: { type: 'none' },
+        events: ['screen_view'],
+        active: false,
+      });
+      const activeOnly = await service.list({ workspace_id: 'ws_a', active: true });
+      expect(activeOnly).toHaveLength(1);
+      expect(activeOnly[0].name).toBe('a');
+
+      const inactiveOnly = await service.list({ workspace_id: 'ws_a', active: false });
+      expect(inactiveOnly).toHaveLength(1);
+      expect(inactiveOnly[0].name).toBe('b');
+    });
+  });
+
+  describe('deliveries listing + retrieval', () => {
+    it('listDeliveries scopes by workspace + supports webhook_id + status filters', async () => {
+      const wh = await service.create({
+        workspace_id: 'ws_a',
+        name: 'wh',
+        url: 'https://x.example.com',
+        auth: { type: 'none' },
+        events: ['screen_view'],
+      });
+      const full = await service.findById('ws_a', wh.id);
+      const d = await service.enqueueDelivery(full!, {
+        event_id: 'e1',
+        event_type: 'screen_view',
+        payload: {},
+      });
+
+      const byWs = await service.listDeliveries({ workspace_id: 'ws_a' });
+      expect(byWs.map((x) => x.id)).toContain(d.id);
+
+      const byWh = await service.listDeliveries({ workspace_id: 'ws_a', webhook_id: wh.id });
+      expect(byWh).toHaveLength(1);
+
+      const fetched = await service.getDelivery('ws_a', d.id);
+      expect(fetched?.id).toBe(d.id);
+      expect(await service.getDelivery('ws_a', 'missing')).toBeNull();
+    });
+  });
+
+  describe('updateDelivery + findReadyDeliveries', () => {
+    it('updates status and findReady picks up pending/retrying only', async () => {
+      const wh = await service.create({
+        workspace_id: 'ws_a',
+        name: 'wh',
+        url: 'https://x.example.com',
+        auth: { type: 'none' },
+        events: ['screen_view'],
+      });
+      const full = await service.findById('ws_a', wh.id);
+      const d = await service.enqueueDelivery(full!, {
+        event_id: 'e1',
+        event_type: 'screen_view',
+        payload: {},
+      });
+      const ready = await service.findReadyDeliveries(50);
+      expect(ready.map((r) => r.id)).toContain(d.id);
+
+      await service.updateDelivery({ ...d, status: 'success' });
+      const afterSuccess = await service.findReadyDeliveries(50);
+      expect(afterSuccess.find((r) => r.id === d.id)).toBeUndefined();
+    });
+  });
+
+  describe('decryptSecret', () => {
+    it('returns empty when no secret stored', async () => {
+      const wh = await service.create({
+        workspace_id: 'ws_a',
+        name: 'no-secret',
+        url: 'https://x.example.com',
+        auth: { type: 'none' },
+        events: ['screen_view'],
+      });
+      const full = await service.findById('ws_a', wh.id);
+      expect(service.decryptSecret(full!)).toBe('');
+    });
+
+    it('round-trips an encrypted secret', async () => {
+      const wh = await service.create({
+        workspace_id: 'ws_a',
+        name: 'with-secret',
+        url: 'https://x.example.com',
+        auth: { type: 'bearer', token: 'sk_round_trip' },
+        events: ['screen_view'],
+      });
+      const full = await service.findById('ws_a', wh.id);
+      expect(service.decryptSecret(full!)).toBe('sk_round_trip');
+    });
+  });
+
+  describe('validation errors', () => {
+    it('rejects transform.template missing when type=template', async () => {
+      await expect(
+        service.create({
+          workspace_id: 'ws_a',
+          name: 'bad-transform',
+          url: 'https://x.example.com',
+          auth: { type: 'none' },
+          events: ['screen_view'],
+          transform: { type: 'template' },
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('rejects retry.max_attempts out of range', async () => {
+      await expect(
+        service.create({
+          workspace_id: 'ws_a',
+          name: 'bad-retry',
+          url: 'https://x.example.com',
+          auth: { type: 'none' },
+          events: ['screen_view'],
+          retry: { max_attempts: 0, backoff_ms: [] },
+        }),
+      ).rejects.toThrow();
+    });
+  });
 });
 
 function makeCryptoSpy(): WebhookCrypto {
