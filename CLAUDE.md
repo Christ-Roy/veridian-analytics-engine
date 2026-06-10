@@ -1,5 +1,13 @@
 # Veridian Analytics Engine — Instructions agent
 
+> ## 🔴 Règle d'or Veridian — zéro contournement (gravée Robert 2026-06-10)
+> **Interdit absolu** : cron bricolé, SQLite/store parallèle, job maison pour
+> ÉVITER l'API ou la DB réelle de l'app. On travaille AVEC le vrai système :
+> coder propre → tester staging → fixer la logique → MAJ DB staging si besoin
+> → test lourd → push prod. Un blocage (accès, credential) se débloque via le
+> lead, il ne se contourne pas. Détail : CLAUDE.md racine veridian-platform.
+
+
 > Fork interne de **staminads** v6.1.0, branché Veridian SaaS multi-tenant.
 > URLs : staging `analytics-engine.staging.veridian.site` (branche `staging`),
 > prod `analytics-engine.app.veridian.site` (branche `main`).
