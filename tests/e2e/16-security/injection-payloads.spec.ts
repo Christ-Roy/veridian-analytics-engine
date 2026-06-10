@@ -57,7 +57,7 @@ test.describe(`Injection payloads [${TARGET}] @security`, () => {
   }
 
   for (const payload of XSS_PAYLOADS) {
-    test(`POST /api/ingest/form with XSS payload (sanitized or escaped)`, async () => {
+    test(`POST /api/ingest/form with XSS payload "${payload.slice(0, 20)}…" (sanitized or escaped)`, async () => {
       const client = new ApiClient(target.engineUrl);
       const res = await client.post(
         "/api/ingest/form",
@@ -92,7 +92,7 @@ test.describe(`Injection payloads [${TARGET}] @security`, () => {
   }
 
   for (const payload of PROTO_POLLUTION_PAYLOADS) {
-    test(`POST /api/auth.login with prototype pollution payload`, async () => {
+    test(`POST /api/auth.login with prototype pollution payload ${JSON.stringify(payload).slice(0, 30)}…`, async () => {
       const client = new ApiClient(target.engineUrl);
       const res = await client.post("/api/auth.login", payload, {
         allowFailure: true,

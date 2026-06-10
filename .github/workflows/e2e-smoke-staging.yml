@@ -17,6 +17,11 @@ on:
     types: [completed]
     branches: [staging]
   workflow_dispatch:
+  schedule:
+    # Surveillance uptime : la stack staging peut mourir HORS deploy
+    # (OOM dev-pub) — cas réel : down du 2026-06-03 au 2026-06-10 sans
+    # détection (le smoke ne tournait qu'après deploy). 3x/jour suffit.
+    - cron: "17 6,12,18 * * *"
 
 concurrency:
   group: e2e-smoke-staging
@@ -31,6 +36,7 @@ jobs:
     name: Smoke staging (01 + 06-rejection)
     if: |
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     # 5min trop court depuis ajout 02-bugs-regression (Playwright browser

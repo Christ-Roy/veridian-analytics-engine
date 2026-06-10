@@ -33,11 +33,22 @@ test.describe(`Setup verrouillé (anti-régression) [${TARGET}] @security @anti-
   test.skip(target.isDemo, "Démo a un flow setup-already-done par seed, pas pertinent");
 
   test("GET /api/setup.status → setupCompleted:true (pré-requis)", async () => {
+    // setup.status partage le bucket throttler 'auth' (10 req/min/IP) avec
+    // les logins que la suite smoke enchaîne → 429 de flakiness CI (issues
+    // #56/#57, rouge depuis le 2026-06-02). Un 429 n'est PAS une régression
+    // de lockdown : on attend la fenêtre et on retente (1 fois suffit).
+    test.setTimeout(120_000);
+
     // Arrange
     const client = new ApiClient(target.engineUrl);
 
     // Act
-    const res = await client.get("/api/setup.status", { timeoutMs: 10_000 });
+    let res = await client.get("/api/setup.status", { timeoutMs: 10_000 });
+    if (res.status === 429) {
+      const retryAfterS = Number(res.headers["retry-after"]) || 61;
+      await new Promise((r) => setTimeout(r, Math.min(retryAfterS, 90) * 1000));
+      res = await client.get("/api/setup.status", { timeoutMs: 10_000 });
+    }
 
     // Assert
     expect(res.status, `setup.status doit répondre 200`).toBe(200);
