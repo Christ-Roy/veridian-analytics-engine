@@ -195,6 +195,15 @@ export function generateVoipCalls(config: VoipCallsConfig): TrackingEvent[] {
 
     callDate.setHours(pickBusinessHour(), randomBetween(0, 59), randomBetween(0, 59), 0);
 
+    // Clamp to `endDate` ("now") : when daysAgo === 0 the business hour drawn
+    // above (9h-18h) can land after endDate's own time-of-day, producing a
+    // call "in the future". An appel ne peut pas être passé après maintenant —
+    // on ramène à endDate. Évite le flaky de borne haute (cf
+    // todo/2026-06-02-flaky-voip-calls-spec-line-86.md).
+    if (callDate.getTime() > config.endDate.getTime()) {
+      callDate = new Date(config.endDate);
+    }
+
     const tracked = weightedPick(DEMO_TRACKED_NUMBERS);
     const provider = weightedPick(PROVIDER_WEIGHTS).provider;
     const status = weightedPick(STATUS_WEIGHTS).status;
