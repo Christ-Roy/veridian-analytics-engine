@@ -65,6 +65,18 @@ Labels : 0 = froid (pas venu) · 1-29 = tiède · ≥30 = chaud.
 - État de sync côté bridge (Postgres) : curseur export + dernier score
   poussé par identité (idempotence + diff réconcile).
 
+## Auth du réconciliateur vers export.userEvents (vérifié 2026-06-10)
+
+- ❌ `POST /api/apiKeys.create` sur le workspace tunnel → 403 "Not a member
+  of this workspace" même en super-admin (les workspaces platform-managed
+  n'ont AUCUN membre, et le service exige une membership réelle).
+- ✅ **JWT super-admin** (login `admin@veridian.site`) passe le
+  `WorkspaceAuthGuard` de l'export → solution V1 : le réconciliateur fait
+  un `auth.login` programmatique et rafraîchit son token (expiration 7j).
+- Amélioration V2 (si besoin) : étendre `provision-workspace.js` pour
+  créer une API key workspace au provisioning (évolution engine, ticket
+  séparé si l'architecte la demande).
+
 ## Étapes
 
 1. Valider design + pondération avec le lead (ce ticket).
