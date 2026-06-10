@@ -83,6 +83,11 @@ export interface UserEventRow {
   page_number: number;
   duration: number;
   max_scroll: number;
+  /**
+   * Properties libres du goal (events custom) — Map ClickHouse, valeurs
+   * castées string à l'ingestion. Vide pour les screen_view.
+   */
+  properties: Record<string, string>;
 }
 
 export interface UserEventsResponse {

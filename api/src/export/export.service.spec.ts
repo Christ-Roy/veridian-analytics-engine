@@ -65,6 +65,7 @@ describe('ExportService', () => {
     page_number: 1,
     duration: 5000,
     max_scroll: 75,
+    properties: {},
     ...overrides,
   });
 
@@ -122,6 +123,22 @@ describe('ExportService', () => {
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
         expect.stringContaining('FROM events FINAL'),
+        expect.any(Object),
+      );
+    });
+
+    it('exports goal properties (custom events — contrat EVENTS-CUSTOM.md)', async () => {
+      const dto: UserEventsQueryDto = {
+        workspace_id: 'test-ws',
+        since: '2025-01-25T00:00:00Z',
+        until: '2025-01-26T00:00:00Z',
+      };
+
+      await service.getUserEvents(dto);
+
+      expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
+        'test-ws',
+        expect.stringContaining('properties'),
         expect.any(Object),
       );
     });

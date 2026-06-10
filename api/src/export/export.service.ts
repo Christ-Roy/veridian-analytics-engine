@@ -127,7 +127,8 @@ export class ExportService {
         toString(goal_timestamp) as goal_timestamp,
         page_number,
         duration,
-        max_scroll
+        max_scroll,
+        properties
       FROM events FINAL
       WHERE ${whereClause}
       ORDER BY updated_at ASC, id ASC
