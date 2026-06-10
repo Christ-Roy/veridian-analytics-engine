@@ -47,6 +47,8 @@ services:
       - traefik.http.routers.analytics-engine-prod.entrypoints=websecure
       - traefik.http.routers.analytics-engine-prod.tls=true
       - traefik.http.routers.analytics-engine-prod.tls.certresolver=letsencrypt
+      - traefik.http.routers.analytics-engine-prod.middlewares=analytics-engine-prod-noindex@docker
+      - traefik.http.middlewares.analytics-engine-prod-noindex.headers.customresponseheaders.X-Robots-Tag=noindex, nofollow, noarchive
       - traefik.http.services.analytics-engine-prod.loadbalancer.server.port=3000
       - veridian.prod.app=analytics-engine
 
@@ -63,6 +65,8 @@ services:
       - traefik.http.routers.analytics-bridge-prod.entrypoints=websecure
       - traefik.http.routers.analytics-bridge-prod.tls=true
       - traefik.http.routers.analytics-bridge-prod.tls.certresolver=letsencrypt
+      - traefik.http.routers.analytics-bridge-prod.middlewares=analytics-bridge-prod-noindex@docker
+      - traefik.http.middlewares.analytics-bridge-prod-noindex.headers.customresponseheaders.X-Robots-Tag=noindex, nofollow, noarchive
       - traefik.http.services.analytics-bridge-prod.loadbalancer.server.port=3002
       - veridian.prod.app=analytics-engine
 
