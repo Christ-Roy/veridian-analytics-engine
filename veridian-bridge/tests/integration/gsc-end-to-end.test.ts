@@ -116,9 +116,15 @@ afterEach(async () => {
 });
 
 test("E2E: oauth-begin → callback → sync → dashboard", async () => {
+  // Date dynamique : le dashboard agrège sur une fenêtre glissante
+  // (days=30 depuis maintenant) — une date en dur sort de la fenêtre
+  // avec le temps et fait pourrir le test (cassé à partir du 2026-06-04).
+  const recentDate = new Date(Date.now() - 7 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   const googleRows: GscRawRow[] = [
     {
-      keys: ["2026-05-05", "veridian seo", "/pricing", "fra", "desktop"],
+      keys: [recentDate, "veridian seo", "/pricing", "fra", "desktop"],
       clicks: 25,
       impressions: 300,
       ctr: 0.083,
