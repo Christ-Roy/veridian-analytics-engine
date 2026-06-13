@@ -170,12 +170,14 @@ agrégat que le bridge consomme.
 - Endpoint : `GET /api/tunnel.aggregate` (nom point-séparé, Bearer workspace,
   curseur incrémental, multi-tenant).
 - **Shape de sortie = interface `AnalyticsAggregate` EXACTE** de
-  `bridge/src/score-tunnel.ts` (le bridge la consomme telle quelle) :
+  `bridge/src/score-tunnel.ts` — **12 champs, ni plus ni moins** (test de
+  parité = égalité stricte du jeu de clés, pas de 13e champ fantôme) :
   ```
   { userId, auditViews, auditScrollMax (0-100), hotPages (uniques),
     otherPages (uniques), consented, ctaClicks, rdvBooked,
     identifiedByEmail, appStarted, sessions, lastSeen }
   ```
+  (lastSeen = ISO ou null ; les 11 autres = nombres/booléens/string, jamais null)
 - Sémantique d'agrégation = `bridge/src/analytics-pull.ts:aggregateEvents` :
   - HOT_PATHS = `/tarifs`, `/contact`, `/roi` (uniques) ;
   - CTA_GOALS = `audit_cta_rdv|appointment_click|roi_lead_click|cta_click` ;
