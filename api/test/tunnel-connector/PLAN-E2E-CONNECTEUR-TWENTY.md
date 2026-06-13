@@ -65,8 +65,9 @@ custom `coldProspect`/`mailingBatch` + vues Kanban. Vérifié 2026-06-13 via
 
 ⚠️ **Le workspace Lab N'A PAS** les fields tunnel sur `person` (seulement le
 custom object `coldProspect` cold-call). Donc le Lab ne sert QU'À l'isolation
-multi-tenant (tenant B), PAS à prouver la data tunnel. Tester le connecteur
-contre le Lab donnerait des PATCH score en 400 (field inexistant) = faux rouge.
+multi-tenant (tenant B), PAS à prouver la data tunnel : la résolution Person
+par `auditSlug` y échouerait (field inexistant → orphan systématique) = faux
+rouge. La cible data outbound est REPLAY.
 
 Creds : `~/credentials/.all-creds.env` →
 `TWENTY_BEARER_TUNNEL_REPLAY`, `TWENTY_BEARER_TUNNEL_LAB`,
@@ -81,14 +82,17 @@ Creds : `~/credentials/.all-creds.env` →
    §1.1). Le connecteur NE CRÉE JAMAIS de Person (§4c.2 / SPEC §4.2) — la
    résolution échoue en `orphan` si la Person n'existe pas. Donc on seed
    d'abord (idempotent, garde-fou `isTestProspect===true`).
-3. **Webhook tunnel configuré** sur `vrd_veridian_site_staging` pointant le
-   REPLAY (Bearer REPLAY chiffré). Auth des endpoints `webhooks.*` =
-   `WorkspaceAuthGuard` → le workspace platform-managed n'a pas d'API key :
-   il faudra soit le JWT super-admin, soit provisionner une API key, soit
-   créer le webhook en seed côté ClickHouse. **À clarifier avec twenty-connector.**
-4. **DRY_RUN OFF** pour l'écriture réelle (le gate accepte DRY_RUN d'abord pour
+3. **API key workspace provisionnée** sur `vrd_veridian_site_staging`
+   (TRANCHÉ lead 2026-06-13) : voie propre = système d'API keys workspace
+   existant (`api/src/api-keys/` + `WorkspaceAuthGuard`). PAS de JWT
+   super-admin (contournement), PAS de seed ClickHouse direct (interdit règle
+   d'or). twenty-connector doit exposer/utiliser le provisioning d'API key
+   workspace comme pré-requis d'implémentation de #2. → **dépendance de SPEC-1.**
+4. **Webhook tunnel configuré** sur `vrd_veridian_site_staging` pointant le
+   REPLAY (Bearer REPLAY chiffré), créé via cette API key workspace.
+5. **DRY_RUN OFF** pour l'écriture réelle (le gate accepte DRY_RUN d'abord pour
    le run à blanc, puis écriture réelle — SPEC §6.7).
-5. **Aucun envoi de mail réel** (boîte Lark perso de Robert) : le parcours
+6. **Aucun envoi de mail réel** (boîte Lark perso de Robert) : le parcours
    analytics ne déclenche aucun mail, OK ; tout flux Notifuse en test = sink /
    injection signée (DoD §2.4). Notre périmètre #3 = events ANALYTICS, pas mail.
 
