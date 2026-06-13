@@ -111,21 +111,22 @@ export class TwentyConnectorService {
 
     const activities: Array<{ deliveryId: string; mapped: MappedTimelineEvent; personId: string }> = [];
 
-    for (const delivery of deliveries.slice(0, BATCH_SIZE)) {
-      const mapped = this.mapDelivery(webhook, delivery);
-      if (!mapped) {
+    for (const delivery of deliveries) {
+      const mappedList = this.mapDelivery(webhook, delivery);
+      if (mappedList.length === 0) {
         // Not a timeline milestone (raw noise / unknown goal / no identity).
         // Treated as a success no-op so the delivery is not retried forever.
         outcome.skipped.push(delivery.id);
         continue;
       }
 
+      // All milestones of one delivery share the same identity → resolve once.
       let resolution: PersonResolution;
       try {
-        resolution = await this.resolvePersonId(webhook.workspace_id, mapped.identity, client, budget);
+        resolution = await this.resolvePersonId(webhook.workspace_id, mappedList[0].identity, client, budget);
       } catch (err) {
         this.logger.warn(
-          `Twenty resolve failed (ws=${webhook.workspace_id}, id=${mapped.identity}): ${(err as Error).message}`,
+          `Twenty resolve failed (ws=${webhook.workspace_id}, id=${mappedList[0].identity}): ${(err as Error).message}`,
         );
         outcome.failed.push(delivery.id);
         continue;
@@ -141,14 +142,20 @@ export class TwentyConnectorService {
         continue;
       }
 
-      activities.push({ deliveryId: delivery.id, mapped, personId: resolution.personId });
+      // Respect the ≤60 activities/call cap (a delivery may yield 2 milestones).
+      // If this delivery's milestones would overflow the batch, stop here and
+      // leave the rest pending for the next tick (they were not classified).
+      if (activities.length + mappedList.length > BATCH_SIZE) break;
+      for (const mapped of mappedList) {
+        activities.push({ deliveryId: delivery.id, mapped, personId: resolution.personId });
+      }
     }
 
     if (activities.length === 0) return outcome;
 
     if (!budget.take()) {
       // No token for the batch POST → all candidates stay pending for next tick.
-      for (const a of activities) outcome.failed.push(a.deliveryId);
+      for (const id of new Set(activities.map((a) => a.deliveryId))) outcome.failed.push(id);
       return outcome;
     }
 
@@ -162,23 +169,24 @@ export class TwentyConnectorService {
           properties: a.mapped.properties,
         })),
       );
-      for (const a of activities) outcome.written.push(a.deliveryId);
+      // One delivery may have produced several activities → dedup ids.
+      for (const id of new Set(activities.map((a) => a.deliveryId))) outcome.written.push(id);
     } catch (err) {
       this.logger.error(`Twenty batchTimeline failed (ws=${webhook.workspace_id}): ${(err as Error).message}`);
-      for (const a of activities) outcome.failed.push(a.deliveryId);
+      for (const id of new Set(activities.map((a) => a.deliveryId))) outcome.failed.push(id);
     }
 
     return outcome;
   }
 
   /**
-   * Map a stored delivery (request_body holds the tracked-event payload) to a
-   * timeline event via the pure mapper.
+   * Map a stored delivery (request_body holds the tracked-event payload) to its
+   * timeline milestones (0, 1 or 2) via the pure mapper.
    */
   private mapDelivery(
     webhook: WebhookDefinition,
     delivery: WebhookDelivery,
-  ): MappedTimelineEvent | null {
+  ): MappedTimelineEvent[] {
     const payload = this.parseBody(delivery.request_body);
     const ctx: TrackedEventContext = {
       workspace_id: webhook.workspace_id,
@@ -188,7 +196,7 @@ export class TwentyConnectorService {
       // request_body; the mapper reads payload fields (path, goal_name, user_id…).
       payload,
     };
-    return this.mapper.map(ctx);
+    return this.mapper.mapAll(ctx);
   }
 
   /**

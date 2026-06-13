@@ -91,82 +91,97 @@ export interface MappedTimelineEvent {
 @Injectable()
 export class TwentyEventMapper {
   /**
-   * Map a tracked event to a timeline activity, or null when the event is
-   * not a milestone (raw stream noise, unknown goal, missing identity).
+   * Map a tracked event to ALL the timeline milestones it produces (0, 1 or 2).
    *
-   * Returning null is the common case: most tracked events do NOT become a
-   * Twenty timeline entry (only digests/milestones do, §4c.3).
+   * Most events produce NONE (raw stream noise, unknown goal, no identity).
+   * A single event can produce TWO milestones: a deep /audit/ screen_view emits
+   * BOTH `audit.page_view` AND `audit.scroll` — mirroring the reference
+   * analytics-pull.ts (setMilestone page_view + setMilestone scroll). Each
+   * milestone gets its OWN deterministic id = f(eventId, name), so they never
+   * collide and replay stays idempotent.
    */
-  map(event: TrackedEventContext): MappedTimelineEvent | null {
+  mapAll(event: TrackedEventContext): MappedTimelineEvent[] {
     const p = event.payload ?? {};
     const identity = this.normalizeIdentity(p.user_id);
-    if (!identity) return null; // no identity → no Person to attach to
+    if (!identity) return []; // no identity → no Person to attach to
 
-    const name = this.resolveName(event.event_type, p);
-    if (!name) return null;
+    const names = this.resolveNames(event.event_type, p);
+    if (names.length === 0) return [];
 
     const happensAt = this.resolveHappensAt(p);
-    return {
+    const properties = this.buildProperties(event, p);
+    return names.map((name) => ({
       id: deterministicTimelineId(event.event_id, name),
       name,
       identity,
       happensAt,
       eventId: event.event_id,
-      properties: this.buildProperties(event, p),
-    };
+      properties,
+    }));
   }
 
   /**
-   * Resolve the timeline name from the raw event. screen_view on a /audit/
-   * path → audit.page_view (+ audit.scroll when deep). goal → mapped by name.
+   * Single-milestone convenience wrapper (first milestone or null). Kept for
+   * callers that only need one; the connector uses mapAll to not drop the
+   * page_view of a deep audit view.
    */
-  private resolveName(
+  map(event: TrackedEventContext): MappedTimelineEvent | null {
+    return this.mapAll(event)[0] ?? null;
+  }
+
+  /**
+   * Resolve ALL timeline names a raw event produces. A deep /audit/ screen_view
+   * yields TWO: audit.page_view + audit.scroll (mirrors analytics-pull.ts which
+   * sets both milestones). Every other case yields 0 or 1.
+   */
+  private resolveNames(
     eventType: string,
     p: Record<string, unknown>,
-  ): TwentyTimelineName | null {
+  ): TwentyTimelineName[] {
     if (eventType === 'screen_view') {
       const path = String(p.path ?? '');
       if (path.startsWith('/audit/')) {
-        // A deep audit view is a stronger signal than a shallow one. We surface
-        // the scroll milestone when the recorded max_scroll crosses the bar;
-        // otherwise the plain page_view milestone.
+        // An /audit/ view ALWAYS produces page_view; a deep one (scroll >= bar)
+        // ALSO produces scroll. We must not drop page_view on deep views — the
+        // reference emits both.
+        const names: TwentyTimelineName[] = ['audit.page_view'];
         const scroll = this.coerceNumber(
           (p as { max_scroll?: unknown }).max_scroll ?? p.scroll,
         );
         if (scroll !== null && scroll >= AUDIT_SCROLL_THRESHOLD) {
-          return 'audit.scroll';
+          names.push('audit.scroll');
         }
-        return 'audit.page_view';
+        return names;
       }
       // Non-audit page views are not timeline milestones (§4c.3).
-      return null;
+      return [];
     }
 
     if (eventType === 'goal') {
       const goal = String(p.goal_name ?? '');
-      if (AUDIT_VIEW_GOALS.has(goal)) return 'audit.page_view';
+      if (AUDIT_VIEW_GOALS.has(goal)) return ['audit.page_view'];
       if (AUDIT_SCROLL_GOALS.has(goal)) {
         const depth = this.coerceNumber(
           (p.properties as Record<string, unknown> | undefined)?.depth,
         );
         return depth !== null && depth >= AUDIT_SCROLL_THRESHOLD
-          ? 'audit.scroll'
-          : null;
+          ? ['audit.scroll']
+          : [];
       }
-      if (CTA_GOALS.has(goal)) return 'audit.cta_click';
-      if (RDV_GOALS.has(goal)) return 'audit.rdv';
-      if (SIGNUP_GOALS.has(goal)) return 'signup';
+      if (CTA_GOALS.has(goal)) return ['audit.cta_click'];
+      if (RDV_GOALS.has(goal)) return ['audit.rdv'];
+      if (SIGNUP_GOALS.has(goal)) return ['signup'];
       if (APP_STARTED_GOALS.has(goal)) {
         const app = String(
           (p.properties as Record<string, unknown> | undefined)?.app ?? '',
         );
-        return APP_STARTED_TIMELINE_APPS.has(app) ? 'app.started' : null;
+        return APP_STARTED_TIMELINE_APPS.has(app) ? ['app.started'] : [];
       }
       // Unknown goal → not a timeline milestone.
-      return null;
+      return [];
     }
 
-    return null;
+    return [];
   }
 
   /**

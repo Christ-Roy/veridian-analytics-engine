@@ -38,11 +38,14 @@ export class TunnelController {
       workspace_id: query.workspace_id,
       since: query.since,
       until: query.until,
+      cursor: query.cursor,
     });
     return {
       workspace_id: query.workspace_id,
       window: result.window,
       aggregates: result.aggregates,
+      truncated: result.truncated,
+      next_cursor: result.next_cursor,
     };
   }
 }

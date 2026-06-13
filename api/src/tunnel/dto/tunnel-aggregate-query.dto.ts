@@ -21,4 +21,13 @@ export class TunnelAggregateQueryDto {
   @IsOptional()
   @IsDateString()
   until?: string;
+
+  @ApiProperty({
+    required: false,
+    description:
+      'Resume cursor from a previous truncated response. When set, drives the first page instead of `since`.',
+  })
+  @IsOptional()
+  @IsString()
+  cursor?: string;
 }

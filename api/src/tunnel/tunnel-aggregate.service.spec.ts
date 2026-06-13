@@ -106,6 +106,29 @@ describe('TunnelAggregateService', () => {
     // both pages merged → 2 CTA clicks for the same identity
     expect(res.aggregates).toHaveLength(1);
     expect(res.aggregates[0].ctaClicks).toBe(2);
+    // fully drained → not truncated, no resume cursor
+    expect(res.truncated).toBe(false);
+    expect(res.next_cursor).toBeNull();
+  });
+
+  it('flags truncation + returns a resume cursor when the page cap is hit', async () => {
+    // Always hand back a next_cursor → the service stops at MAX_PAGES with
+    // events still unread. It must NOT silently return partial data.
+    exportService.getUserEvents.mockResolvedValue({
+      data: [row({ goal_name: 'cta_click' })],
+      next_cursor: 'MORE',
+      has_more: true,
+    });
+    const res = await service.aggregate({ workspace_id: 'ws_a', since: '2026-06-09T00:00:00Z' });
+    expect(res.truncated).toBe(true);
+    expect(res.next_cursor).toBe('MORE');
+  });
+
+  it('resumes from an inbound cursor (drives the first page, not since)', async () => {
+    exportService.getUserEvents.mockResolvedValue({ data: [], next_cursor: null, has_more: false });
+    await service.aggregate({ workspace_id: 'ws_a', cursor: 'RESUME', since: '2026-06-09T00:00:00Z' });
+    expect(exportService.getUserEvents.mock.calls[0][0]).toMatchObject({ cursor: 'RESUME' });
+    expect(exportService.getUserEvents.mock.calls[0][0]).not.toHaveProperty('since');
   });
 
   it('passes the workspace_id straight through (multi-tenant scoping by the reader)', async () => {

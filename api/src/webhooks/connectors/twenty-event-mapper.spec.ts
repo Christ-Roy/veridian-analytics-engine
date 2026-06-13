@@ -54,14 +54,27 @@ describe('TwentyEventMapper', () => {
       expect(out?.name).toBe('audit.page_view');
     });
 
-    it('maps a deep /audit/ view (scroll >= 75) to audit.scroll', () => {
-      const out = mapper.map(
+    it('maps a deep /audit/ view to BOTH audit.page_view AND audit.scroll', () => {
+      // A deep audit view must NOT drop the page_view (the reference emits both).
+      const out = mapper.mapAll(
         ctx({
           event_type: 'screen_view',
           payload: { path: '/audit/monsite-ab3x', max_scroll: 80, user_id: 's-1' },
         }),
       );
-      expect(out?.name).toBe('audit.scroll');
+      expect(out.map((m) => m.name).sort()).toEqual(['audit.page_view', 'audit.scroll']);
+      // distinct deterministic ids so they never collide on the same event
+      expect(out[0].id).not.toBe(out[1].id);
+    });
+
+    it('maps a shallow /audit/ view to ONLY audit.page_view', () => {
+      const out = mapper.mapAll(
+        ctx({
+          event_type: 'screen_view',
+          payload: { path: '/audit/x', max_scroll: 30, user_id: 's-1' },
+        }),
+      );
+      expect(out.map((m) => m.name)).toEqual(['audit.page_view']);
     });
 
     it('ignores a non-audit page view (not a timeline milestone)', () => {

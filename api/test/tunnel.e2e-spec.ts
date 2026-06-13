@@ -123,6 +123,9 @@ describe('Tunnel aggregate E2E', () => {
     expect(res.body.workspace_id).toBe(WS);
     expect(res.body.window).toHaveProperty('since');
     expect(res.body.window).toHaveProperty('until');
+    // a small window is fully drained → not truncated, no resume cursor
+    expect(res.body.truncated).toBe(false);
+    expect(res.body.next_cursor).toBeNull();
 
     const agg = res.body.aggregates.find((a: { userId: string }) => a.userId === 'lead@x.com');
     expect(agg).toBeDefined();

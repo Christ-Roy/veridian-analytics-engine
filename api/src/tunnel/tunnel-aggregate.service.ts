@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ExportService } from '../export/export.service';
 import { AnalyticsAggregate } from './entities/analytics-aggregate';
 import {
@@ -27,6 +27,10 @@ export interface TunnelAggregateResult {
   aggregates: AnalyticsAggregate[];
   /** ISO window actually scanned. */
   window: { since: string; until: string };
+  /** True when the safety page cap was hit before all events were read. */
+  truncated: boolean;
+  /** Resume cursor when truncated (bridge re-calls with it); null otherwise. */
+  next_cursor: string | null;
 }
 
 /** Default lookback window — matches the bridge's fixed 48h sweep (sync.ts). */
@@ -38,24 +42,30 @@ const MAX_PAGES = 200;
 
 @Injectable()
 export class TunnelAggregateService {
+  private readonly logger = new Logger(TunnelAggregateService.name);
+
   constructor(private readonly exportService: ExportService) {}
 
   /**
    * Compute the complete per-identity analytics aggregate over [since, until].
    * Walks the cursor internally so the bridge receives finished aggregates, not
    * per-page fragments to merge.
+   *
+   * @param params.cursor optional resume cursor (from a previous truncated
+   *   response) — when present it drives the first page instead of `since`.
    */
   async aggregate(params: {
     workspace_id: string;
     since?: string;
     until?: string;
+    cursor?: string;
   }): Promise<TunnelAggregateResult> {
     const until = params.until ?? new Date().toISOString();
     const since =
       params.since ?? new Date(Date.parse(until) - DEFAULT_WINDOW_MS).toISOString();
 
     let acc: Map<string, AggregateAccumulator> | undefined;
-    let cursor: string | null = null;
+    let cursor: string | null = params.cursor ?? null;
     let pages = 0;
 
     do {
@@ -71,9 +81,23 @@ export class TunnelAggregateService {
       pages += 1;
     } while (cursor && pages < MAX_PAGES);
 
+    // Safety cap hit with events still unread: the aggregates are PARTIAL.
+    // Surface a resume cursor + flag so the bridge can continue from here
+    // instead of silently scoring on truncated data (a missing session would
+    // under-score a hot lead). The bridge re-calls with this cursor.
+    const truncated = cursor !== null;
+    if (truncated) {
+      this.logger.warn(
+        `tunnel.aggregate truncated at ${MAX_PAGES} pages for ws=${params.workspace_id} ` +
+          `(window ${since}..${until}); returning resume cursor.`,
+      );
+    }
+
     return {
       aggregates: acc ? toAggregates(acc) : [],
       window: { since, until },
+      truncated,
+      next_cursor: truncated ? cursor : null,
     };
   }
 }

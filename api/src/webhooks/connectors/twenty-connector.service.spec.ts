@@ -144,6 +144,21 @@ describe('TwentyConnectorService', () => {
       expect(batches).toHaveLength(0);
     });
 
+    it('emits TWO activities for a deep /audit/ view (page_view + scroll), delivery written once', async () => {
+      const { client, batches, resolves } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const d = delivery('d1', { event_type: 'screen_view', path: '/audit/x', max_scroll: 90, user_id: 'a@b.com' });
+      const out = await connector.flushBatch(twentyWebhook(), [d], client, budget);
+      // one delivery → two timeline activities, but classified written ONCE
+      expect(out.written).toEqual(['d1']);
+      expect(batches[0]).toHaveLength(2);
+      expect(batches[0].map((a: { name: string }) => a.name).sort()).toEqual(['audit.page_view', 'audit.scroll']);
+      // Person resolved once (both milestones share the identity)
+      expect(resolves).toEqual(['a@b.com']);
+      // distinct deterministic ids
+      expect(batches[0][0].id).not.toBe(batches[0][1].id);
+    });
+
     it('orphans a delivery whose Person is not found', async () => {
       const { client, batches } = fakeClient(async () => null);
       const budget = new TwentyBudget(100, () => 0);
