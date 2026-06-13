@@ -21,6 +21,9 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // Webhooks e2e (webhooks.e2e-spec.ts) — multi-tenant fixture
   'staminads_ws_test_ws_webhooks_a',
   'staminads_ws_test_ws_webhooks_b',
+  // Tunnel aggregate e2e (tunnel.e2e-spec.ts) — workspace + multi-tenant probe
+  'staminads_ws_tunnel_test_ws',
+  'staminads_ws_tunnel_other_ws',
 ];
 
 let client: ClickHouseClient;

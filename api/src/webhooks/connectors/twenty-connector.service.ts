@@ -155,6 +155,7 @@ export class TwentyConnectorService {
     try {
       await client.batchTimeline(
         activities.map((a) => ({
+          id: a.mapped.id, // deterministic UUIDv5 → exactly-once on replay (task #9)
           name: a.mapped.name,
           happensAt: a.mapped.happensAt,
           targetPersonId: a.personId,

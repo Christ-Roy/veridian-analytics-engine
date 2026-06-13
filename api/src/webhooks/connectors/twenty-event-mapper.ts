@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { deterministicTimelineId } from './deterministic-id';
 
 /**
  * TwentyEventMapper — pure mapping of a tracked analytics event onto a Twenty
@@ -64,6 +65,12 @@ export interface TrackedEventContext {
 }
 
 export interface MappedTimelineEvent {
+  /**
+   * Deterministic Twenty activity id (UUIDv5 = f(eventId, name)). A replay of
+   * the same (event, milestone) yields the SAME id → Twenty no-ops →
+   * exactly-once with no engine-side store (task #9).
+   */
+  id: string;
   /** Frozen timeline name §4c.3 (the activity `name`). */
   name: TwentyTimelineName;
   /**
@@ -100,6 +107,7 @@ export class TwentyEventMapper {
 
     const happensAt = this.resolveHappensAt(p);
     return {
+      id: deterministicTimelineId(event.event_id, name),
       name,
       identity,
       happensAt,

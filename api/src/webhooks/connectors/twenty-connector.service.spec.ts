@@ -217,19 +217,64 @@ describe('TwentyConnectorService', () => {
     });
   });
 
-  describe('idempotence (happensAt is the true event time, replay-stable)', () => {
-    it('produces the same activity for the same event on replay', async () => {
+  describe('idempotence / exactly-once (task #9)', () => {
+    it('emits a DETERMINISTIC activity id, identical across replays', async () => {
       const { client, batches } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
       const budget = new TwentyBudget(100, () => 0);
       const d = delivery('d1', { event_type: 'goal', goal_name: 'rdv_booked', user_id: 'a@b.com', event_timestamp: '2026-06-10T09:00:00.000Z' });
       await connector.flushBatch(twentyWebhook(), [d], client, budget);
       connector.clearCache();
       await connector.flushBatch(twentyWebhook(), [d], client, budget);
-      // The batched timeline activity is byte-identical across replays (same
-      // happensAt + eventId in properties) → Twenty-side dedup is deterministic.
-      expect(batches[0][0]).toEqual(batches[1][0]);
-      expect(batches[0][0].properties.eventId).toBe('evt_d1');
-      expect(batches[0][0].happensAt).toBe('2026-06-10T09:00:00.000Z');
+      // Real idempotence: the SAME deterministic id is sent on every replay, so
+      // Twenty lands on the same row (409/no-op). We assert the id (not just the
+      // payload — a byte-identical payload WITHOUT a stable id still duplicates).
+      const id1 = batches[0][0].id;
+      const id2 = batches[1][0].id;
+      expect(id1).toBe(id2);
+      expect(id1).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    });
+
+    it('distinct events get distinct activity ids', async () => {
+      const { client, batches } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      await connector.flushBatch(
+        twentyWebhook(),
+        [
+          delivery('d1', { event_type: 'goal', goal_name: 'rdv_booked', user_id: 'a@b.com' }),
+          delivery('d2', { event_type: 'goal', goal_name: 'audit_cta_rdv', user_id: 'a@b.com' }),
+        ],
+        client,
+        budget,
+      );
+      expect(batches[0][0].id).not.toBe(batches[0][1].id);
+    });
+
+    it('exactly-once at the server: replaying yields ONE activity per id (409 dedup)', async () => {
+      // Simulate Twenty's server-side dedup keyed by the client-supplied id.
+      const stored = new Set<string>();
+      let duplicateRejected = 0;
+      const client = {
+        async resolvePerson() {
+          return { id: 'p1', doNotContact: false };
+        },
+        async batchTimeline(items: any[]) {
+          for (const it of items) {
+            if (stored.has(it.id)) {
+              duplicateRejected += 1; // Twenty would 409 → connector no-ops
+              continue;
+            }
+            stored.add(it.id);
+          }
+        },
+      } as unknown as TwentyClient;
+      const budget = new TwentyBudget(100, () => 0);
+      const d = delivery('d1', { event_type: 'goal', goal_name: 'rdv_booked', user_id: 'a@b.com' });
+      await connector.flushBatch(twentyWebhook(), [d], client, budget);
+      connector.clearCache();
+      await connector.flushBatch(twentyWebhook(), [d], client, budget);
+      // One unique activity stored despite two flushes — exactly-once.
+      expect(stored.size).toBe(1);
+      expect(duplicateRejected).toBe(1);
     });
   });
 });

@@ -34,6 +34,12 @@ export interface TwentyClientConfig {
 
 /** Timeline activity payload §4c.2. */
 export interface TimelineActivityInput {
+  /**
+   * Deterministic client-supplied id (UUIDv5 = f(event_id, name)). Makes a
+   * replay land on the SAME Twenty row → exactly-once, no engine-side store
+   * (task #9). Twenty accepts a client id and no-ops/409 on a duplicate.
+   */
+  id: string;
   name: string; // frozen §4c.3: audit.* | signup | app.started | score.threshold
   happensAt: string; // ISO UTC — true event time, never the write time
   targetPersonId: string;
@@ -127,12 +133,22 @@ export class TwentyClient {
       {
         method: 'POST',
         headers: this.headers,
+        // Each item carries its deterministic `id` (spread via ...i) so a
+        // replay reuses the same Twenty row → exactly-once.
         body: JSON.stringify(
           items.map((i) => ({ ...i, createdBy: { source: 'API' } })),
         ),
         signal: AbortSignal.timeout(this.timeout),
       },
     );
+    // 409 = the deterministic id already exists → replay no-op (exactly-once).
+    // Not an error: the activity is already there, do not retry/duplicate.
+    if (res.status === 409) {
+      this.logger.debug(
+        `batchTimeline: 409 duplicate (deterministic id already present) — no-op`,
+      );
+      return;
+    }
     if (!res.ok) {
       throw new Error(
         `Twenty batchTimeline ${res.status}: ${await this.safeText(res)}`,

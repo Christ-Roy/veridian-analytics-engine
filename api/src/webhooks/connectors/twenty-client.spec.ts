@@ -102,10 +102,10 @@ describe('TwentyClient', () => {
 
   describe('batchTimeline (§4c.2)', () => {
     const items: TimelineActivityInput[] = [
-      { name: 'audit.rdv', happensAt: '2026-06-10T09:00:00.000Z', targetPersonId: 'p1', properties: {} },
+      { id: 'aaaaaaaa-bbbb-5ccc-8ddd-eeeeeeeeeeee', name: 'audit.rdv', happensAt: '2026-06-10T09:00:00.000Z', targetPersonId: 'p1', properties: {} },
     ];
 
-    it('POSTs to /rest/batch/timelineActivities and stamps createdBy.source=API', async () => {
+    it('POSTs to /rest/batch/timelineActivities, stamps createdBy.source=API + the deterministic id', async () => {
       fetchMock.mockResolvedValue(ok({}));
       await makeClient().batchTimeline(items);
       const [url, init] = fetchMock.mock.calls[0];
@@ -114,6 +114,14 @@ describe('TwentyClient', () => {
       const sent = JSON.parse(init.body);
       expect(sent[0].createdBy).toEqual({ source: 'API' });
       expect(sent[0].name).toBe('audit.rdv');
+      // the deterministic id MUST be forwarded — it is what makes a replay idempotent
+      expect(sent[0].id).toBe('aaaaaaaa-bbbb-5ccc-8ddd-eeeeeeeeeeee');
+    });
+
+    it('treats a 409 (duplicate id) as a no-op success (exactly-once on replay)', async () => {
+      fetchMock.mockResolvedValue(err(409, 'duplicate'));
+      // must NOT throw — a 409 means the activity already exists
+      await expect(makeClient().batchTimeline(items)).resolves.toBeUndefined();
     });
 
     it('is a no-op for an empty batch', async () => {
