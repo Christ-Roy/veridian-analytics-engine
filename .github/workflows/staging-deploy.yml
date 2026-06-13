@@ -490,6 +490,9 @@ jobs:
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_STAGING }}
           STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
+          # Secret M2M des endpoints /api/admin/platform/* (PlatformAdminGuard).
+          # Requis (${VAR:?} dans base.yml) — sans lui le deploy fail-closed.
+          PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
           BRIDGE_DB_PASSWORD: ${{ secrets.BRIDGE_DB_PASSWORD_STAGING }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY_STAGING }}
@@ -511,6 +514,7 @@ jobs:
           STAMINADS_ADMIN_EMAIL=admin@veridian.site
           STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
           VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
+          PLATFORM_ADMIN_API_KEY=${PLATFORM_ADMIN_API_KEY}
           HUB_HMAC_SECRET=${HUB_HMAC_SECRET}
           SKIP_HMAC=false
           BRIDGE_DB_USER=bridge
