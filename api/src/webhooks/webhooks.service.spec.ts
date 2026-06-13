@@ -156,6 +156,32 @@ describe('WebhooksService', () => {
         }),
       ).rejects.toThrow();
     });
+
+    // ─── task #6: auth absent / invalid must not 500 ─────────────────
+    it('defaults to auth.type=none when auth is omitted (no 500)', async () => {
+      // auth is omitted entirely — used to crash on dto.auth.type (500).
+      const created = await service.create({
+        workspace_id: 'ws_a',
+        name: 'no-auth',
+        url: 'https://public.example.com/hook',
+        events: ['screen_view'],
+      } as never);
+      expect(created.auth).toEqual({ type: 'none', has_secret: false });
+    });
+
+    it('rejects an invalid auth.type with a structured 400 (INVALID_AUTH)', async () => {
+      await expect(
+        service.create({
+          workspace_id: 'ws_a',
+          name: 'bad-auth',
+          url: 'https://x.example.com/hook',
+          auth: { type: 'wizard' },
+          events: ['screen_view'],
+        } as never),
+      ).rejects.toMatchObject({
+        response: { code: 'INVALID_AUTH' },
+      });
+    });
   });
 
   describe('multi-tenant isolation', () => {

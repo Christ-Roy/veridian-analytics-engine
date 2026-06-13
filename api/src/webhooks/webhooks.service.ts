@@ -112,16 +112,17 @@ export class WebhooksService {
     const now = toClickHouseDateTime();
     const id = `wh_${generateId().replace(/-/g, '').slice(0, 22)}`;
 
+    const auth = this.resolveAuth(dto.auth);
     const definition: WebhookDefinition = {
       id,
       workspace_id: dto.workspace_id,
       name: dto.name,
       url: dto.url,
       active: dto.active ?? true,
-      auth_type: dto.auth.type,
+      auth_type: auth.type,
       auth_secret_encrypted:
-        dto.auth.token && dto.auth.token.length > 0
-          ? this.crypto.encryptSecret(dto.auth.token)
+        auth.token && auth.token.length > 0
+          ? this.crypto.encryptSecret(auth.token)
           : '',
       events: dto.events,
       filters: (dto.filters ?? []) as WebhookFilter[],
@@ -204,13 +205,17 @@ export class WebhooksService {
       }
     }
 
+    // Validate auth.type when supplied (structured 400, not a silent bad value).
+    const newAuthType =
+      dto.auth !== undefined ? this.resolveAuth(dto.auth).type : existing.auth_type;
+
     const now = toClickHouseDateTime();
     const updated: WebhookDefinition = {
       ...existing,
       name: dto.name ?? existing.name,
       url: dto.url ?? existing.url,
       active: dto.active ?? existing.active,
-      auth_type: dto.auth?.type ?? existing.auth_type,
+      auth_type: newAuthType,
       auth_secret_encrypted:
         dto.auth?.token !== undefined
           ? dto.auth.token.length > 0
@@ -404,6 +409,26 @@ export class WebhooksService {
         has_secret: def.auth_secret_encrypted.length > 0,
       },
     };
+  }
+
+  /**
+   * Normalize the optional auth block. Omitting `auth` defaults to
+   * { type: 'none' } (public endpoint, no credentials) instead of crashing on
+   * `dto.auth.type` (was a 500 — cf task #6). A present-but-invalid type yields
+   * a structured 400 so IA callers can react.
+   */
+  private resolveAuth(
+    auth?: { type?: string; token?: string },
+  ): { type: WebhookDefinition['auth_type']; token?: string } {
+    if (!auth || auth.type === undefined) return { type: 'none' };
+    const valid: WebhookDefinition['auth_type'][] = ['none', 'bearer', 'basic', 'hmac'];
+    if (!valid.includes(auth.type as WebhookDefinition['auth_type'])) {
+      throw new BadRequestException({
+        code: 'INVALID_AUTH',
+        message: `auth.type must be one of ${valid.join(', ')}`,
+      });
+    }
+    return { type: auth.type as WebhookDefinition['auth_type'], token: auth.token };
   }
 
   private dtoToTransform(

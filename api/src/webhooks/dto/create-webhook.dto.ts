@@ -118,10 +118,16 @@ export class CreateWebhookDto {
   @IsBoolean()
   active?: boolean;
 
-  @ApiProperty({ type: WebhookAuthDto })
+  /**
+   * Auth for the destination. Optional — omitting it defaults to { type: 'none' }
+   * (a public endpoint with no credentials). When PRESENT it is validated
+   * strictly (a malformed auth yields a structured 400, never a 500).
+   */
+  @ApiProperty({ type: WebhookAuthDto, required: false })
+  @IsOptional()
   @ValidateNested()
   @Type(() => WebhookAuthDto)
-  auth: WebhookAuthDto;
+  auth?: WebhookAuthDto;
 
   @ApiProperty({ type: [String] })
   @IsArray()
