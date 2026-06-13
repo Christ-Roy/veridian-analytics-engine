@@ -127,6 +127,52 @@ export class ApiKeysService {
     };
   }
 
+  /**
+   * Create a workspace-scoped API key for a PLATFORM-MANAGED workspace (M2M).
+   *
+   * Unlike create(), this does NOT call validateRoleForUser: it is only ever
+   * reached behind PlatformAdminGuard (the shared platform secret = the highest
+   * authority). A platform-managed workspace has NO members, so requiring a
+   * membership would be an impossible egg-and-chicken (task #8). The caller
+   * (admin-platform) is responsible for asserting the workspace exists first.
+   *
+   * user_id / created_by are the synthetic 'platform' principal so the key's
+   * origin is auditable (it is not tied to a real user).
+   */
+  async createForPlatform(params: {
+    workspace_id: string;
+    name?: string;
+    role?: ApiKeyRole;
+    description?: string;
+  }): Promise<CreateApiKeyResponseDto> {
+    const now = toClickHouseDateTime();
+    const { key, hash, prefix } = generateApiKeyToken();
+    const apiKey: ApiKey = {
+      id: generateId(),
+      key_hash: hash,
+      key_prefix: prefix,
+      user_id: 'platform',
+      workspace_id: params.workspace_id,
+      name: params.name ?? 'Platform-provisioned key',
+      description:
+        params.description ??
+        'Auto-provisioned via /api/admin/platform/workspaces.provisionApiKey (M2M).',
+      role: params.role ?? 'admin',
+      status: 'active',
+      expires_at: null,
+      last_used_at: null,
+      failed_attempts_count: 0,
+      last_failed_attempt_at: null,
+      created_by: 'platform-admin',
+      revoked_by: null,
+      revoked_at: null,
+      created_at: now,
+      updated_at: now,
+    };
+    await this.clickhouse.insertSystem('api_keys', [serializeApiKey(apiKey)]);
+    return { key, apiKey: toPublicApiKey(apiKey) };
+  }
+
   async list(dto: ListApiKeysDto = {}): Promise<PublicApiKey[]> {
     const whereClauses: string[] = [];
     const params: Record<string, unknown> = {};

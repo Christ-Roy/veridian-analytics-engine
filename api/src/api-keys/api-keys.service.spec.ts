@@ -387,6 +387,37 @@ describe('ApiKeysService', () => {
     });
   });
 
+  describe('createForPlatform (M2M, no membership)', () => {
+    it('generates a workspace key WITHOUT requiring a membership', async () => {
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+      const getMembership = jest.spyOn(membersService, 'getMembership');
+
+      const result = await service.createForPlatform({ workspace_id: 'ws_platform' });
+
+      expect(result.key).toContain('stam_live_');
+      expect(result.apiKey.workspace_id).toBe('ws_platform');
+      expect(result.apiKey.role).toBe('admin'); // default
+      expect(result.apiKey.status).toBe('active');
+      expect(result.apiKey.user_id).toBe('platform');
+      expect(result.apiKey.created_by).toBe('platform-admin');
+      expect(result.apiKey).not.toHaveProperty('key_hash');
+      // crucial: no membership lookup — that is the egg/chicken we bypass
+      expect(getMembership).not.toHaveBeenCalled();
+      expect(clickhouse.insertSystem).toHaveBeenCalledWith('api_keys', expect.any(Array));
+    });
+
+    it('honours an explicit role + name', async () => {
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+      const result = await service.createForPlatform({
+        workspace_id: 'ws_platform',
+        name: 'Tunnel key',
+        role: 'editor',
+      });
+      expect(result.apiKey.name).toBe('Tunnel key');
+      expect(result.apiKey.role).toBe('editor');
+    });
+  });
+
   describe('list', () => {
     it('returns all keys when no filters provided', async () => {
       clickhouse.querySystem.mockResolvedValue([mockApiKeyRow]);

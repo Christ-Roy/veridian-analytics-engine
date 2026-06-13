@@ -3,6 +3,7 @@ import {
   Injectable,
   InternalServerErrorException,
   Logger,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { randomBytes } from 'crypto';
@@ -167,6 +168,36 @@ export class AdminPlatformService {
       password_reset_url: passwordResetUrl,
       phone_numbers: phoneStatus,
       user_created: true,
+    };
+  }
+
+  /**
+   * Provision a workspace-scoped API key for an EXISTING (platform-managed)
+   * workspace (M2M, task #8). The tunnel workspace vrd_veridian_site_staging
+   * has no members, so the normal apiKeys.create (WorkspaceAuthGuard + member)
+   * cannot bootstrap a first key — this M2M path does it behind
+   * PlatformAdminGuard. Returns the key ONCE (never re-logged).
+   */
+  async provisionApiKey(params: {
+    workspace_id: string;
+    name?: string;
+    role?: 'admin' | 'editor' | 'viewer';
+  }): Promise<{ workspace_id: string; api_key: string; key_prefix: string }> {
+    if (!(await this.workspaceExists(params.workspace_id))) {
+      throw new NotFoundException({
+        error: 'workspace_not_found',
+        message: `Workspace ${params.workspace_id} does not exist.`,
+      });
+    }
+    const result = await this.apiKeysService.createForPlatform({
+      workspace_id: params.workspace_id,
+      name: params.name,
+      role: params.role,
+    });
+    return {
+      workspace_id: params.workspace_id,
+      api_key: result.key,
+      key_prefix: result.apiKey.key_prefix,
     };
   }
 

@@ -55,6 +55,7 @@ describe('AdminPlatformService.provisionTenant', () => {
           provide: ApiKeysService,
           useValue: {
             create: jest.fn(),
+            createForPlatform: jest.fn(),
           },
         },
         {
@@ -287,5 +288,38 @@ describe('AdminPlatformService.provisionTenant', () => {
     // Still returns api_key — caller can re-trigger email later.
     expect(result.api_key).toBe('stam_live_deadbeef');
     expect(result.password_reset_url).toContain('/reset-password/');
+  });
+
+  describe('provisionApiKey (M2M, existing workspace)', () => {
+    it('404 when the workspace does not exist', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // workspaceExists → false
+      await expect(
+        service.provisionApiKey({ workspace_id: 'ws_ghost' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(apiKeysService.createForPlatform).not.toHaveBeenCalled();
+    });
+
+    it('provisions a key for an existing workspace via createForPlatform', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'vrd_site_staging' }]); // exists
+      apiKeysService.createForPlatform.mockResolvedValue({
+        key: 'stam_live_abc',
+        apiKey: { key_prefix: 'stam_live_abc12', workspace_id: 'vrd_site_staging' } as never,
+      });
+      const result = await service.provisionApiKey({
+        workspace_id: 'vrd_site_staging',
+        name: 'Tunnel key',
+        role: 'admin',
+      });
+      expect(result).toEqual({
+        workspace_id: 'vrd_site_staging',
+        api_key: 'stam_live_abc',
+        key_prefix: 'stam_live_abc12',
+      });
+      expect(apiKeysService.createForPlatform).toHaveBeenCalledWith({
+        workspace_id: 'vrd_site_staging',
+        name: 'Tunnel key',
+        role: 'admin',
+      });
+    });
   });
 });

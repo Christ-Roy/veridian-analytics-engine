@@ -1,8 +1,9 @@
-import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminPlatformService } from './admin-platform.service';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { ProvisionTenantResponseDto } from './dto/provision-tenant-response.dto';
+import { ProvisionApiKeyDto } from './dto/provision-api-key.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 
@@ -38,5 +39,19 @@ export class AdminPlatformController {
     @Body() dto: ProvisionTenantDto,
   ): Promise<ProvisionTenantResponseDto> {
     return this.adminPlatformService.provisionTenant(dto);
+  }
+
+  @Post('workspaces.provisionApiKey')
+  @HttpCode(201)
+  @ApiOperation({
+    summary:
+      'Provision a workspace-scoped API key for an EXISTING platform-managed workspace (no members). M2M only.',
+  })
+  provisionApiKey(@Body() dto: ProvisionApiKeyDto) {
+    return this.adminPlatformService.provisionApiKey({
+      workspace_id: dto.workspace_id,
+      name: dto.name,
+      role: dto.role,
+    });
   }
 }

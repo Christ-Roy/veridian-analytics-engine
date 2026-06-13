@@ -257,4 +257,42 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     expect(response.body.phone_numbers[0].status).toBe('skipped_no_bridge');
     expect(response.body.phone_numbers[1].status).toBe('skipped_no_bridge');
   });
+
+  describe('POST /api/admin/platform/workspaces.provisionApiKey', () => {
+    it('returns 401 without a Bearer token', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.provisionApiKey')
+        .send({ workspace_id: 'whatever' })
+        .expect(401);
+    });
+
+    it('returns 404 for an unknown workspace', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.provisionApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: 'ws_does_not_exist_xyz' })
+        .expect(404);
+    });
+
+    it('provisions a workspace key for an existing (member-less) workspace', async () => {
+      // Provision a tenant first to get a real, existing workspace.
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ name: 'Key Probe Co', email: `keyprobe-${Date.now()}@test.com`, siteUrl: 'https://kp.test' })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.provisionApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId, name: 'Tunnel key' })
+        .expect(201);
+
+      expect(res.body.workspace_id).toBe(wsId);
+      expect(res.body.api_key).toMatch(/^stam_live_/);
+      expect(res.body.key_prefix).toMatch(/^stam_live_/);
+    });
+  });
 });
