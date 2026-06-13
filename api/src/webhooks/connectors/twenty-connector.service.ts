@@ -46,6 +46,12 @@ interface CachedPerson {
   resolvedAt: number;
 }
 
+/** Discriminated result of a Person resolution attempt. */
+type PersonResolution =
+  | { status: 'found'; personId: string }
+  | { status: 'not_found' }
+  | { status: 'no_budget' };
+
 @Injectable()
 export class TwentyConnectorService {
   private readonly logger = new Logger(TwentyConnectorService.name);
@@ -114,9 +120,9 @@ export class TwentyConnectorService {
         continue;
       }
 
-      let personId: string | null;
+      let resolution: PersonResolution;
       try {
-        personId = await this.resolvePersonId(webhook.workspace_id, mapped.identity, client, budget);
+        resolution = await this.resolvePersonId(webhook.workspace_id, mapped.identity, client, budget);
       } catch (err) {
         this.logger.warn(
           `Twenty resolve failed (ws=${webhook.workspace_id}, id=${mapped.identity}): ${(err as Error).message}`,
@@ -124,18 +130,18 @@ export class TwentyConnectorService {
         outcome.failed.push(delivery.id);
         continue;
       }
-      if (personId === null) {
-        // Budget exhausted mid-resolution → leave for next tick (not a failure).
-        if (budget.remaining() === 0) {
-          outcome.failed.push(delivery.id);
-          continue;
-        }
-        // Person genuinely not found → orphan (import batch may not have run yet).
+      if (resolution.status === 'no_budget') {
+        // No token for the resolution → retry next tick (not a failure).
+        outcome.failed.push(delivery.id);
+        continue;
+      }
+      if (resolution.status === 'not_found') {
+        // Person genuinely not found → orphan (import batch may run later).
         outcome.orphans.push(delivery.id);
         continue;
       }
 
-      activities.push({ deliveryId: delivery.id, mapped, personId });
+      activities.push({ deliveryId: delivery.id, mapped, personId: resolution.personId });
     }
 
     if (activities.length === 0) return outcome;
@@ -184,23 +190,29 @@ export class TwentyConnectorService {
     return this.mapper.map(ctx);
   }
 
-  /** Resolve + cache a Person id. Returns null on cache-miss-not-found OR no budget. */
+  /**
+   * Resolve + cache a Person id. Returns a discriminated result so the caller
+   * never has to guess WHY resolution did not yield an id:
+   *   - found     → personId (from cache or a fresh lookup)
+   *   - not_found → the Person genuinely does not exist yet (orphan)
+   *   - no_budget → no token left for the lookup (retry next tick, NOT an orphan)
+   */
   private async resolvePersonId(
     workspaceId: string,
     identity: string,
     client: TwentyClient,
     budget: TwentyBudget,
-  ): Promise<string | null> {
+  ): Promise<PersonResolution> {
     const key = `${workspaceId}:${identity}`;
     const cached = this.personCache.get(key);
     if (cached && Date.now() - cached.resolvedAt < PERSON_CACHE_TTL_MS) {
-      return cached.id;
+      return { status: 'found', personId: cached.id };
     }
-    if (!budget.take()) return null; // no token → caller leaves delivery pending
+    if (!budget.take()) return { status: 'no_budget' };
     const person = await client.resolvePerson(identity);
-    if (!person) return null;
+    if (!person) return { status: 'not_found' };
     this.personCache.set(key, { id: person.id, resolvedAt: Date.now() });
-    return person.id;
+    return { status: 'found', personId: person.id };
   }
 
   private parseBody(raw: string): Record<string, unknown> {

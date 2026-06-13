@@ -165,6 +165,19 @@ describe('TwentyConnectorService', () => {
       expect(batches[0].length).toBe(60);
     });
 
+    it('fails (not orphans) a delivery when no budget is left for the resolution', async () => {
+      // Person would NOT be found, but the bucket is already empty: the delivery
+      // must be classified no_budget→failed (retry next tick), NOT orphan — a
+      // budget-starved lookup must never be mistaken for a missing Person.
+      const { client, resolves } = fakeClient(async () => null);
+      const budget = new TwentyBudget(0, () => 0); // empty bucket
+      const deliveries = [delivery('d1', { event_type: 'goal', goal_name: 'rdv_booked', user_id: 'ghost@x.com' })];
+      const out = await connector.flushBatch(twentyWebhook(), deliveries, client, budget);
+      expect(out.failed).toEqual(['d1']);
+      expect(out.orphans).toEqual([]);
+      expect(resolves).toEqual([]); // no network lookup attempted without a token
+    });
+
     it('fails the batch when no token is available for the POST', async () => {
       const { client, batches } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
       // budget of 1: consumed by the single Person resolution, none left for the POST
