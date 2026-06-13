@@ -18,6 +18,10 @@
 #   ENCRYPTION_KEY            = 32+ chars (openssl rand -hex 32)
 #   STAMINADS_ADMIN_PASSWORD  = mot de passe admin console staminads
 #   VERIDIAN_ADMIN_API_KEY    = clé API utilisée par Hub pour appeler le bridge
+#   PLATFORM_ADMIN_API_KEY    = secret M2M /api/admin/platform/* (provisionApiKey,
+#                               tenants.provision). REQUIS (${VAR:?} dans base.yml)
+#                               → à setter dans Dokploy ENV avant le prochain
+#                               deploy prod, sinon `compose up` échoue.
 #   BRIDGE_DB_USER / BRIDGE_DB_PASSWORD = creds Postgres bridge
 #   TOKEN_ENCRYPTION_KEY      = chiffrement tokens GSC/VoIP (AES-256-GCM)
 #   HUB_HMAC_SECRET           = HMAC secret pour endpoints Hub

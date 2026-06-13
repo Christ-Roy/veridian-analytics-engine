@@ -96,6 +96,8 @@ jobs:
           ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
           STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
           VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
+          # M2M admin platform (PlatformAdminGuard) : ${VAR:?} dans compose/base.yml.
+          PLATFORM_ADMIN_API_KEY: ci-platform-admin-key-placeholder
           # Postgres bridge (A4) : ${VAR:?} dans postgres-bridge
           BRIDGE_DB_USER: ci-bridge-user
           BRIDGE_DB_PASSWORD: ci-bridge-password
