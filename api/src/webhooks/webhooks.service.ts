@@ -407,10 +407,17 @@ export class WebhooksService {
   }
 
   private dtoToTransform(
-    transform?: { type: 'passthrough' | 'template'; template?: string },
+    transform?: {
+      type: 'passthrough' | 'template' | 'twenty';
+      template?: string;
+      dry_run?: boolean;
+    },
   ): WebhookTransform {
     if (!transform) return null;
     if (transform.type === 'passthrough') return { type: 'passthrough' };
+    if (transform.type === 'twenty') {
+      return { type: 'twenty', dry_run: transform.dry_run === true };
+    }
     if (transform.type === 'template') {
       if (!transform.template) {
         throw new BadRequestException({

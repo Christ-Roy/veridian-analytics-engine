@@ -62,6 +62,10 @@ export class WebhookTransformEngine {
         });
       }
     }
+    // type === 'twenty' never reaches the generic render path: the delivery
+    // worker routes Twenty destinations to TwentyConnectorService (batched
+    // timeline + Person resolution), not to a plain templated POST. This
+    // fallback only guards against a misrouted call.
     return JSON.stringify(event);
   }
 

@@ -26,9 +26,23 @@ export interface WebhookTransformTemplate {
   template: string;
 }
 
+/**
+ * Native Twenty CRM destination (design B, modèle Segment/PostHog).
+ * The webhook `url` is the Twenty REST base URL, `auth.token` (encrypted) is
+ * the Twenty Bearer. The connector batches timeline activities + resolves the
+ * target Person — it does NOT do a plain templated POST.
+ * Cf CONTRATS-TUNNEL §4c + connectors/twenty-connector.service.ts.
+ */
+export interface WebhookTransformTwenty {
+  type: 'twenty';
+  /** Gate à blanc: log mutations instead of sending. Reads stay real. */
+  dry_run?: boolean;
+}
+
 export type WebhookTransform =
   | WebhookTransformPassthrough
   | WebhookTransformTemplate
+  | WebhookTransformTwenty
   | null;
 
 export interface WebhookRetryConfig {

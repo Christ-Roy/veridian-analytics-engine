@@ -6,6 +6,9 @@ import { WebhookTransformEngine } from './webhook-transform-engine';
 import { WebhookSsrfGuard } from './webhook-ssrf-guard';
 import { WebhookDefinition, DEFAULT_RETRY_CONFIG } from './entities/webhook-definition.entity';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
+import { TwentyConnectorService } from './connectors/twenty-connector.service';
+import { TwentyEventMapper } from './connectors/twenty-event-mapper';
+import { TwentyBudget } from './connectors/twenty-budget';
 
 const baseWebhook: WebhookDefinition = {
   id: 'wh_unit_1',
@@ -67,6 +70,8 @@ describe('WebhookDeliveryWorker', () => {
         { provide: WebhooksService, useValue: webhooks },
         WebhookTransformEngine,
         WebhookSsrfGuard,
+        TwentyEventMapper,
+        TwentyConnectorService,
         {
           provide: ConfigService,
           useValue: { get: (k: string) => (k === 'WEBHOOK_ALLOW_HTTP' ? 'false' : undefined) },
@@ -245,6 +250,99 @@ describe('WebhookDeliveryWorker', () => {
       webhooks.findReadyDeliveries = jest.fn(async () => []);
       const processed = await worker.drainQueue(50);
       expect(processed).toBe(0);
+    });
+
+    it('routes Twenty-destination deliveries to the connector, not the generic POST', async () => {
+      const twentyWebhook: WebhookDefinition = {
+        ...baseWebhook,
+        id: 'wh_t',
+        url: 'https://crm.app.veridian.site',
+        transform: { type: 'twenty' },
+      };
+      const dT = { ...baseDelivery, id: 'del_t', webhook_id: 'wh_t' };
+      webhooks.findReadyDeliveries = jest.fn(async () => [dT]);
+      webhooks.findByIdInternal = jest.fn(async (_id: string) => twentyWebhook);
+      const flushSpy = jest
+        .spyOn(worker, 'flushTwentyGroup')
+        .mockResolvedValue(undefined);
+      await worker.drainQueue(50);
+      expect(flushSpy).toHaveBeenCalledTimes(1);
+      expect(flushSpy.mock.calls[0][0].id).toBe('wh_t');
+      expect(flushSpy.mock.calls[0][1].map((d) => d.id)).toEqual(['del_t']);
+      // generic POST path never used for a Twenty destination
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('flushTwentyGroup — outcome persistence', () => {
+    const twentyWebhook: WebhookDefinition = {
+      ...baseWebhook,
+      id: 'wh_t',
+      url: 'https://crm.app.veridian.site',
+      transform: { type: 'twenty' },
+    };
+    const mkDelivery = (id: string): WebhookDelivery => ({
+      ...baseDelivery,
+      id,
+      webhook_id: 'wh_t',
+      event_type: 'goal',
+      request_body: JSON.stringify({ event_type: 'goal', goal_name: 'rdv_booked', user_id: 'a@b.com' }),
+    });
+
+    function connectorOutcome(over: Partial<{
+      written: string[];
+      orphans: string[];
+      failed: string[];
+      skipped: string[];
+    }>) {
+      return { written: [], orphans: [], failed: [], skipped: [], ...over };
+    }
+
+    it('marks written deliveries success', async () => {
+      const connector = (worker as unknown as { twenty: TwentyConnectorService }).twenty;
+      jest.spyOn(connector, 'flushBatch').mockResolvedValue(connectorOutcome({ written: ['x1'] }));
+      await worker.flushTwentyGroup(twentyWebhook, [mkDelivery('x1')], new TwentyBudget());
+      const updated = webhooks.updateDelivery.mock.calls.find((c) => (c[0] as WebhookDelivery).id === 'x1')![0] as WebhookDelivery;
+      expect(updated.status).toBe('success');
+    });
+
+    it('marks skipped deliveries success no-op (never retried)', async () => {
+      const connector = (worker as unknown as { twenty: TwentyConnectorService }).twenty;
+      jest.spyOn(connector, 'flushBatch').mockResolvedValue(connectorOutcome({ skipped: ['x2'] }));
+      await worker.flushTwentyGroup(twentyWebhook, [mkDelivery('x2')], new TwentyBudget());
+      const updated = webhooks.updateDelivery.mock.calls.find((c) => (c[0] as WebhookDelivery).id === 'x2')![0] as WebhookDelivery;
+      expect(updated.status).toBe('success');
+      expect(updated.error_message).toMatch(/skipped/);
+    });
+
+    it('retries orphan deliveries (Person not yet imported)', async () => {
+      const connector = (worker as unknown as { twenty: TwentyConnectorService }).twenty;
+      jest.spyOn(connector, 'flushBatch').mockResolvedValue(connectorOutcome({ orphans: ['x3'] }));
+      await worker.flushTwentyGroup(twentyWebhook, [mkDelivery('x3')], new TwentyBudget());
+      const updated = webhooks.updateDelivery.mock.calls.find((c) => (c[0] as WebhookDelivery).id === 'x3')![0] as WebhookDelivery;
+      expect(updated.status).toBe('retrying');
+      expect(updated.attempt).toBe(2);
+      expect(updated.error_message).toMatch(/orphan/);
+    });
+
+    it('marks failed group inactive without calling the connector', async () => {
+      const connector = (worker as unknown as { twenty: TwentyConnectorService }).twenty;
+      const flushSpy = jest.spyOn(connector, 'flushBatch');
+      await worker.flushTwentyGroup({ ...twentyWebhook, active: false }, [mkDelivery('x4')], new TwentyBudget());
+      expect(flushSpy).not.toHaveBeenCalled();
+      const updated = webhooks.updateDelivery.mock.calls.find((c) => (c[0] as WebhookDelivery).id === 'x4')![0] as WebhookDelivery;
+      expect(updated.status).toBe('failed');
+      expect(updated.error_message).toMatch(/inactive/);
+    });
+
+    it('marks failed when the Twenty base URL is blocked by the SSRF guard', async () => {
+      const connector = (worker as unknown as { twenty: TwentyConnectorService }).twenty;
+      const flushSpy = jest.spyOn(connector, 'flushBatch');
+      await worker.flushTwentyGroup({ ...twentyWebhook, url: 'http://127.0.0.1/' }, [mkDelivery('x5')], new TwentyBudget());
+      expect(flushSpy).not.toHaveBeenCalled();
+      const updated = webhooks.updateDelivery.mock.calls.find((c) => (c[0] as WebhookDelivery).id === 'x5')![0] as WebhookDelivery;
+      expect(updated.status).toBe('failed');
+      expect(updated.error_message).toMatch(/ssrf/);
     });
   });
 });

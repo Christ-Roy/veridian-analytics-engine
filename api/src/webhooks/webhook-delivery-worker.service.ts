@@ -11,10 +11,18 @@ import {
 } from './entities/webhook-definition.entity';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 import { createHmac } from 'crypto';
+import { TwentyConnectorService, ConnectorOutcome } from './connectors/twenty-connector.service';
+import { TwentyBudget } from './connectors/twenty-budget';
 
 const POLL_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const RESPONSE_BODY_LIMIT = 64_000;
+const TWENTY_BUDGET_PER_MIN = 100; // §4c.2
+/**
+ * Backoff applied to an orphan Twenty delivery (Person not yet created by the
+ * import batch). Re-tried until max_attempts, then it gives up like any other.
+ */
+const TWENTY_ORPHAN_BACKOFF_MS = 5 * 60_000;
 
 export interface DeliveryAttemptResult {
   success: boolean;
@@ -44,6 +52,7 @@ export class WebhookDeliveryWorker {
     private readonly transformEngine: WebhookTransformEngine,
     private readonly ssrf: WebhookSsrfGuard,
     private readonly config: ConfigService,
+    private readonly twenty: TwentyConnectorService,
   ) {}
 
   /** Cron entry-point. Skipped while the previous tick is still running. */
@@ -63,12 +72,178 @@ export class WebhookDeliveryWorker {
   async drainQueue(batchSize = 50): Promise<number> {
     const pending = await this.webhooks.findReadyDeliveries(batchSize);
     if (pending.length === 0) return 0;
-    let processed = 0;
+
+    // Split Twenty destinations (batched) from generic webhooks (1:1 POST).
+    // We resolve each delivery's webhook once and group the Twenty ones by
+    // webhook_id so the connector can batch ≤60 timeline activities per call.
+    const twentyGroups = new Map<string, WebhookDelivery[]>();
+    const generic: WebhookDelivery[] = [];
+    const webhookCache = new Map<string, WebhookDefinition | null>();
+
     for (const delivery of pending) {
+      let webhook = webhookCache.get(delivery.webhook_id);
+      if (webhook === undefined) {
+        webhook = await this.webhooks.findByIdInternal(delivery.webhook_id);
+        webhookCache.set(delivery.webhook_id, webhook);
+      }
+      if (webhook && TwentyConnectorService.isTwentyDestination(webhook)) {
+        const group = twentyGroups.get(delivery.webhook_id) ?? [];
+        group.push(delivery);
+        twentyGroups.set(delivery.webhook_id, group);
+      } else {
+        generic.push(delivery);
+      }
+    }
+
+    let processed = 0;
+
+    // Generic webhooks: unchanged 1:1 path.
+    for (const delivery of generic) {
       await this.deliverOne(delivery);
       processed += 1;
     }
+
+    // Twenty destinations: one batch flush per webhook, sharing a minute budget.
+    if (twentyGroups.size > 0) {
+      const budget = new TwentyBudget(TWENTY_BUDGET_PER_MIN);
+      for (const [webhookId, deliveries] of twentyGroups) {
+        const webhook = webhookCache.get(webhookId);
+        if (!webhook) continue;
+        await this.flushTwentyGroup(webhook, deliveries, budget);
+        processed += deliveries.length;
+      }
+    }
+
     return processed;
+  }
+
+  /**
+   * Flush one Twenty webhook's ready deliveries through the connector, then
+   * persist each delivery's outcome:
+   *   - written → success
+   *   - skipped (non-milestone) → success no-op (never retried)
+   *   - orphan (Person not found) → retrying with backoff (import may run later)
+   *   - failed (mapping/budget/batch error) → retry path (5xx-like)
+   */
+  async flushTwentyGroup(
+    webhook: WebhookDefinition,
+    deliveries: WebhookDelivery[],
+    budget: TwentyBudget,
+  ): Promise<void> {
+    if (!webhook.active) {
+      for (const d of deliveries) {
+        await this.webhooks.updateDelivery({
+          ...d,
+          status: 'failed',
+          error_message: 'webhook is inactive',
+        });
+      }
+      return;
+    }
+
+    // Anti-loop + scheme guard on the Twenty base URL (same as generic path).
+    try {
+      this.ssrf.assertSafeUrl(webhook.url, {
+        allowHttp: this.httpAllowed(),
+        allowPrivate: this.privateAllowed(),
+      });
+    } catch (err) {
+      for (const d of deliveries) {
+        await this.webhooks.updateDelivery({
+          ...d,
+          status: 'failed',
+          error_message: `ssrf: ${(err as Error).message}`,
+        });
+      }
+      return;
+    }
+
+    const secret = this.webhooks.decryptSecret(webhook);
+    const client = this.twenty.buildClient(webhook, secret);
+    const byId = new Map(deliveries.map((d) => [d.id, d]));
+    let outcome: ConnectorOutcome;
+    try {
+      outcome = await this.twenty.flushBatch(webhook, deliveries, client, budget);
+    } catch (err) {
+      // Unexpected connector error → retry the whole group (5xx-like).
+      this.logger.error(`twenty flushBatch crashed (ws=${webhook.workspace_id}): ${(err as Error).message}`);
+      for (const d of deliveries) {
+        await this.scheduleConnectorRetry(webhook, d, `connector: ${(err as Error).message}`);
+      }
+      return;
+    }
+
+    const sentAt = toClickHouseDateTime();
+    for (const id of outcome.written) {
+      const d = byId.get(id);
+      if (d) {
+        await this.webhooks.updateDelivery({
+          ...d,
+          status: 'success',
+          sent_at: sentAt,
+          http_status: 200,
+          error_message: '',
+        });
+      }
+    }
+    for (const id of outcome.skipped) {
+      const d = byId.get(id);
+      if (d) {
+        await this.webhooks.updateDelivery({
+          ...d,
+          status: 'success',
+          sent_at: sentAt,
+          error_message: 'skipped: not a timeline milestone',
+        });
+      }
+    }
+    for (const id of outcome.orphans) {
+      const d = byId.get(id);
+      if (d) await this.scheduleConnectorRetry(webhook, d, 'orphan: Person not found', TWENTY_ORPHAN_BACKOFF_MS);
+    }
+    for (const id of outcome.failed) {
+      const d = byId.get(id);
+      if (d) await this.scheduleConnectorRetry(webhook, d, 'twenty: write/budget failure');
+    }
+  }
+
+  /**
+   * Retry a Twenty delivery with the webhook's backoff, or give up at
+   * max_attempts. Mirrors the generic 5xx retry path so orphans/transient
+   * failures eventually converge or surface as gave_up.
+   */
+  private async scheduleConnectorRetry(
+    webhook: WebhookDefinition,
+    delivery: WebhookDelivery,
+    reason: string,
+    overrideBackoffMs?: number,
+  ): Promise<void> {
+    const nextAttempt = delivery.attempt + 1;
+    const max = webhook.retry_config.max_attempts;
+    const sentAt = toClickHouseDateTime();
+    if (nextAttempt > max) {
+      await this.webhooks.updateDelivery({
+        ...delivery,
+        status: 'gave_up',
+        sent_at: sentAt,
+        error_message: reason,
+      });
+      return;
+    }
+    const backoff =
+      overrideBackoffMs ??
+      webhook.retry_config.backoff_ms[
+        Math.min(delivery.attempt - 1, webhook.retry_config.backoff_ms.length - 1)
+      ] ??
+      60_000;
+    await this.webhooks.updateDelivery({
+      ...delivery,
+      status: 'retrying',
+      attempt: nextAttempt,
+      scheduled_at: toClickHouseDateTime(new Date(Date.now() + backoff)),
+      sent_at: sentAt,
+      error_message: reason,
+    });
   }
 
   async deliverOne(delivery: WebhookDelivery): Promise<void> {

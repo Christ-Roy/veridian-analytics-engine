@@ -1,0 +1,219 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { WebhookDefinition } from '../entities/webhook-definition.entity';
+import { WebhookDelivery } from '../entities/webhook-delivery.entity';
+import {
+  TwentyEventMapper,
+  TrackedEventContext,
+  MappedTimelineEvent,
+} from './twenty-event-mapper';
+import { TwentyClient } from './twenty-client';
+import { TwentyBudget } from './twenty-budget';
+
+/**
+ * TwentyConnectorService — the engine-native Twenty destination (design B,
+ * modèle Segment/PostHog). Re-implements the micro-service `bridge/src/writer.ts`
+ * timeline path inside the webhooks module.
+ *
+ * Unlike a plain webhook (1 delivery → 1 POST), the Twenty destination BATCHES
+ * deliveries: it resolves the target Person, groups up to 60 timeline activities
+ * per call (§4c.2), and respects the ≤100 req/min budget (§4c.2). Each delivery
+ * is then marked success / orphan / failed individually.
+ *
+ * Multi-tenant: the TwentyClient is built per webhook from that workspace's own
+ * url (base) + decrypted Bearer. No shared singleton, no cross-tenant bleed.
+ *
+ * DRY_RUN: per-webhook via transform.dry_run (gate à blanc) OR globally via
+ * TWENTY_CONNECTOR_DRY_RUN. Reads (Person resolution) stay real, writes logged.
+ */
+
+export interface ConnectorOutcome {
+  /** delivery ids successfully written (or dry-run accepted) to a timeline batch */
+  written: string[];
+  /** delivery ids whose Person could not be resolved — left for the reconcile */
+  orphans: string[];
+  /** delivery ids that failed (mapping error, budget exhausted, batch error) */
+  failed: string[];
+  /** delivery ids skipped (not a timeline milestone) — treated as success no-op */
+  skipped: string[];
+}
+
+const BATCH_SIZE = 60; // §4c.2
+const PERSON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+interface CachedPerson {
+  id: string;
+  resolvedAt: number;
+}
+
+@Injectable()
+export class TwentyConnectorService {
+  private readonly logger = new Logger(TwentyConnectorService.name);
+  /** Person resolution cache, keyed by `${workspace_id}:${identity}` (tenant-scoped). */
+  private readonly personCache = new Map<string, CachedPerson>();
+
+  constructor(
+    private readonly mapper: TwentyEventMapper,
+    private readonly config: ConfigService,
+  ) {}
+
+  /** True when a webhook is a Twenty destination. */
+  static isTwentyDestination(webhook: WebhookDefinition): boolean {
+    return webhook.transform?.type === 'twenty';
+  }
+
+  /**
+   * Build the per-tenant Twenty client from the webhook definition.
+   * @param secret decrypted Bearer (caller decrypts via WebhooksService).
+   */
+  buildClient(webhook: WebhookDefinition, secret: string): TwentyClient {
+    const transform = webhook.transform as { type: 'twenty'; dry_run?: boolean } | null;
+    const dryRun =
+      transform?.dry_run === true ||
+      this.config.get<string>('TWENTY_CONNECTOR_DRY_RUN') === 'true';
+    return new TwentyClient({
+      baseUrl: webhook.url,
+      bearer: secret,
+      dryRun,
+    });
+  }
+
+  /**
+   * Push a batch of ready deliveries for ONE Twenty webhook.
+   *
+   * Steps (mirrors writer.flushOnce, §4c):
+   *   1. map each delivery's event → timeline name + identity (skip non-milestones)
+   *   2. resolve Person (cache TTL 24h) — orphan when not found
+   *   3. batch ≤60 → POST /rest/batch/timelineActivities (1 budget token)
+   *   4. classify each delivery: written / orphan / failed / skipped
+   *
+   * @param budget shared minute budget (timeline has priority over score push).
+   */
+  async flushBatch(
+    webhook: WebhookDefinition,
+    deliveries: WebhookDelivery[],
+    client: TwentyClient,
+    budget: TwentyBudget,
+  ): Promise<ConnectorOutcome> {
+    const outcome: ConnectorOutcome = {
+      written: [],
+      orphans: [],
+      failed: [],
+      skipped: [],
+    };
+    if (deliveries.length === 0) return outcome;
+
+    const activities: Array<{ deliveryId: string; mapped: MappedTimelineEvent; personId: string }> = [];
+
+    for (const delivery of deliveries.slice(0, BATCH_SIZE)) {
+      const mapped = this.mapDelivery(webhook, delivery);
+      if (!mapped) {
+        // Not a timeline milestone (raw noise / unknown goal / no identity).
+        // Treated as a success no-op so the delivery is not retried forever.
+        outcome.skipped.push(delivery.id);
+        continue;
+      }
+
+      let personId: string | null;
+      try {
+        personId = await this.resolvePersonId(webhook.workspace_id, mapped.identity, client, budget);
+      } catch (err) {
+        this.logger.warn(
+          `Twenty resolve failed (ws=${webhook.workspace_id}, id=${mapped.identity}): ${(err as Error).message}`,
+        );
+        outcome.failed.push(delivery.id);
+        continue;
+      }
+      if (personId === null) {
+        // Budget exhausted mid-resolution → leave for next tick (not a failure).
+        if (budget.remaining() === 0) {
+          outcome.failed.push(delivery.id);
+          continue;
+        }
+        // Person genuinely not found → orphan (import batch may not have run yet).
+        outcome.orphans.push(delivery.id);
+        continue;
+      }
+
+      activities.push({ deliveryId: delivery.id, mapped, personId });
+    }
+
+    if (activities.length === 0) return outcome;
+
+    if (!budget.take()) {
+      // No token for the batch POST → all candidates stay pending for next tick.
+      for (const a of activities) outcome.failed.push(a.deliveryId);
+      return outcome;
+    }
+
+    try {
+      await client.batchTimeline(
+        activities.map((a) => ({
+          name: a.mapped.name,
+          happensAt: a.mapped.happensAt,
+          targetPersonId: a.personId,
+          properties: a.mapped.properties,
+        })),
+      );
+      for (const a of activities) outcome.written.push(a.deliveryId);
+    } catch (err) {
+      this.logger.error(`Twenty batchTimeline failed (ws=${webhook.workspace_id}): ${(err as Error).message}`);
+      for (const a of activities) outcome.failed.push(a.deliveryId);
+    }
+
+    return outcome;
+  }
+
+  /**
+   * Map a stored delivery (request_body holds the tracked-event payload) to a
+   * timeline event via the pure mapper.
+   */
+  private mapDelivery(
+    webhook: WebhookDefinition,
+    delivery: WebhookDelivery,
+  ): MappedTimelineEvent | null {
+    const payload = this.parseBody(delivery.request_body);
+    const ctx: TrackedEventContext = {
+      workspace_id: webhook.workspace_id,
+      event_type: delivery.event_type,
+      event_id: delivery.event_id,
+      // The dispatcher stores the enriched ctx (payload + event_type/id/ws) as
+      // request_body; the mapper reads payload fields (path, goal_name, user_id…).
+      payload,
+    };
+    return this.mapper.map(ctx);
+  }
+
+  /** Resolve + cache a Person id. Returns null on cache-miss-not-found OR no budget. */
+  private async resolvePersonId(
+    workspaceId: string,
+    identity: string,
+    client: TwentyClient,
+    budget: TwentyBudget,
+  ): Promise<string | null> {
+    const key = `${workspaceId}:${identity}`;
+    const cached = this.personCache.get(key);
+    if (cached && Date.now() - cached.resolvedAt < PERSON_CACHE_TTL_MS) {
+      return cached.id;
+    }
+    if (!budget.take()) return null; // no token → caller leaves delivery pending
+    const person = await client.resolvePerson(identity);
+    if (!person) return null;
+    this.personCache.set(key, { id: person.id, resolvedAt: Date.now() });
+    return person.id;
+  }
+
+  private parseBody(raw: string): Record<string, unknown> {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  /** Test seam — clears the per-tenant Person cache. */
+  clearCache(): void {
+    this.personCache.clear();
+  }
+}

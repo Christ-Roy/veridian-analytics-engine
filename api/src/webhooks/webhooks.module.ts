@@ -9,6 +9,8 @@ import { WebhookFilterEngine } from './webhook-filter-engine';
 import { WebhookTransformEngine } from './webhook-transform-engine';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { WebhookDeliveryWorker } from './webhook-delivery-worker.service';
+import { TwentyEventMapper } from './connectors/twenty-event-mapper';
+import { TwentyConnectorService } from './connectors/twenty-connector.service';
 
 @Module({
   imports: [DatabaseModule, forwardRef(() => MembersModule)],
@@ -21,6 +23,8 @@ import { WebhookDeliveryWorker } from './webhook-delivery-worker.service';
     WebhookTransformEngine,
     WebhookDispatcherService,
     WebhookDeliveryWorker,
+    TwentyEventMapper,
+    TwentyConnectorService,
   ],
   exports: [WebhooksService, WebhookDispatcherService],
 })

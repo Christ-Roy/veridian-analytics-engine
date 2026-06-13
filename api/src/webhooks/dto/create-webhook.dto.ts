@@ -55,10 +55,10 @@ export class WebhookFilterDto {
 }
 
 export class WebhookTransformDto {
-  @ApiProperty({ enum: ['passthrough', 'template'] })
+  @ApiProperty({ enum: ['passthrough', 'template', 'twenty'] })
   @IsString()
-  @IsIn(['passthrough', 'template'])
-  type: 'passthrough' | 'template';
+  @IsIn(['passthrough', 'template', 'twenty'])
+  type: 'passthrough' | 'template' | 'twenty';
 
   /** Handlebars template (only used when type='template'). */
   @ApiProperty({ required: false })
@@ -66,6 +66,18 @@ export class WebhookTransformDto {
   @IsString()
   @MaxLength(64_000)
   template?: string;
+
+  /**
+   * Native Twenty destination only (type='twenty'): log mutations instead of
+   * sending them (gate à blanc). Reads (Person resolution) stay real.
+   */
+  @ApiProperty({
+    required: false,
+    description: 'Twenty destination dry-run (mutations logged, reads real).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  dry_run?: boolean;
 }
 
 export class WebhookRetryDto {
