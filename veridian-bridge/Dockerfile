@@ -1,5 +1,12 @@
 FROM node:22-alpine
 
+# Patch the alpine base openssl ahead of node:22-alpine rebumping its base:
+# CVE-2026-45447 (HIGH) in libssl3/libcrypto3 3.5.6-r0 is fixed in 3.5.7-r0.
+# Trivy Étage 2 (image scan, bloquant) fails the staging deploy otherwise.
+# Real fix (a patched version exists) — NOT a .trivyignore exception.
+# Remove once node:22-alpine ships a base with openssl >= 3.5.7-r0.
+RUN apk upgrade --no-cache libssl3 libcrypto3
+
 WORKDIR /app
 
 RUN addgroup -g 1001 -S app && adduser -S app -u 1001 -G app
