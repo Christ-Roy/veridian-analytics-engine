@@ -30,6 +30,17 @@ unifié** — **reste en service**. Le débranchement consiste à **désactiver 
 l'engine pousse ces mêmes jalons nativement, **sans casser le scoring unifié ni
 le flux Notifuse**.
 
+> ✅ **OPTION A FIGÉE (team-lead, 2026-06-13).** L'engine **ne calcule JAMAIS** et
+> **ne PATCH JAMAIS** `person.score`. Le **bridge reste la seule autorité du
+> score** (il a les signaux Notifuse + le writer + le CAS exactly-once). L'engine
+> fournit deux choses, et deux seulement : **(a)** la timeline analytics
+> event-driven (jalons `audit.*`, team task #2) et **(b)** un **endpoint
+> d'agrégats analytics** `GET /api/tunnel.aggregate` que le bridge consomme
+> **à la place du pull brut** pour fusionner avec ses signaux Notifuse (team task
+> #5 reformulé). La variante « engine PATCH score » de l'option B est **écartée**.
+> Le contrat exact de l'endpoint (shape = interface `AnalyticsAggregate`) est en
+> §2bis et doit être figé dans `CONTRATS-TUNNEL.md` §7 **avant l'E2E #3**.
+
 ---
 
 ## 1. Cartographie — ce que fait le micro-service (5 fonctions)
@@ -95,29 +106,70 @@ sans aucun signal analytics (non-consentants cookies). Le score est donc
 qui a cliqué 2 mails mais n'a pas (encore) de cookies analytics retomberait à 0
 = **régression de scoring + perte de leads chauds**.
 
-### Les deux options propres (à trancher AVANT la coupure)
+### Décision figée : Option A (team-lead, 2026-06-13)
 
-| Option | Description | Coût | Risque | Reco |
-|---|---|---|---|---|
-| **A — Scoring reste dans le micro-service** | Le natif ne pousse vers Twenty QUE les **jalons timeline** `audit.*` (fonction #3). Le **scoring unifié reste dans le micro-service** (fonction #4 + #5). Mais le bridge n'a plus le pull analytics → il lui faut les agrégats analytics par une **autre voie**. → Le natif émet AUSSI un webhook *vers le bridge* (pas vers Twenty) avec l'agrégat analytics par identité, OU l'engine expose un endpoint `GET /api/tunnel/aggregate?user_id=` que le bridge interroge à la place du pull brut. | Moyen — le natif doit fournir les agrégats au bridge | Faible — le scoring reste centralisé, une seule écriture `person.score` | ✅ **~75%** — préserve l'invariant scoring unifié sans dédoubler la logique |
-| **B — Scoring migré dans l'engine** | Le natif calcule le **score complet** côté engine (re-implémente `score-tunnel.ts`) MAIS il a besoin des signaux Notifuse, que l'engine n'a pas. → L'engine devrait consommer les webhooks Notifuse OU le bridge pousse ses signaux Notifuse vers l'engine. Duplication de la logique de scoring + l'engine devient dépendant de Notifuse (couplage qu'on ne veut pas). | Élevé — re-implémentation + nouveau couplage engine↔Notifuse | Élevé — deux implémentations de scoring à garder synchro, couplage indésirable | ❌ contraire à « zéro code partagé » et au périmètre engine |
+| Option | Description | Statut |
+|---|---|---|
+| **A — Scoring reste dans le micro-service** | Le natif ne pousse vers Twenty QUE les **jalons timeline** `audit.*` (remplace la fonction #3 côté timeline). Le **scoring unifié reste dans le micro-service** (fonctions #4 + #5). Le bridge n'a plus le pull brut → l'engine lui expose un **endpoint d'agrégats analytics** `GET /api/tunnel.aggregate` (cf §2bis) que le bridge consomme à la place de `export.userEvents`, puis fusionne avec ses signaux Notifuse. | ✅ **RETENUE** — préserve l'invariant scoring unifié, une seule autorité `person.score`, pas de couplage engine↔Notifuse |
+| **B — Scoring migré dans l'engine (engine PATCH score)** | Le natif recompute et PATCH `person.score` côté engine. Mais l'engine n'a pas les signaux Notifuse (et ne doit pas — couplage interdit) → score analytics-only qui écrase les composants email + double writer sur `person.score`. | ❌ **ÉCARTÉE** — régression scoring garantie + lost update |
 
-**Recommandation forte : Option A.** Le scoring unifié **reste l'autorité du
-micro-service** (il a déjà les signaux Notifuse + le writer + le CAS
-exactly-once sur `person.score`). Le natif ne fait que **remplacer le transport
-de la source analytics** : au lieu d'un pull brut `export.userEvents`, il pousse
-les jalons `audit.*` en timeline **et** alimente le bridge en agrégats analytics
-(par identité) pour le recalcul de score.
-
-> ⚠️ **GATE DE CONCEPTION** : ce runbook ne peut pas figer l'option tant que le
-> connecteur natif (task #2) n'est pas conçu. **L'agent qui construit le natif
-> (#2) DOIT trancher A vs B et le documenter dans `CONTRATS-TUNNEL.md` §7 (ou un
-> §7b nouveau) AVANT la phase E2E (#3).** Le présent runbook recommande A et
-> liste, en §3, les invariants que TOUTE option doit respecter.
+**Conséquence directe pour le débranchement** : une seule chose est coupée côté
+bridge — le **pull brut** `export.userEvents` (la consommation passive de
+`analytics-pull.ts` + `engine-client.ts`). Il est **remplacé par la consommation
+de l'endpoint agrégat**. Le scoring (#4), le writer (#5), le flux Notifuse (#1,
+#2) **restent intégralement côté bridge**. L'engine **ne touche jamais** au champ
+`person.score`.
 
 ---
 
-## 3. Invariants à préserver (quelle que soit l'option retenue)
+## 2bis. Contrat de l'endpoint agrégat `GET /api/tunnel.aggregate`
+
+> 🔴 À **figer dans `CONTRATS-TUNNEL.md` §7 AVANT l'E2E #3.** C'est le contrat
+> qui remplace le pull brut côté bridge. Tranché par l'agent qui porte les tasks
+> #2/#5 (twenty-connector) ; ce runbook fixe la cible que le bridge attend.
+
+- **Auth** : JWT super-admin engine (`auth.login` programmatique, déjà en place
+  pour le pull — `CONTRATS-TUNNEL.md` §7 « auth réconciliateur »). Pas d'API key
+  workspace possible sur un workspace platform-managed (403 vérifié 2026-06-10).
+- **Query** : `workspace_id` (= `vrd_veridian_site_prod`), `since` / `until`
+  (fenêtre, défaut 48h pour coller au curseur actuel du bridge), pagination
+  cursor pour les gros volumes.
+- **Réponse** : un agrégat **par identité** (`user_id` = slug audit OU email
+  normalisé), shape **strictement identique** à l'interface `AnalyticsAggregate`
+  que `score-tunnel.ts` consomme aujourd'hui — sinon le bridge doit re-mapper et
+  on introduit un risque de drift :
+
+```ts
+// shape attendue par item (1 par user_id) — miroir de AnalyticsAggregate
+{
+  userId: string;          // slug audit OU email normalisé (union des 2 clés)
+  auditViews: number;
+  auditScrollMax: number;  // 0-100
+  hotPages: number;        // /tarifs, /contact, /roi (uniques)
+  otherPages: number;      // hors audit + hors chaudes (uniques)
+  consented: boolean;      // tracké, ne score JAMAIS (décision lead)
+  ctaClicks: number;
+  rdvBooked: number;
+  identifiedByEmail: boolean;
+  appStarted: boolean;     // goal Hub notifuse/prospection (whitelist §4a-bis)
+  sessions: number;
+  lastSeen: string | null; // ISO 8601 (le bridge parse en Date)
+}
+```
+
+- **Sémantique d'agrégation** : exactement celle de `analytics-pull.ts:aggregateEvents`
+  (SCORING-V1.md §3) — c'est l'engine qui devient la source de vérité de
+  l'agrégat, donc l'engine doit reproduire fidèlement cette agrégation
+  (HOT_PATHS, mapping des goals `audit.*`/`signup`/`app_started`, whitelist
+  `APP_STARTED_SCORED_APPS`, `consent_granted` = 0 point). Tout écart = écart de
+  score → bloquant en parité (§5 P3).
+- **Le bridge garde** la fusion slug↔email (`mergeAggregates` via `links.json`)
+  et le calcul `computeTunnelScore(notifuse, analytics)`. L'endpoint ne remplace
+  QUE la **source** des agrégats analytics, pas la logique de score.
+
+---
+
+## 3. Invariants à préserver (Option A)
 
 La coupure n'est **propre** que si, après bascule, TOUS ces invariants tiennent :
 
@@ -128,12 +180,16 @@ La coupure n'est **propre** que si, après bascule, TOUS ces invariants tiennent
    (`analytics-pull.ts:emitMilestones`). Le natif **doit produire la même clé de
    dédup** (ou Twenty doit dédupliquer sur cette clé) — sinon re-jouer = doublon.
 3. **Le scoring unifié reste correct.** `person.score` doit refléter
-   Notifuse + Analytics. Pas de score analytics-only qui écrase le composant
-   email. Invariant « 2 clics = 30 = chaud » vérifié post-bascule.
-4. **Une seule autorité d'écriture sur `person.score`.** Pas deux writers qui se
-   marchent dessus (lost update). Le CAS exactly-once du store
-   (`markScorePushed` avec `AND score = ?`) ne protège QUE le writer du bridge —
-   il ne protège PAS contre un second writer externe.
+   Notifuse + Analytics. L'engine ne PATCH JAMAIS `person.score` (Option A) ; le
+   bridge recompute depuis l'endpoint agrégat + ses signaux Notifuse. Invariant
+   « 2 clics = 30 = chaud » vérifié post-bascule.
+4. **Une seule autorité d'écriture sur `person.score` = le bridge.** L'engine ne
+   touche jamais ce champ (Option A figée). Le CAS exactly-once du store
+   (`markScorePushed` avec `AND score = ?`) reste l'unique garde-fou — il n'y a
+   pas de second writer externe à craindre tant que l'Option A tient.
+4bis. **L'agrégat servi par l'endpoint == l'agrégat produit par le pull.** La
+   sémantique d'agrégation engine doit être identique à `aggregateEvents`
+   (§2bis) — sinon écart de score (bloquant en parité §5 P3).
 5. **happensAt = vraie heure de l'event** (`CONTRATS-TUNNEL.md` §4c.2), pas
    l'heure de livraison. Le micro-service normalisait en `toISOString()`
    (Twenty rejette les micro-précisions en 400 → casse le batch de 60).
@@ -151,8 +207,11 @@ La coupure n'est **propre** que si, après bascule, TOUS ces invariants tiennent
 
 ### Phase 0 — Pré-requis (bloquants)
 
-- [ ] Connecteur natif construit (task #2) + **option A/B tranchée et écrite**
-      dans `CONTRATS-TUNNEL.md`.
+- [ ] Connecteur natif timeline construit (task #2).
+- [ ] **Endpoint agrégat `GET /api/tunnel.aggregate` livré** (task #5) + contrat
+      §2bis **figé dans `CONTRATS-TUNNEL.md` §7**.
+- [ ] **Bridge adapté** pour consommer l'endpoint agrégat à la place du pull brut
+      (ticket tunnel §3) — capable des deux voies en Phase 1.
 - [ ] E2E natif vert (task #3) sur workspace Twenty de **TEST** (Tunnel Lab).
 - [ ] Natif déployé en **prod** et tournant.
 - [ ] Critères de **PREUVE PROD §5 TOUS verts**.
@@ -162,59 +221,68 @@ La coupure n'est **propre** que si, après bascule, TOUS ces invariants tiennent
 Le natif et le micro-service tournent **en parallèle** un temps donné (§5).
 Pendant cette fenêtre :
 
-- [ ] Le natif pousse les jalons analytics (vers Twenty et/ou vers le bridge
-      selon l'option A).
-- [ ] Le micro-service **continue** son pull analytics (rien coupé).
-- [ ] On **compare** : mêmes jalons, mêmes timestamps, même score résultant.
-      La dédup déterministe (§3.2) garantit que le double-run ne crée **pas** de
-      doublon en timeline (même `eventId` → no-op).
+- [ ] Le natif pousse les jalons `audit.*` en timeline Twenty (task #2).
+- [ ] Le micro-service **continue** son pull analytics brut (rien coupé).
+- [ ] **L'endpoint agrégat tourne** ; on compare l'agrégat servi par
+      `GET /api/tunnel.aggregate` avec l'agrégat que le bridge produit par son
+      pull (`aggregateEvents`) — **item par item, champ par champ** : 0 écart.
+- [ ] On **compare** : mêmes jalons timeline, mêmes timestamps, même score
+      résultant. La dédup déterministe (§3.2) garantit que le double-run ne crée
+      **pas** de doublon en timeline (même `eventId` → no-op).
+- [ ] Le bridge sait consommer la **nouvelle voie agrégat** en plus de son pull
+      (les deux donnent le même `AnalyticsAggregate`) — c'est ce qui autorise la
+      bascule de source en Phase 2.
 - [ ] Tableau de parité tenu (cf §5) : 0 écart pendant N jours.
 
-> ⚠️ Si l'option A est retenue et que le natif alimente le bridge en agrégats,
-> la Phase 1 vérifie aussi que le bridge sait consommer cette nouvelle voie
-> **en plus** de son pull (les deux donnent le même agrégat).
+### Phase 2 — Bascule de la source analytics (pull brut → endpoint agrégat)
 
-### Phase 2 — Coupure de la source analytics du micro-service
+Côté **micro-service** (`veridian-tunnel-de-vente`), une fois la parité prouvée.
+⚠️ **On ne coupe PAS l'apport analytics du scoring** — on en change la SOURCE :
+le bridge cesse de pull `export.userEvents` (+ emit jalons timeline, désormais
+faits par le natif) et lit l'endpoint agrégat pour le recalcul de score.
 
-Côté **micro-service** (`veridian-tunnel-de-vente`), une fois la parité prouvée :
-
-- [ ] **Désactiver les étapes 1+2 de `sync.runOnce()`** (pull export + emit
-      jalons). Voie propre : un flag `ANALYTICS_PULL_ENABLED` (défaut `1`) qui,
-      à `0`, saute le bloc `if (engineAdminEmail && engineAdminPassword)` dans
-      `sync.ts`. **NE PAS supprimer le code** en Phase 2 (rollback instantané).
-- [ ] Retirer (ou laisser vides) les ENV `ENGINE_ADMIN_EMAIL` /
-      `ENGINE_ADMIN_PASSWORD` du compose bridge → le pull ne s'arme plus de
-      lui-même (le code skippe déjà si elles sont vides : `sync.ts` L74).
-      ⚠️ **Garder** `ENGINE_BASE_URL`/`ENGINE_WORKSPACE_ID` si l'option A fait
-      que le bridge interroge encore l'engine pour les agrégats.
+- [ ] **Basculer la source** : `sync.ts` consomme `GET /api/tunnel.aggregate`
+      au lieu de `exportAll` + `aggregateEvents`, et **n'émet plus** les jalons
+      timeline `audit.*` (le natif les pousse). Voie propre : flag
+      `ANALYTICS_SOURCE` (`pull` par défaut → `aggregate`) qui choisit la source.
+      **NE PAS supprimer le code du pull** en Phase 2 (rollback instantané).
+- [ ] **Garder armé l'accès engine** : `ENGINE_ADMIN_EMAIL`/`ENGINE_ADMIN_PASSWORD`
+      (JWT super-admin) + `ENGINE_BASE_URL`/`ENGINE_WORKSPACE_ID` — l'endpoint
+      agrégat utilise la **même auth** que le pull. **Ne PAS vider ces ENV.**
 - [ ] **Garder** le scoring (#4) et le writer (#5) — ils tournent toujours,
-      alimentés par les signaux Notifuse + (option A) les agrégats analytics
-      fournis par le natif.
+      alimentés par les signaux Notifuse + les agrégats analytics servis par
+      l'endpoint engine. L'engine ne touche JAMAIS `person.score`.
 - [ ] Redéployer le bridge sur dev-pub (`docker compose up -d`).
 - [ ] Vérifier `GET https://bridge.staging.veridian.site/healthz` : `ok`,
-      `last_sync_at` continue d'avancer (sweep Notifuse tourne toujours).
+      `last_sync_at` continue d'avancer (sweep Notifuse + recalcul score tournent).
 
 ### Phase 3 — Vérification post-coupure (fenêtre d'observation)
 
 - [ ] Pendant 48-72h, vérifier que les jalons `audit.*` arrivent **toujours**
       dans Twenty (via le natif désormais) — zéro régression timeline.
-- [ ] Vérifier que les scores restent cohérents (invariant §3.3).
-- [ ] Vérifier les logs bridge : plus de ligne `[sync] pulled=...` (ou
-      `pulled=0`), le sweep Notifuse continue (`réinjectés=...`).
+- [ ] Vérifier que les scores restent cohérents (invariants §3.3 / §3.4bis) —
+      le bridge recompute toujours `person.score`, alimenté par l'endpoint.
+- [ ] Vérifier les logs bridge : plus de ligne `[sync] pulled=...` brut (la
+      source agrégat remplace), le sweep Notifuse continue (`réinjectés=...`),
+      les scores continuent d'être upsert/poussés.
 - [ ] Vérifier la CI E2E tunnel (`tunnel-e2e.yml`) reste **verte** — elle
       exerce le parcours complet ; adapter les gates analytics si elles
-      testaient le pull (cf ticket §6, point « adapter tunnel-e2e »).
+      testaient le pull brut (cf ticket §6, point « adapter tunnel-e2e »).
 
 ### Phase 4 — Nettoyage (après fenêtre d'observation stable)
 
-- [ ] Supprimer le code mort du pull analytics du micro-service
-      (`analytics-pull.ts`, `engine-client.ts`, étapes 1-2 de `sync.ts`) — tier
-      🟡, l'agent tunnel promote autonome après E2E vert.
-- [ ] Mettre à jour `CONTRATS-TUNNEL.md` §7 : le flux analytics est désormais
-      natif engine→Twenty ; le micro-service ne couvre plus que Notifuse (+ lane
-      segments). Historiser la bascule (date, SHA).
+- [ ] Supprimer le code mort du **pull brut** analytics du micro-service
+      (`engine-client.ts:exportAll`, `analytics-pull.ts:aggregateEvents` +
+      `emitMilestones` si le natif fait la timeline, étapes pull de `sync.ts`) —
+      tier 🟡, l'agent tunnel promote autonome après E2E vert.
+      ⚠️ **Garder** `score-tunnel.ts`, `writer.ts`, `mergeAggregates`, et le
+      client de l'endpoint agrégat — ils restent l'autorité du score.
+- [ ] Mettre à jour `CONTRATS-TUNNEL.md` §7 : la timeline analytics est désormais
+      native engine→Twenty ; l'agrégat analytics est servi par
+      `GET /api/tunnel.aggregate` (contrat §2bis figé) ; le bridge reste seule
+      autorité du `person.score`. Historiser la bascule (date, SHA).
 - [ ] Mettre à jour `DEFINITION-OF-DONE-V1.md` et la doc SPEC-BRIDGE si elle
-      décrit encore le pull analytics comme à la charge du bridge.
+      décrit encore le pull brut analytics comme à la charge du bridge.
 
 ---
 
@@ -226,17 +294,20 @@ Côté **micro-service** (`veridian-tunnel-de-vente`), une fois la parité prouv
 |---|---|---|---|
 | P1 | **Natif tourne en prod sans erreur** | `webhook_deliveries.status` du connecteur Twenty natif | **≥ 7 jours** consécutifs, taux `success` **≥ 99%**, zéro `gave_up` non justifié |
 | P2 | **Parité timeline** | Diff jalons `audit.*` poussés par le natif vs ceux qui seraient poussés par le pull (double-run Phase 1) | **0 écart** sur la fenêtre (mêmes events, mêmes happensAt, mêmes targetPerson) |
-| P3 | **Parité scoring** | `person.score` calculé avec source natif == score historique (mêmes composants Notifuse+Analytics) | **0 écart** ; invariant « 2 clics = 30 = chaud » re-vérifié |
+| P3a | **Parité agrégat** | agrégat servi par `GET /api/tunnel.aggregate` == agrégat produit par `aggregateEvents` du pull (item/champ) | **0 écart** sur la fenêtre |
+| P3b | **Parité scoring** | `person.score` recomputé bridge depuis l'endpoint == score historique (mêmes composants Notifuse+Analytics) | **0 écart** ; invariant « 2 clics = 30 = chaud » re-vérifié |
 | P4 | **Zéro doublon** | Re-jouer un parcours → `eventId` déterministe → no-op en timeline | **0 doublon** créé par le double-run |
 | P5 | **Zéro perte** | Tout `audit.*` vu côté engine arrive côté Twenty (compteur source vs destination) | **0 perte** sur la fenêtre |
 | P6 | **Latence acceptable** | délai event analytics → apparition Twenty via natif | meilleure ou égale au pull horaire (≤ 1h, idéalement temps réel) |
 | P7 | **Flux Notifuse non impacté** | webhook + sweep Notifuse continuent, `healthz` ok | aucune régression observée pendant la fenêtre |
-| P8 | **Option A/B figée au contrat** | `CONTRATS-TUNNEL.md` §7 documente la nouvelle topologie + autorité du score | présent et relu |
+| P8 | **Contrat endpoint figé** | `CONTRATS-TUNNEL.md` §7 documente `GET /api/tunnel.aggregate` (shape §2bis) + autorité du score = bridge (Option A) | présent et relu |
+| P9 | **Engine ne PATCH jamais `person.score`** | audit des écritures Twenty : aucune mutation `person.score` ne provient de l'engine | confirmé (Option A respectée) |
 
-**Rollback (si un critère casse après Phase 2)** : remettre
-`ANALYTICS_PULL_ENABLED=1` (+ ENV `ENGINE_ADMIN_*`), redéployer le bridge → le
-pull analytics reprend immédiatement. La dédup déterministe absorbe le
-recouvrement. C'est pourquoi **on ne supprime AUCUN code avant la Phase 4**.
+**Rollback (si un critère casse après Phase 2)** : remettre `ANALYTICS_SOURCE=pull`
+(les ENV `ENGINE_ADMIN_*` n'ont jamais été retirées), redéployer le bridge → le
+pull brut analytics reprend immédiatement comme source de score. La dédup
+déterministe absorbe le recouvrement timeline. C'est pourquoi **on ne supprime
+AUCUN code avant la Phase 4**.
 
 ---
 
