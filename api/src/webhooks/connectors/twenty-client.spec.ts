@@ -124,6 +124,22 @@ describe('TwentyClient', () => {
       await expect(makeClient().batchTimeline(items)).resolves.toBeUndefined();
     });
 
+    it('treats a 400 "A duplicate entry was detected" as a no-op (real Twenty REPLAY, #12)', async () => {
+      // The real Twenty returns 400 (not 409) on a duplicate deterministic id.
+      fetchMock.mockResolvedValue(err(400, '{"messages":["A duplicate entry was detected"]}'));
+      await expect(makeClient().batchTimeline(items)).resolves.toBeUndefined();
+    });
+
+    it('matches "duplicate" case-insensitively in the 400 body', async () => {
+      fetchMock.mockResolvedValue(err(400, 'DUPLICATE record'));
+      await expect(makeClient().batchTimeline(items)).resolves.toBeUndefined();
+    });
+
+    it('still THROWS on a 400 that is NOT a duplicate (real error)', async () => {
+      fetchMock.mockResolvedValue(err(400, 'invalid happensAt format'));
+      await expect(makeClient().batchTimeline(items)).rejects.toThrow('Twenty batchTimeline 400');
+    });
+
     it('is a no-op for an empty batch', async () => {
       await makeClient().batchTimeline([]);
       expect(fetchMock).not.toHaveBeenCalled();

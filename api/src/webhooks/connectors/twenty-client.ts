@@ -37,7 +37,9 @@ export interface TimelineActivityInput {
   /**
    * Deterministic client-supplied id (UUIDv5 = f(event_id, name)). Makes a
    * replay land on the SAME Twenty row → exactly-once, no engine-side store
-   * (task #9). Twenty accepts a client id and no-ops/409 on a duplicate.
+   * (task #9). Twenty accepts a client id; on a duplicate it returns 400
+   * "A duplicate entry was detected" (NOT 409 — verified by the E2E RUN, #12)
+   * which batchTimeline treats as a no-op.
    */
   id: string;
   name: string; // frozen §4c.3: audit.* | signup | app.started | score.threshold
@@ -141,19 +143,24 @@ export class TwentyClient {
         signal: AbortSignal.timeout(this.timeout),
       },
     );
-    // 409 = the deterministic id already exists → replay no-op (exactly-once).
-    // Not an error: the activity is already there, do not retry/duplicate.
-    if (res.status === 409) {
+    if (res.ok) return;
+
+    // Read the error body ONCE (a Response body is single-use) — reused both
+    // for the duplicate test and the thrown message.
+    const body = await this.safeText(res);
+
+    // Duplicate of an already-written deterministic id → replay no-op
+    // (exactly-once). The real Twenty REPLAY returns 400 "A duplicate entry
+    // was detected" (NOT 409, despite REST conventions) — verified by the E2E
+    // RUN. We accept BOTH: 409, or 400 whose body mentions "duplicate".
+    if (res.status === 409 || (res.status === 400 && /duplicate/i.test(body))) {
       this.logger.debug(
-        `batchTimeline: 409 duplicate (deterministic id already present) — no-op`,
+        `batchTimeline: duplicate (HTTP ${res.status}, id already present) — no-op exactly-once`,
       );
       return;
     }
-    if (!res.ok) {
-      throw new Error(
-        `Twenty batchTimeline ${res.status}: ${await this.safeText(res)}`,
-      );
-    }
+
+    throw new Error(`Twenty batchTimeline ${res.status}: ${body}`);
   }
 
   // NOTE: no patchPerson() — the engine never writes person.score (the bridge
