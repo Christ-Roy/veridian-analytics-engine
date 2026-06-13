@@ -17,6 +17,7 @@ describe('SessionPayloadHandler', () => {
   let bufferService: jest.Mocked<EventBufferService>;
   let workspacesService: jest.Mocked<WorkspacesService>;
   let geoService: jest.Mocked<GeoService>;
+  let eventEmitter: { emit: jest.Mock };
 
   const mockWorkspace = {
     id: 'test-ws',
@@ -103,6 +104,7 @@ describe('SessionPayloadHandler', () => {
     bufferService = module.get(EventBufferService);
     workspacesService = module.get(WorkspacesService);
     geoService = module.get(GeoService);
+    eventEmitter = module.get(EventEmitter2);
   });
 
   afterEach(() => {
@@ -182,6 +184,54 @@ describe('SessionPayloadHandler', () => {
 
       const events = bufferService.addBatch.mock.calls[0][0];
       expect(events[0].page_duration).toBe(5500); // Keep as ms, matches schema
+    });
+  });
+
+  describe('emitTracked — event.tracked payload (webhooks fan-out, #15)', () => {
+    function lastTracked(): {
+      event_id: string;
+      payload: Record<string, unknown>;
+    } {
+      const call = eventEmitter.emit.mock.calls.find((c) => c[0] === 'event.tracked');
+      if (!call) throw new Error('event.tracked was not emitted');
+      return call[1];
+    }
+
+    it('includes max_scroll so the connector can emit audit.scroll (>=75)', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ path: '/audit/x', scroll: 85, page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+      await handler.handle(payload, null);
+      expect(lastTracked().payload.max_scroll).toBe(85);
+    });
+
+    it('includes real event timestamps so happensAt is the true event time', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ path: '/audit/x', page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+      await handler.handle(payload, null);
+      const p = lastTracked().payload;
+      // entered_at + received_at are ClickHouse datetime strings (mapper reads them)
+      expect(typeof p.entered_at).toBe('string');
+      expect(typeof p.received_at).toBe('string');
+    });
+
+    it('uses a STABLE event_id (dedup_token, no Date.now) for replay idempotence', async () => {
+      const make = () =>
+        createPayload({
+          actions: [createPageviewAction({ path: '/audit/x', page_number: 1 })],
+          attributes: { landing_page: 'https://example.com/' },
+        });
+      await handler.handle(make(), null);
+      const id1 = lastTracked().event_id;
+      jest.clearAllMocks();
+      await handler.handle(make(), null);
+      const id2 = lastTracked().event_id;
+      // same logical event → same id (no Date.now drift) → connector replay no-op
+      expect(id1).toBe(id2);
+      expect(id1).not.toMatch(/\d{13}/); // no epoch-ms suffix
     });
   });
 

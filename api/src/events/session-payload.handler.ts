@@ -144,14 +144,23 @@ export class SessionPayloadHandler {
       const payload = {
         workspace_id: event.workspace_id,
         event_type: event.name ?? 'unknown',
+        // event_id MUST be STABLE for a given logical event so the Twenty
+        // connector's deterministic id (f(personId, event_id, name)) collides
+        // on replay = exactly-once (#12/#13). dedup_token is deterministic
+        // (deserialize*: `${session_id}_pv_${page_number}` / `_goal_...`); the
+        // fallback is ALSO deterministic (NO Date.now() — that would break
+        // idempotence by making every replay a fresh id → duplicates).
         event_id:
-          (rec.dedup_token as string | undefined) ??
-          `${event.session_id}_${event.name}_${Date.now()}`,
+          (rec.dedup_token as string | undefined) ||
+          `${event.session_id}_${event.name}_${rec.page_number ?? 0}`,
         payload: {
           session_id: event.session_id,
           path: rec.path,
           page_number: rec.page_number,
           previous_path: rec.previous_path,
+          // max_scroll drives the audit.scroll milestone (>=75) in the mapper.
+          // Omitting it lost the scroll signal entirely (#15).
+          max_scroll: rec.max_scroll,
           goal_name: rec.goal_name,
           goal_value: rec.goal_value,
           properties: rec.properties,
@@ -179,6 +188,12 @@ export class SessionPayloadHandler {
           language: rec.language,
           timezone: rec.timezone,
           user_id: event.user_id ?? null,
+          // Real event timestamps so the connector sets happensAt = TRUE event
+          // time (§4c.2), not the write time. The mapper reads these (in order:
+          // goal_timestamp → event_timestamp → entered_at → received_at). #15.
+          goal_timestamp: rec.goal_timestamp,
+          entered_at: rec.entered_at,
+          received_at: rec.received_at,
         },
       };
       this.eventEmitter.emit('event.tracked', payload);
