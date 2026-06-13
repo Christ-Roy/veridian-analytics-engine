@@ -118,23 +118,38 @@ bascule slug→email en cours de session (rétro-attribution staminads) :
 - **Rouge si** : un POST != 200, ou un event manquant à l'export.
 
 ### SPEC-3 — Data NICKEL dans Twenty (cœur)
-Après le parcours + 1 tick worker (≤ ~15s) :
+
+⚠️ **Architecture en 2 régimes (arbitrage lead, Tasks #2 vs #5)** :
+- **TIMELINE = event-driven** → connecteur du delivery worker (Task #2).
+  1 event → 1 timelineActivity, latence ~15s (tick worker 10s).
+- **SCORE = agrégat** → service `@Interval` séparé `TwentyScoreSyncService`
+  (Task #5). Le score est fonction de TOUT l'historique d'une identité
+  (un webhook voit 1 event isolé sans l'historique) → recompute périodique +
+  PATCH des écarts. La latence du score dépend de la période du job.
+- **Conséquence test** : 3a/3b/3d/3e se prouvent après le tick worker (#2) ;
+  3c (score) se prouve après un cycle du job @Interval (#5). Mon #3 est bloqué
+  par #2 ET #5.
+
 - **3a Résolution Person** : la timeline atterrit sur la BONNE Person (résolue
   par slug PUIS par email — les deux clés doivent converger sur le même record,
-  union slug↔email).
+  union slug↔email). [via #2]
 - **3b Noms d'events** : timeline contient les digests namespace.verbe du §4c.3
   (`audit.page_view`, `audit.scroll`, `audit.cta_click`, `audit.rdv`) — JAMAIS
-  les goal names bruts du site (`audit_cta_rdv`, etc.). Le connecteur fait le
-  mapping.
-- **3c Score** : `person.score` PATCHé selon la grille (view 10 < scroll 15 <
-  CTA 20 < identify 35 < RDV 50, cf §4a-bis ordre strict) + champ `components`
-  (détail des points) présent → score pas une boîte noire.
+  les goal names bruts du site (`cta_click`, `rdv_booked`...). Le connecteur
+  fait le mapping. [via #2]
+- **3c Score** : `person.score` PATCHé par le job @Interval selon la grille
+  figée §4a (ordre strict view 10 < scroll 15 < CTA 20 < identify/signup 35 <
+  app_started 40 < RDV 50 ; invariant "2 clics = 30 = chaud") + champ
+  `components` (détail des points) présent → score pas une boîte noire.
+  Idempotence score = compare-and-set (pas de lost-update, bug connu du
+  micro-service). [via #5]
 - **3d happensAt** : chaque `timelineActivity.happensAt` = la VRAIE heure de
-  l'event (timestamp du goal/pageview), PAS l'heure d'écriture.
+  l'event (timestamp du goal/pageview, base ts figée du script), PAS l'heure
+  d'écriture. [via #2]
 - **3e Idempotence (ZÉRO doublon)** : **rejouer le MÊME parcours** (mêmes
   session_id + timestamps → mêmes `dedup_token` → mêmes `event_id`) ne crée
-  AUCUNE nouvelle timelineActivity ni double-compte de score. Comptage timeline
-  AVANT == APRÈS le replay.
+  AUCUNE nouvelle timelineActivity [#2] ni double-compte de score [#5].
+  Comptage timeline AVANT == APRÈS le replay.
 
 ### SPEC-4 — Table webhook_deliveries (traçabilité + redaction)
 - **4a Status** : les deliveries du parcours sont `status=success`,
