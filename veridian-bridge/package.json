@@ -40,6 +40,7 @@
     "node": ">=22"
   },
   "overrides": {
-    "picomatch": "^4.0.4"
+    "picomatch": "^4.0.4",
+    "esbuild": "^0.28.1"
   }
 }
