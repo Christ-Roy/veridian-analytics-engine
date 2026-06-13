@@ -264,6 +264,33 @@ describe('TwentyConnectorService', () => {
       expect(batches[0][0].id).not.toBe(batches[0][1].id);
     });
 
+    it('task #13: same event re-attributed to TWO Person → TWO distinct ids (no cross-Person collision)', async () => {
+      // slug→email retro-attribution: same event_id + name, two identities
+      // resolving two Person records. Each must get its own activity id.
+      const { client, batches } = fakeClient(async (identity: string) => ({
+        id: identity.includes('@') ? 'person_email' : 'person_slug',
+        doNotContact: false,
+      }));
+      const budget = new TwentyBudget(100, () => 0);
+      await connector.flushBatch(
+        twentyWebhook(),
+        [
+          // same underlying tracked event_id (evt_pv1) + same milestone, two identities
+          delivery('d_slug', { event_type: 'screen_view', path: '/audit/x', user_id: 'monsite-ab3x' }, { event_id: 'evt_pv1' }),
+          delivery('d_email', { event_type: 'screen_view', path: '/audit/x', user_id: 'lead@x.com' }, { event_id: 'evt_pv1' }),
+        ],
+        client,
+        budget,
+      );
+      // both produced audit.page_view but for different Person → different ids
+      const ids = batches[0].map((a: { id: string; targetPersonId: string }) => a.id);
+      expect(ids[0]).not.toBe(ids[1]);
+      expect(batches[0].map((a: { targetPersonId: string }) => a.targetPersonId).sort()).toEqual([
+        'person_email',
+        'person_slug',
+      ]);
+    });
+
     it('exactly-once at the server: replaying yields ONE activity per id (409 dedup)', async () => {
       // Simulate Twenty's server-side dedup keyed by the client-supplied id.
       const stored = new Set<string>();

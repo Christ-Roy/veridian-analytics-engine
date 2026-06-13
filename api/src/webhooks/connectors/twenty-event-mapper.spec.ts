@@ -63,8 +63,9 @@ describe('TwentyEventMapper', () => {
         }),
       );
       expect(out.map((m) => m.name).sort()).toEqual(['audit.page_view', 'audit.scroll']);
-      // distinct deterministic ids so they never collide on the same event
-      expect(out[0].id).not.toBe(out[1].id);
+      // both carry the same eventId; the connector derives distinct ids from
+      // (personId, eventId, name) after resolution, so the two names suffice here.
+      expect(out.every((m) => m.eventId === out[0].eventId)).toBe(true);
     });
 
     it('maps a shallow /audit/ view to ONLY audit.page_view', () => {

@@ -7,22 +7,30 @@ describe('deterministic-id (UUIDv5)', () => {
     expect(uuidv5('hello')).toMatch(UUID_RE);
   });
 
-  it('is deterministic: same input → same UUID', () => {
+  it('is deterministic: same (person, event, name) → same UUID', () => {
     expect(uuidv5('abc')).toBe(uuidv5('abc'));
-    expect(deterministicTimelineId('evt_1', 'audit.rdv')).toBe(
-      deterministicTimelineId('evt_1', 'audit.rdv'),
+    expect(deterministicTimelineId('p1', 'evt_1', 'audit.rdv')).toBe(
+      deterministicTimelineId('p1', 'evt_1', 'audit.rdv'),
     );
   });
 
   it('different inputs → different UUIDs', () => {
     expect(uuidv5('a')).not.toBe(uuidv5('b'));
-    // same event, different milestone → distinct ids
-    expect(deterministicTimelineId('evt_1', 'audit.rdv')).not.toBe(
-      deterministicTimelineId('evt_1', 'audit.cta_click'),
+    // same person+event, different milestone → distinct ids
+    expect(deterministicTimelineId('p1', 'evt_1', 'audit.rdv')).not.toBe(
+      deterministicTimelineId('p1', 'evt_1', 'audit.cta_click'),
     );
-    // different event, same milestone → distinct ids
-    expect(deterministicTimelineId('evt_1', 'audit.rdv')).not.toBe(
-      deterministicTimelineId('evt_2', 'audit.rdv'),
+    // same person, different event, same milestone → distinct ids
+    expect(deterministicTimelineId('p1', 'evt_1', 'audit.rdv')).not.toBe(
+      deterministicTimelineId('p1', 'evt_2', 'audit.rdv'),
+    );
+  });
+
+  it('task #13: same (event, name) but DIFFERENT Person → DIFFERENT ids', () => {
+    // The slug→email retro-attribution re-emits one event under two Person
+    // records; each must get its OWN activity (no cross-Person collision).
+    expect(deterministicTimelineId('person_slug', 'evt_pv_1', 'audit.page_view')).not.toBe(
+      deterministicTimelineId('person_email', 'evt_pv_1', 'audit.page_view'),
     );
   });
 

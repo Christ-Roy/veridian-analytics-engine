@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { deterministicTimelineId } from './deterministic-id';
 
 /**
  * TwentyEventMapper — pure mapping of a tracked analytics event onto a Twenty
@@ -66,11 +65,11 @@ export interface TrackedEventContext {
 
 export interface MappedTimelineEvent {
   /**
-   * Deterministic Twenty activity id (UUIDv5 = f(eventId, name)). A replay of
-   * the same (event, milestone) yields the SAME id → Twenty no-ops →
-   * exactly-once with no engine-side store (task #9).
+   * NOTE: the deterministic Twenty activity id is NOT here — it depends on the
+   * resolved targetPersonId (task #13), so the CONNECTOR computes it AFTER
+   * Person resolution via deterministicTimelineId(personId, eventId, name).
+   * The mapper only carries `eventId` + `name`, the inputs to that id.
    */
-  id: string;
   /** Frozen timeline name §4c.3 (the activity `name`). */
   name: TwentyTimelineName;
   /**
@@ -96,9 +95,9 @@ export class TwentyEventMapper {
    * Most events produce NONE (raw stream noise, unknown goal, no identity).
    * A single event can produce TWO milestones: a deep /audit/ screen_view emits
    * BOTH `audit.page_view` AND `audit.scroll` — mirroring the reference
-   * analytics-pull.ts (setMilestone page_view + setMilestone scroll). Each
-   * milestone gets its OWN deterministic id = f(eventId, name), so they never
-   * collide and replay stays idempotent.
+   * analytics-pull.ts (setMilestone page_view + setMilestone scroll). The
+   * connector derives each milestone's deterministic id from
+   * (personId, eventId, name) after resolving the Person (task #13).
    */
   mapAll(event: TrackedEventContext): MappedTimelineEvent[] {
     const p = event.payload ?? {};
@@ -111,7 +110,6 @@ export class TwentyEventMapper {
     const happensAt = this.resolveHappensAt(p);
     const properties = this.buildProperties(event, p);
     return names.map((name) => ({
-      id: deterministicTimelineId(event.event_id, name),
       name,
       identity,
       happensAt,

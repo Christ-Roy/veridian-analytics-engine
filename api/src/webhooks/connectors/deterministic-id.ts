@@ -55,11 +55,21 @@ export function uuidv5(name: string): string {
 }
 
 /**
- * Deterministic id for a Twenty timeline activity. Keyed by the underlying
- * tracked event id + the timeline activity name so that:
- *   - the SAME (event, milestone) always yields the SAME activity id (replay-safe)
- *   - two DIFFERENT milestones derived from one event (rare) stay distinct.
+ * Deterministic id for a Twenty timeline activity. Keyed by the target Person
+ * + the tracked event id + the timeline activity name so that:
+ *   - the SAME (person, event, milestone) always yields the SAME id (replay-safe)
+ *   - two DIFFERENT milestones of one event (e.g. page_view + scroll) stay distinct
+ *   - the SAME event attributed to TWO Person records (slug then email, via the
+ *     staminads retro-attribution — TUNNEL-IDENTITE §2) yields TWO distinct ids
+ *     → two legitimate activities, no cross-Person collision (task #13).
+ *
+ * ⚠️ targetPersonId is REQUIRED → generate this id AFTER resolving the Person,
+ * not in the mapper (which has no personId yet).
  */
-export function deterministicTimelineId(eventId: string, name: string): string {
-  return uuidv5(`timeline:${eventId}:${name}`);
+export function deterministicTimelineId(
+  targetPersonId: string,
+  eventId: string,
+  name: string,
+): string {
+  return uuidv5(`timeline:${targetPersonId}:${eventId}:${name}`);
 }

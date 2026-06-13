@@ -9,6 +9,7 @@ import {
 } from './twenty-event-mapper';
 import { TwentyClient } from './twenty-client';
 import { TwentyBudget } from './twenty-budget';
+import { deterministicTimelineId } from './deterministic-id';
 
 /**
  * TwentyConnectorService — the engine-native Twenty destination (design B,
@@ -162,7 +163,10 @@ export class TwentyConnectorService {
     try {
       await client.batchTimeline(
         activities.map((a) => ({
-          id: a.mapped.id, // deterministic UUIDv5 → exactly-once on replay (task #9)
+          // Deterministic id keyed by (personId, eventId, name): exactly-once on
+          // replay (#9/#12) AND no cross-Person collision when the same event is
+          // re-attributed slug→email → two Person → two ids (#13).
+          id: deterministicTimelineId(a.personId, a.mapped.eventId, a.mapped.name),
           name: a.mapped.name,
           happensAt: a.mapped.happensAt,
           targetPersonId: a.personId,
