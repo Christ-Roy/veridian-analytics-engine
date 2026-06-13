@@ -136,6 +136,29 @@ async function runParcours() {
     'phase1 identify(slug)+view+scroll+cta',
   );
 
+  // --- Phase 1bis : le prospect navigue vers une HOT PAGE (/tarifs) avant de
+  // donner son email. Exerce l'agrégat hotPages (HOT_PATHS = /tarifs,/contact,/roi).
+  // Toujours user_id = slug (pas encore identifié par email).
+  await track(
+    sessionPayload(
+      SLUG,
+      [
+        {
+          type: 'pageview',
+          path: '/tarifs',          // HOT_PAGE → +15 (agrégat hotPages, SPEC endpoint)
+          page_number: 2,
+          duration: 40,
+          scroll: 50,
+          entered_at: t(96),
+          exited_at: t(136),
+        },
+      ],
+      96,
+      136,
+    ),
+    'phase1bis hot page /tarifs',
+  );
+
   // --- Phase 2 : le prospect donne son email (form/RDV) → identify(email).
   // La session courante est ré-attribuée à l'email (rétro-attribution staminads).
   // On re-poste le pageview audit (même page_number → même dedup_token : idempotent

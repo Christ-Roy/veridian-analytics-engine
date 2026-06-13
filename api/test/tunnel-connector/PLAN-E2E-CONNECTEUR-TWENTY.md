@@ -101,9 +101,12 @@ Creds : `~/credentials/.all-creds.env` →
   `vrd_veridian_site_staging` → REPLAY, events `[screen_view, goal]`,
   filtre `path matches ^/audit/`.
 - **Vert si** : `webhooks.create` → 201 (ou `webhooks.list` montre le webhook
-  existant), token Bearer REPLAY **masqué** dans la réponse, `auth_secret`
-  chiffré en DB.
+  existant), token Bearer REPLAY **masqué** dans la réponse (`has_secret:true`,
+  jamais le token), `auth_secret` chiffré en DB.
 - **Rouge si** : 401/403/500, ou token en clair dans la réponse/DB.
+- ⚠️ **Lié Task #6** : `webhooks.create` avec champ `auth` absent/invalide doit
+  renvoyer **400** (`INVALID_*`), PAS 500. À re-tester une fois #6 livrée
+  (input malformé = erreur structurée que l'agent qui provisionne peut traiter).
 
 ### SPEC-2 — Parcours réaliste via POST /api/track
 Séquence d'un prospect (script `parcours-events.mjs`), un seul `user_id` qui
@@ -137,12 +140,13 @@ bascule slug→email en cours de session (rétro-attribution staminads) :
   (`audit.page_view`, `audit.scroll`, `audit.cta_click`, `audit.rdv`) — JAMAIS
   les goal names bruts du site (`cta_click`, `rdv_booked`...). Le connecteur
   fait le mapping. [via #2]
-- **3c Score** : `person.score` PATCHé par le job @Interval selon la grille
-  figée §4a (ordre strict view 10 < scroll 15 < CTA 20 < identify/signup 35 <
-  app_started 40 < RDV 50 ; invariant "2 clics = 30 = chaud") + champ
-  `components` (détail des points) présent → score pas une boîte noire.
-  Idempotence score = compare-and-set (pas de lost-update, bug connu du
-  micro-service). [via #5]
+- **3c Score** : ⚠️ **l'engine NE PATCH PAS `person.score`** (pivot lead, cf
+  SPEC-3bis). Le score reste écrit par le **bridge tunnel** (autorité unique,
+  fusion Notifuse+analytics, compare-and-set). Ma vérif côté engine = assertion
+  NÉGATIVE : aucune écriture engine sur `person.score`. La preuve du score
+  correct (grille §4a, invariant "2 clics = 30") se fait côté bridge, hors de
+  mon périmètre #3 — je vérifie seulement que l'engine fournit l'agrégat juste
+  (SPEC-3bis) que le bridge consommera.
 - **3d happensAt** : chaque `timelineActivity.happensAt` = la VRAIE heure de
   l'event (timestamp du goal/pageview, base ts figée du script), PAS l'heure
   d'écriture. [via #2]
@@ -150,6 +154,45 @@ bascule slug→email en cours de session (rétro-attribution staminads) :
   session_id + timestamps → mêmes `dedup_token` → mêmes `event_id`) ne crée
   AUCUNE nouvelle timelineActivity [#2] ni double-compte de score [#5].
   Comptage timeline AVANT == APRÈS le replay.
+
+### SPEC-3bis — Endpoint agrégats analytics (Task #5, design final)
+
+⚠️ **Pivot lead confirmé** : l'engine NE calcule JAMAIS `person.score` et NE
+PATCH JAMAIS `person.score`. Le **bridge tunnel reste l'autorité unique du
+score** (il fusionne Notifuse + analytics via `computeTunnelScore`, et a le
+compare-and-set anti lost-update). L'engine expose seulement un endpoint
+agrégat que le bridge consomme.
+
+- Endpoint : `GET /api/tunnel.aggregate` (nom point-séparé, Bearer workspace,
+  curseur incrémental, multi-tenant).
+- **Shape de sortie = interface `AnalyticsAggregate` EXACTE** de
+  `bridge/src/score-tunnel.ts` (le bridge la consomme telle quelle) :
+  ```
+  { userId, auditViews, auditScrollMax (0-100), hotPages (uniques),
+    otherPages (uniques), consented, ctaClicks, rdvBooked,
+    identifiedByEmail, appStarted, sessions, lastSeen }
+  ```
+- Sémantique d'agrégation = `bridge/src/analytics-pull.ts:aggregateEvents` :
+  - HOT_PATHS = `/tarifs`, `/contact`, `/roi` (uniques) ;
+  - CTA_GOALS = `audit_cta_rdv|appointment_click|roi_lead_click|cta_click` ;
+  - RDV_GOALS = `rdv_booked` ; AUDIT_VIEW = `audit_view|audit_page_view` +
+    `screen_view /audit/*` ; scroll ≥ 75 ;
+  - `identifiedByEmail = userId.includes('@')` OU goal `signup` ;
+  - `appStarted` = goal `app_started` AVEC `properties.app ∈
+    {notifuse, prospection}` (roi-calculator EXCLU) ;
+  - `consented` tracké mais ne score jamais.
+- **Vert si** : l'endpoint retourne pour `acme-test-7h3k9x2p` (slug) :
+  `auditViews≥1, auditScrollMax≥75, hotPages=1 (/tarifs), ctaClicks=1` ; et
+  pour `bob.test@example.com` (email) : `rdvBooked=1, identifiedByEmail=true`.
+  Union des 2 clés cohérente avec `mergeAggregates`.
+- **Rouge si** : shape divergent de `AnalyticsAggregate` (un champ manquant
+  casse le bridge), mauvais comptage hot/other pages, mauvais mapping CTA.
+
+> ⚠️ **Désalignement de contrat à signaler** : la description de Task #5 liste
+> les champs SANS `appStarted` ni `sessions`, alors que l'interface réelle
+> `AnalyticsAggregate` les contient ET le scoring les utilise (`app_started`
+> +40, `return_visit` +15 si sessions≥2). L'endpoint DOIT retourner
+> l'interface complète. → remonté à twenty-connector + lead.
 
 ### SPEC-4 — Table webhook_deliveries (traçabilité + redaction)
 - **4a Status** : les deliveries du parcours sont `status=success`,
@@ -176,9 +219,15 @@ bascule slug→email en cours de session (rétro-attribution staminads) :
 - **6b Pas de null/champ vide parasite** : la timelineActivity n'a pas de
   `properties` avec des clés à `null`/`""` non significatives ; le PATCH score
   n'écrase pas des fields non concernés.
-- **6c Pas de double-écriture** : un seul writer (le connecteur). Vérifier
-  qu'aucune autre voie (bridge design A débranché) n'écrit en parallèle dans
-  REPLAY pendant le test → sinon doublons. (lié Task #4)
+- **6c Pas de double-écriture** :
+  - **Timeline** : un seul writer = le connecteur engine (#2). Aucune autre voie
+    (bridge design A) ne doit écrire des timelineActivities en parallèle dans
+    REPLAY pendant le test (sinon doublons) → bridge en DRY_RUN / débranché
+    pour le test (lié Task #4).
+  - **Score** : l'engine NE DOIT JAMAIS PATCHer `person.score` (autorité unique
+    = bridge, SPEC-3bis/3c). Double writer score = lost-update garanti. Assertion
+    négative : `person.score` n'est jamais modifié par une requête venant de
+    l'engine.
 - **6d Formats** : `score` est un NUMBER entier ; `providerClass` (si écrit) est
   une value UPPER_SNAKE_CASE valide ; `happensAt` ISO UTC valide.
 - **Tout écart 6a-6d = BLOQUANT** (rapport rouge, ticket + SendMessage
