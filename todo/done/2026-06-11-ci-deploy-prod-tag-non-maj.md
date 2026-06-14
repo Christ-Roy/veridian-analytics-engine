@@ -52,3 +52,11 @@ C'est un faux positif dangereux : on croit avoir déployé, on n'a rien déploy�
 - Run promo #23 : https://github.com/Christ-Roy/veridian-analytics-engine/actions/runs/27315263789
 - composeId Dokploy : `RH8yiQGFLxTzVXtrvlNmB` (analytics-engine-prod)
 - Workflow : `.github/workflows/prod-ci.yml` job `deploy-prod`
+
+---
+## ✅ RÉSOLU — 2026-06-14
+Fix : `prod-ci.yml` step Deploy prod fait désormais `compose.update`
+ENGINE_IMAGE_TAG/BRIDGE_IMAGE_TAG=prod-<sha> (tag immuable) AVANT compose.deploy
+→ auto-pull garanti, plus de container figé. + health check sur l'engine (pas le
+bridge) + smoke provisionApiKey≠404 pour détecter un faux "deploy success".
+Commit b1c98d2, promu main, validé prod (`.env` Dokploy = ENGINE_IMAGE_TAG=prod-b1c98d2).
