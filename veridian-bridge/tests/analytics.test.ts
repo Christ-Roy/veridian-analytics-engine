@@ -92,7 +92,9 @@ test("analytics: query native = workspace_id + metrics + dimensions + preset + t
     table: string;
   };
   assert.equal(sent.workspace_id, "ws_xyz");
-  assert.deepEqual(sent.metrics, ["pageviews", "sessions"]);
+  // Métrique `sessions` (table sessions) ventilée par utm_source. PAS
+  // `pageviews` (countIf(name=...) casse — colonne name absente des tables).
+  assert.deepEqual(sent.metrics, ["sessions"]);
   assert.deepEqual(sent.dimensions, ["utm_source"]);
   // Contrat natif : preset (PAS le legacy { type }).
   assert.equal(sent.dateRange.preset, "today");

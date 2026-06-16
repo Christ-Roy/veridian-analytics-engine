@@ -217,11 +217,11 @@ test("endpoint: workspace inconnu (Engine 400) → 404 workspace_not_found", asy
 });
 
 test("endpoint: happy path renvoie score + label + services", async () => {
-  // 2 queries natives : sessions → pageviews, goals → goals.
+  // 2 queries natives : pages → page_count (= pageviews), goals → goals.
   fake.setBehavior({
     analyticsStatus: 200,
     analyticsBodyByTable: {
-      sessions: { data: [{ pageviews: 1500 }] },
+      pages: { data: [{ page_count: 1500 }] },
       goals: { data: [{ goals: 3 }] },
     },
   });
@@ -272,11 +272,11 @@ test("endpoint: Engine 500 → 502 analytics_query_failed", async () => {
   assert.equal(body.error, "analytics_query_failed");
 });
 
-test("endpoint: 2 queries natives (sessions+goals) avec preset 30j + Bearer M2M", async () => {
+test("endpoint: 2 queries natives (pages+goals) avec preset 30j + Bearer M2M", async () => {
   fake.setBehavior({
     analyticsStatus: 200,
     analyticsBodyByTable: {
-      sessions: { data: [{ pageviews: 100 }] },
+      pages: { data: [{ page_count: 100 }] },
       goals: { data: [{ goals: 1 }] },
     },
   });
@@ -298,6 +298,11 @@ test("endpoint: 2 queries natives (sessions+goals) avec preset 30j + Bearer M2M"
     assert.equal(sent.workspace_id, "ws_check");
     assert.equal(sent.dateRange.preset, "previous_30_days");
   }
+  // pageviews via page_count/table pages, goals via table goals.
   const tables = queries.map((q) => (q.body as { table: string }).table).sort();
-  assert.deepEqual(tables, ["goals", "sessions"]);
+  assert.deepEqual(tables, ["goals", "pages"]);
+  const metrics = queries
+    .flatMap((q) => (q.body as { metrics: string[] }).metrics)
+    .sort();
+  assert.deepEqual(metrics, ["goals", "page_count"]);
 });

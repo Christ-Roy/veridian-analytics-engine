@@ -347,20 +347,26 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
       }
 
       try {
-        // Contrat natif : une query = UNE table. `pageviews` vit dans la
-        // table `sessions`, `goals` dans la table `goals` — on ne peut pas
-        // les mélanger dans une même query (≠ legacy Staminads). Deux queries
-        // M2M, puis fusion des rows pour `buildCountsFromStaminadsRows`.
+        // Contrat natif : une query = UNE table.
+        //   - pageviews = métrique `page_count` (count() sur table `pages`).
+        //     ⚠️ PAS la métrique `pageviews` : son SQL countIf(name='screen_view')
+        //     référence une colonne `name` absente des tables analytiques → casse
+        //     ClickHouse. `page_count` est la vraie métrique câblée (1 ligne
+        //     `pages` = 1 pageview), sémantiquement = l'ancien legacy screen_view.
+        //   - goals = métrique `goals` (count() sur table `goals`).
+        // On ne peut pas mélanger 2 tables dans une query → 2 queries M2M, puis
+        // fusion pour `buildCountsFromStaminadsRows` (qui lit row.pageviews /
+        // row.goals — on mappe page_count → pageviews avant de la passer).
         let pageviewRows: Array<Record<string, unknown>>;
         let goalRows: Array<Record<string, unknown>>;
         try {
           const [pvRes, goalRes] = await Promise.all([
             engineM2m.analyticsQuery({
               workspace_id: workspaceId,
-              metrics: ["pageviews"],
+              metrics: ["page_count"],
               dimensions: [],
               dateRange: { preset: "previous_30_days" },
-              table: "sessions",
+              table: "pages",
             }),
             engineM2m.analyticsQuery({
               metrics: ["goals"], // proxy "form_submission" en attendant table bridge B1
@@ -370,7 +376,11 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
               table: "goals",
             }),
           ]);
-          pageviewRows = pvRes.data ?? [];
+          // Mappe page_count → pageviews pour rester compatible avec
+          // buildCountsFromStaminadsRows (clé `pageviews`).
+          pageviewRows = (pvRes.data ?? []).map((row) => ({
+            pageviews: row["page_count"],
+          }));
           goalRows = goalRes.data ?? [];
         } catch (err) {
           // 400/404 natif (workspace inconnu) → 404 propre ; sinon 502.
@@ -417,12 +427,16 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
       return;
     }
     try {
-      // pageviews + sessions vivent tous deux dans la table `sessions` → 1
-      // seule query M2M native. Preset natif `today` (≈ la fenêtre 24h de
-      // l'ancien `last_24_hours`).
+      // Breakdown sessions par source d'acquisition (debug/affichage). Métrique
+      // `sessions` (count() sur table `sessions`, câblée dans le query-builder)
+      // ventilée par `utm_source` (dimension valide sur `sessions`). Preset
+      // natif `today` (≈ l'ancien `last_24_hours`). On NE demande PAS la
+      // métrique `pageviews` ici : son SQL countIf(name='screen_view') casse
+      // (colonne `name` absente des tables analytiques) — le total pageviews
+      // se lit via page_count/table pages (cf score/tenant-status).
       const result = await engineM2m.analyticsQuery({
         workspace_id: wsId,
-        metrics: ["pageviews", "sessions"],
+        metrics: ["sessions"],
         dimensions: ["utm_source"],
         dateRange: { preset: "today" },
         table: "sessions",

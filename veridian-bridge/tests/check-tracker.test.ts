@@ -194,16 +194,21 @@ test("check-tracker: exception du fetcher → 500 internal", async () => {
 
 // ─── makeStaminadsRecentActivityFetcher (helper M2M natif) ────────────────
 
-test("recentActivityFetcher: somme les pageviews + firstSeenAt si activité", async () => {
+test("recentActivityFetcher: somme les page_count + firstSeenAt si activité", async () => {
   let captured:
-    | { workspace_id: string; dateRange: { preset?: string }; table?: string }
+    | {
+        workspace_id: string;
+        metrics: string[];
+        dateRange: { preset?: string };
+        table?: string;
+      }
     | null = null;
   const fetcher = makeStaminadsRecentActivityFetcher({
     engine: {
       async analyticsQuery(input) {
         captured = input;
         // Réponse native { data } — agrégat single-row (preset today, pas de dim).
-        return { data: [{ pageviews: 17 }] };
+        return { data: [{ page_count: 17 }] };
       },
     },
   });
@@ -212,9 +217,10 @@ test("recentActivityFetcher: somme les pageviews + firstSeenAt si activité", as
   const activity = await fetcher("ws_demo");
 
   assert.equal(captured!.workspace_id, "ws_demo");
-  // Contrat natif : preset today + table sessions.
+  // Contrat natif : page_count sur table pages, preset today.
+  assert.deepEqual(captured!.metrics, ["page_count"]);
   assert.equal(captured!.dateRange.preset, "today");
-  assert.equal(captured!.table, "sessions");
+  assert.equal(captured!.table, "pages");
   assert.equal(activity.totalEvents24h, 17);
   // firstSeenAt = horodatage de détection (best-effort) dès qu'il y a activité.
   assert.ok(activity.firstSeenAt, "firstSeenAt non null quand activité > 0");
@@ -224,11 +230,11 @@ test("recentActivityFetcher: somme les pageviews + firstSeenAt si activité", as
   );
 });
 
-test("recentActivityFetcher: 0 pageview → activité nulle, firstSeenAt null", async () => {
+test("recentActivityFetcher: 0 page_count → activité nulle, firstSeenAt null", async () => {
   const fetcher = makeStaminadsRecentActivityFetcher({
     engine: {
       async analyticsQuery() {
-        return { data: [{ pageviews: 0 }] };
+        return { data: [{ page_count: 0 }] };
       },
     },
   });

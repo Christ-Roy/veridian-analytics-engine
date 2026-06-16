@@ -32,12 +32,12 @@ let workspaceId: string;
 
 test.beforeAll(async () => {
   // Bridge câblé sur un FakeStaminads. analytics.query renvoie 1500 pageviews
-  // 30j → service `pageviews` actif → score = 30 ("À améliorer").
+  // 30j (via page_count/table pages) → service `pageviews` actif → score = 30.
   bridge = await bootBridgeWithStaminads();
   bridge.staminads!.setBehavior({
     analyticsStatus: 200,
     analyticsBodyByTable: {
-      sessions: { data: [{ pageviews: 1500 }] },
+      pages: { data: [{ page_count: 1500 }] },
       goals: { data: [{ goals: 0 }] },
     },
   });
@@ -146,7 +146,7 @@ test.describe("Tenant inexistant", () => {
     bridge.staminads!.setBehavior({
       analyticsStatus: 200,
       analyticsBodyByTable: {
-        sessions: { data: [{ pageviews: 1500 }] },
+        pages: { data: [{ page_count: 1500 }] },
         goals: { data: [{ goals: 0 }] },
       },
     });

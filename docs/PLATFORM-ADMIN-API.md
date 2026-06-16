@@ -125,15 +125,21 @@ loguait en super_admin (`getAdminToken`). Désormais il tape cet endpoint M2M.
 ```json
 {
   "workspace_id": "boulangerie_dupont",
-  "metrics": ["pageviews"],
+  "metrics": ["page_count"],
   "dimensions": [],
   "dateRange": { "preset": "previous_30_days" },
-  "table": "sessions"
+  "table": "pages"
 }
 ```
 
-⚠️ Une query = UNE table. `pageviews` vit dans `sessions`, `goals` dans
-`goals` — pour les deux, faire deux queries (cf. le score côté bridge).
+⚠️ **Une query = UNE table.** Tables analytiques : `sessions`, `pages`, `goals`.
+Pour compter les **pageviews**, utiliser la métrique **`page_count`** sur la
+table **`pages`** (1 ligne = 1 pageview). ⚠️ NE PAS utiliser la métrique
+`pageviews` : son SQL `countIf(name='screen_view')` référence une colonne
+`name` qui n'existe dans AUCUNE table analytique (elle est dans `events`, non
+requêtable) → ClickHouse renvoie `Unknown identifier 'name'`. `goals` se compte
+via la métrique `goals` (table `goals`). Pour pageviews + goals, deux queries
+(cf. le score côté bridge).
 
 **Réponse 200** : `{ "data": [...], "meta": {...}, "query": {...} }`
 

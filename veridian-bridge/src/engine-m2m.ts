@@ -82,7 +82,7 @@ export interface AnalyticsQueryInput {
     end?: string;
     granularity?: string;
   };
-  table?: "sessions" | "goals";
+  table?: "sessions" | "pages" | "goals";
   timezone?: string;
   limit?: number;
 }

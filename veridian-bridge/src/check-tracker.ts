@@ -93,7 +93,7 @@ export interface EngineAnalyticsQuerier {
     metrics: string[];
     dimensions?: string[];
     dateRange: { preset?: string; start?: string; end?: string };
-    table?: "sessions" | "goals";
+    table?: "sessions" | "pages" | "goals";
   }): Promise<{ data: Array<Record<string, unknown>> }>;
 }
 
@@ -103,10 +103,13 @@ export interface EngineAnalyticsQuerier {
  * PLATFORM_ADMIN_API_KEY). Utilisé par app.ts. Logique isolée pour pouvoir la
  * mocker en test sans rejouer un faux serveur.
  *
- * On interroge `pageviews` sur le preset natif `today` (le contrat natif n'a
- * PAS de fenêtre `last_24_hours` glissante ni de dimension `date` — `today`
- * couvre le besoin onboarding "le tracker a-t-il commencé à émettre ?") :
- *   - somme des `pageviews` → totalEvents24h
+ * On interroge `page_count` (table `pages`) sur le preset natif `today` (le
+ * contrat natif n'a PAS de fenêtre `last_24_hours` glissante ni de dimension
+ * `date` — `today` couvre le besoin onboarding "le tracker a-t-il commencé à
+ * émettre ?"). ⚠️ PAS la métrique `pageviews` (countIf(name=...) qui casse :
+ * colonne `name` absente des tables analytiques) — `page_count` = `count()`
+ * sur `pages` est la vraie métrique câblée :
+ *   - somme des `page_count` → totalEvents24h
  *   - `firstSeenAt` = horodatage de détection (now) dès qu'un event est vu.
  *     Le wizard ne l'affiche qu'à titre indicatif ; le natif day-dimension
  *     est un nombre (jour du mois), pas une date reconstructible — on assume
@@ -123,10 +126,10 @@ export function makeStaminadsRecentActivityFetcher(opts: {
     try {
       const res = await opts.engine.analyticsQuery({
         workspace_id: workspaceId,
-        metrics: ["pageviews"],
+        metrics: ["page_count"],
         dimensions: [],
         dateRange: { preset: "today" },
-        table: "sessions",
+        table: "pages",
       });
       data = res.data ?? [];
     } catch {
@@ -136,7 +139,7 @@ export function makeStaminadsRecentActivityFetcher(opts: {
 
     let total = 0;
     for (const row of data) {
-      const pvRaw = row["pageviews"];
+      const pvRaw = row["page_count"];
       const pv =
         typeof pvRaw === "number"
           ? pvRaw

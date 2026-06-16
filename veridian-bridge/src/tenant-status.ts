@@ -70,7 +70,7 @@ export interface EngineAnalyticsQuerier {
     metrics: string[];
     dimensions?: string[];
     dateRange: { preset?: string; start?: string; end?: string };
-    table?: "sessions" | "goals";
+    table?: "sessions" | "pages" | "goals";
   }): Promise<{ data: Array<Record<string, unknown>> }>;
 }
 
@@ -135,6 +135,12 @@ export function createTenantStatusBuilder(
  * pouvoir la mocker en test sans rejouer un faux serveur.
  *
  * Contrat natif (≠ legacy Staminads) :
+ *   - métrique `page_count` sur table `pages` = total pageviews. ⚠️ PAS la
+ *     métrique `pageviews` : elle est déclarée `countIf(name='screen_view')`
+ *     mais la colonne `name` n'existe dans AUCUNE table analytique
+ *     (sessions/pages/goals) — elle casse ClickHouse. `page_count` = `count()`
+ *     sur `pages` (1 ligne = 1 pageview) est la vraie métrique câblée dans le
+ *     query-builder natif, sémantiquement = l'ancien legacy screen_view.
  *   - `dateRange.preset: "previous_30_days"` (PAS `{type:"last_30_days"}`)
  *   - réponse `{ data: [...] }` (PAS `{ rows: [...] }`)
  * Sans dimensions, la query retourne UNE ligne avec la métrique globale. On
@@ -148,10 +154,10 @@ export function makeStaminadsPageviewsFetcher(opts: {
     try {
       const res = await opts.engine.analyticsQuery({
         workspace_id: workspaceId,
-        metrics: ["pageviews"],
+        metrics: ["page_count"],
         dimensions: [],
         dateRange: { preset: "previous_30_days" },
-        table: "sessions",
+        table: "pages",
       });
       data = res.data ?? [];
     } catch {
@@ -162,7 +168,7 @@ export function makeStaminadsPageviewsFetcher(opts: {
     if (data.length === 0) return 0;
     let total = 0;
     for (const row of data) {
-      const pv = row["pageviews"];
+      const pv = row["page_count"];
       if (typeof pv === "number") total += pv;
       else if (typeof pv === "string") total += Number(pv) || 0;
     }

@@ -43,7 +43,7 @@ export interface Behavior {
    * queries (une par table) → permet de renvoyer des data différentes. Si la
    * table demandée n'a pas d'override ici, on retombe sur `analyticsBody`.
    */
-  analyticsBodyByTable?: Partial<Record<"sessions" | "goals", unknown>>;
+  analyticsBodyByTable?: Partial<Record<"sessions" | "pages" | "goals", unknown>>;
 }
 
 const DEFAULT_BEHAVIOR: Required<Behavior> = {
@@ -171,7 +171,7 @@ export class FakeStaminads {
       path === "/api/admin/platform/analytics.query" &&
       req.method === "POST"
     ) {
-      const table = (body as { table?: "sessions" | "goals" } | undefined)
+      const table = (body as { table?: "sessions" | "pages" | "goals" } | undefined)
         ?.table;
       const override =
         table && this.behavior.analyticsBodyByTable[table] !== undefined

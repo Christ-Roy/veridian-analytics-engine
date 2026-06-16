@@ -205,7 +205,7 @@ export class RealStaminads {
       req.method === "POST"
     ) {
       const body = (await this.readBody(req)) as
-        | { workspace_id?: string; table?: "sessions" | "goals" }
+        | { workspace_id?: string; table?: "sessions" | "pages" | "goals" }
         | undefined;
       const workspaceId = body?.workspace_id;
       if (!workspaceId || typeof workspaceId !== "string") {
@@ -233,12 +233,13 @@ export class RealStaminads {
         };
         const agg = parsed.data[0] ?? { pageviews: "0", goals: "0" };
         // ClickHouse renvoie les count() en String (UInt64) → on coerce en
-        // number (score.ts/tenant-status.ts ne somment que les `number`).
-        // Format natif { data }, métrique scopée à la table demandée.
+        // number. Format natif { data }, métrique scopée à la table demandée :
+        //   - pages  → page_count (= total pageviews, le bridge lit page_count)
+        //   - goals  → goals
         const row =
           table === "goals"
             ? { goals: Number(agg.goals) }
-            : { pageviews: Number(agg.pageviews) };
+            : { page_count: Number(agg.pageviews) };
         this.send(res, 200, { data: [row], meta: { total_rows: 1 } });
       } catch (err) {
         this.send(res, 500, {

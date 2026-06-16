@@ -332,7 +332,8 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
         .post('/api/admin/platform/analytics.query')
         .send({
           workspace_id: 'whatever',
-          metrics: ['pageviews'],
+          metrics: ['page_count'],
+          table: 'pages',
           dateRange: { preset: 'previous_30_days' },
         })
         .expect(401);
@@ -367,10 +368,13 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
         .set('Authorization', `Bearer ${PLATFORM_KEY}`)
         .send({
           workspace_id: wsId,
-          metrics: ['pageviews'],
+          // page_count/table pages = la vraie métrique pageviews câblée dans le
+          // query-builder natif (la métrique `pageviews` countIf(name=...) casse
+          // car la colonne `name` n'existe pas dans les tables analytiques).
+          metrics: ['page_count'],
           dimensions: [],
           dateRange: { preset: 'previous_30_days' },
-          table: 'sessions',
+          table: 'pages',
         })
         .expect(200);
 
