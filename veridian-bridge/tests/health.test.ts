@@ -18,8 +18,7 @@ beforeEach(async () => {
   await fake.start();
   const app = createApp({
     staminadsUrl: fake.url,
-    adminEmail: "admin@veridian.local",
-    adminPassword: "test-pass-2026",
+      platformAdminApiKey: "veridian-test-platform-key-32-chars!!",
     veridianAdminApiKey: ADMIN_KEY,
   });
   const started = await startAppOnEphemeralPort(app);

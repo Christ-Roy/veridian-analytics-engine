@@ -1,5 +1,9 @@
 /**
  * Tests GET /api/admin/analytics.
+ *
+ * Depuis la migration M2M (2026-06-16) : lit l'Engine via
+ * `POST /api/admin/platform/analytics.query` (Bearer PLATFORM_ADMIN_API_KEY),
+ * contrat NATIF (preset date range, réponse { data, meta }).
  */
 
 import { test, beforeEach, afterEach } from "node:test";
@@ -8,6 +12,7 @@ import { createApp } from "../src/app.js";
 import { FakeStaminads, startAppOnEphemeralPort } from "./helpers/fake-staminads.js";
 
 const ADMIN_KEY = "veridian-test-admin-key-32-chars!";
+const PLATFORM_KEY = "veridian-test-platform-key-32-chars!!";
 
 let fake: FakeStaminads;
 let bridgeUrl: string;
@@ -18,8 +23,7 @@ beforeEach(async () => {
   await fake.start();
   const app = createApp({
     staminadsUrl: fake.url,
-    adminEmail: "admin@veridian.local",
-    adminPassword: "test-pass-2026",
+    platformAdminApiKey: PLATFORM_KEY,
     veridianAdminApiKey: ADMIN_KEY,
   });
   const started = await startAppOnEphemeralPort(app);
@@ -40,19 +44,17 @@ async function getAnalytics(wsId: string | null) {
   });
 }
 
-test("analytics: happy path proxy 200", async () => {
-  fake.setBehavior({ setupCompleted: true });
+test("analytics: happy path → renvoie { data } natif", async () => {
   const res = await getAnalytics("ws_fake_abc");
   assert.equal(res.status, 200);
   const body = (await res.json()) as {
-    rows: Array<{ utm_source: string; pageviews: number; sessions: number }>;
+    data: Array<{ utm_source: string; pageviews: number; sessions: number }>;
   };
-  assert.equal(body.rows[0].utm_source, "veridian-poc");
-  assert.equal(body.rows[0].pageviews, 3);
+  assert.equal(body.data[0].utm_source, "veridian-poc");
+  assert.equal(body.data[0].pageviews, 3);
 });
 
 test("analytics: wsId manquant → 400 missing_wsId", async () => {
-  fake.setBehavior({ setupCompleted: true });
   const res = await getAnalytics(null);
   assert.equal(res.status, 400);
   const body = (await res.json()) as { error: string };
@@ -60,53 +62,47 @@ test("analytics: wsId manquant → 400 missing_wsId", async () => {
 });
 
 test("analytics: wsId vide → 400 missing_wsId", async () => {
-  fake.setBehavior({ setupCompleted: true });
   const res = await getAnalytics("");
   assert.equal(res.status, 400);
 });
 
-test("analytics: status staminads forwardé tel quel (200 → 200)", async () => {
-  fake.setBehavior({ setupCompleted: true, analyticsStatus: 200 });
-  const res = await getAnalytics("ws_fake_abc");
-  assert.equal(res.status, 200);
-});
-
-test("analytics: status staminads forwardé tel quel (500 → 500)", async () => {
+test("analytics: erreur Engine (500) → 502 analytics_query_failed", async () => {
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 500,
     analyticsBody: { error: "clickhouse_down" },
   });
   const res = await getAnalytics("ws_fake_abc");
-  assert.equal(res.status, 500);
-  const body = (await res.json()) as { error: string };
-  assert.equal(body.error, "clickhouse_down");
+  assert.equal(res.status, 502);
+  const body = (await res.json()) as { error: string; status: number };
+  assert.equal(body.error, "analytics_query_failed");
+  assert.equal(body.status, 500);
 });
 
-test("analytics: payload query envoyé contient workspace_id + metrics + dimensions", async () => {
-  fake.setBehavior({ setupCompleted: true });
+test("analytics: query native = workspace_id + metrics + dimensions + preset + table", async () => {
   await getAnalytics("ws_xyz");
-  const queryCall = fake.getCalls().find((c) => c.path === "/api/analytics.query");
+  const queryCall = fake
+    .getCalls()
+    .find((c) => c.path === "/api/admin/platform/analytics.query");
   assert.ok(queryCall);
   const sent = queryCall.body as {
     workspace_id: string;
     metrics: string[];
     dimensions: string[];
-    dateRange: { type: string };
+    dateRange: { preset: string };
+    table: string;
   };
-  // staminads DTO : workspace_id snake_case (cf openapi AnalyticsQueryDto)
   assert.equal(sent.workspace_id, "ws_xyz");
   assert.deepEqual(sent.metrics, ["pageviews", "sessions"]);
   assert.deepEqual(sent.dimensions, ["utm_source"]);
-  assert.equal(sent.dateRange.type, "last_24_hours");
+  // Contrat natif : preset (PAS le legacy { type }).
+  assert.equal(sent.dateRange.preset, "today");
+  assert.equal(sent.table, "sessions");
 });
 
-test("analytics: utilise admin token (Authorization header présent)", async () => {
-  fake.setBehavior({ setupCompleted: true });
+test("analytics: appelle le natif avec Bearer PLATFORM_ADMIN_API_KEY", async () => {
   await getAnalytics("ws_fake_abc");
-  const queryCall = fake.getCalls().find((c) => c.path === "/api/analytics.query");
-  assert.match(
-    String(queryCall!.headers["authorization"]),
-    /^Bearer fake-admin-token-from-(login|init)$/
-  );
+  const queryCall = fake
+    .getCalls()
+    .find((c) => c.path === "/api/admin/platform/analytics.query");
+  assert.equal(queryCall!.headers["authorization"], `Bearer ${PLATFORM_KEY}`);
 });

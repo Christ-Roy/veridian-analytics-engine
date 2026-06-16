@@ -94,9 +94,9 @@ jobs:
         env:
           CLICKHOUSE_PASSWORD: ci-clickhouse-pass
           ENCRYPTION_KEY: ci-encryption-key-32-chars-minimum
-          STAMINADS_ADMIN_PASSWORD: ci-staminads-pass
           VERIDIAN_ADMIN_API_KEY: ci-veridian-admin-key-32-chars-min
-          # M2M admin platform (PlatformAdminGuard) : ${VAR:?} dans compose/base.yml.
+          # M2M admin platform (PlatformAdminGuard) : ${VAR:?} dans compose/base.yml
+          # sur les services engine ET bridge (remplace STAMINADS_ADMIN_PASSWORD).
           PLATFORM_ADMIN_API_KEY: ci-platform-admin-key-placeholder
           # Postgres bridge (A4) : ${VAR:?} dans postgres-bridge
           BRIDGE_DB_USER: ci-bridge-user
@@ -488,7 +488,6 @@ jobs:
           BRIDGE_TAG: ${{ needs.build.outputs.bridge_tag }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD_STAGING }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_STAGING }}
-          STAMINADS_ADMIN_PASSWORD: ${{ secrets.STAMINADS_ADMIN_PASSWORD_STAGING }}
           VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
           # Secret M2M des endpoints /api/admin/platform/* (PlatformAdminGuard).
           # Requis (${VAR:?} dans base.yml) — sans lui le deploy fail-closed.
@@ -511,8 +510,6 @@ jobs:
           NODE_ENV=production
           CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
           ENCRYPTION_KEY=${ENCRYPTION_KEY}
-          STAMINADS_ADMIN_EMAIL=admin@veridian.site
-          STAMINADS_ADMIN_PASSWORD=${STAMINADS_ADMIN_PASSWORD}
           VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
           PLATFORM_ADMIN_API_KEY=${PLATFORM_ADMIN_API_KEY}
           HUB_HMAC_SECRET=${HUB_HMAC_SECRET}

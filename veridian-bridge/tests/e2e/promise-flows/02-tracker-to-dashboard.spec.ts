@@ -36,7 +36,10 @@ test.beforeAll(async () => {
   bridge = await bootBridgeWithStaminads();
   bridge.staminads!.setBehavior({
     analyticsStatus: 200,
-    analyticsBody: { rows: [{ pageviews: 1500 }] },
+    analyticsBodyByTable: {
+      sessions: { data: [{ pageviews: 1500 }] },
+      goals: { data: [{ goals: 0 }] },
+    },
   });
 
   // Provision un tenant pour les tests de dashboard
@@ -142,7 +145,10 @@ test.describe("Tenant inexistant", () => {
     // Restore le comportement par défaut pour ne pas polluer d'autres tests.
     bridge.staminads!.setBehavior({
       analyticsStatus: 200,
-      analyticsBody: { rows: [{ pageviews: 1500 }] },
+      analyticsBodyByTable: {
+        sessions: { data: [{ pageviews: 1500 }] },
+        goals: { data: [{ goals: 0 }] },
+      },
     });
   });
 });

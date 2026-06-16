@@ -40,8 +40,7 @@ async function bootBridge(pageviewsByWorkspace: Record<string, number>): Promise
   const app = createApp(
     {
       staminadsUrl: "http://127.0.0.1:1", // jamais appelé (fetcher injecté)
-      adminEmail: "admin@veridian.local",
-      adminPassword: "test-pass-2026",
+      platformAdminApiKey: "veridian-test-platform-key-32-chars!!",
       veridianAdminApiKey: ADMIN_KEY,
     },
     { pageviewsFetcher: fetcher },

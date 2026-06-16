@@ -153,13 +153,14 @@ let fake: FakeStaminads;
 let bridgeUrl: string;
 let closeBridge: () => Promise<void>;
 
+const PLATFORM_KEY = "veridian-test-platform-key-32-chars!!";
+
 beforeEach(async () => {
   fake = new FakeStaminads();
   await fake.start();
   const app = createApp({
     staminadsUrl: fake.url,
-    adminEmail: "admin@veridian.local",
-    adminPassword: "test-pass-2026",
+    platformAdminApiKey: PLATFORM_KEY,
     veridianAdminApiKey: ADMIN_KEY,
   });
   const started = await startAppOnEphemeralPort(app);
@@ -186,9 +187,8 @@ test("endpoint: mauvaise clé Bearer → 403 invalid_admin_key", async () => {
   assert.equal(res.status, 403);
 });
 
-test("endpoint: workspace inconnu (staminads 404) → 404 workspace_not_found", async () => {
+test("endpoint: workspace inconnu (Engine 404) → 404 workspace_not_found", async () => {
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 404,
     analyticsBody: { error: "workspace not found" },
   });
@@ -202,11 +202,10 @@ test("endpoint: workspace inconnu (staminads 404) → 404 workspace_not_found", 
   assert.equal(body.workspaceId, "ws_unknown");
 });
 
-test("endpoint: workspace inconnu (staminads 400) → 404 workspace_not_found", async () => {
-  // staminads peut renvoyer 400 si le workspace_id est mal formé / absent.
+test("endpoint: workspace inconnu (Engine 400) → 404 workspace_not_found", async () => {
+  // L'Engine peut renvoyer 400 si le workspace_id est mal formé / absent.
   // On traduit en 404 propre côté bridge pour l'appelant.
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 400,
     analyticsBody: { error: "bad request" },
   });
@@ -218,10 +217,13 @@ test("endpoint: workspace inconnu (staminads 400) → 404 workspace_not_found", 
 });
 
 test("endpoint: happy path renvoie score + label + services", async () => {
+  // 2 queries natives : sessions → pageviews, goals → goals.
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 200,
-    analyticsBody: { rows: [{ pageviews: 1500, goals: 3 }] },
+    analyticsBodyByTable: {
+      sessions: { data: [{ pageviews: 1500 }] },
+      goals: { data: [{ goals: 3 }] },
+    },
   });
   const res = await fetch(
     `${bridgeUrl}/api/admin/tenant/ws_demo/score`,
@@ -235,17 +237,16 @@ test("endpoint: happy path renvoie score + label + services", async () => {
     services: { active: string[]; inactive: string[] };
   };
   assert.equal(body.workspaceId, "ws_demo");
-  // pageviews(30) + forms(20) = 50 → "Bon"
+  // pageviews(30) + forms(20, proxy goals) = 50 → "Bon"
   assert.equal(body.score, 50);
   assert.equal(body.label, "Bon");
   assert.deepEqual(body.services.active, ["pageviews", "forms"]);
 });
 
-test("endpoint: rows vides → score 0, label À démarrer", async () => {
+test("endpoint: data vides → score 0, label À démarrer", async () => {
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 200,
-    analyticsBody: { rows: [] },
+    analyticsBody: { data: [] },
   });
   const res = await fetch(
     `${bridgeUrl}/api/admin/tenant/ws_zero/score`,
@@ -257,9 +258,8 @@ test("endpoint: rows vides → score 0, label À démarrer", async () => {
   assert.equal(body.label, "À démarrer");
 });
 
-test("endpoint: staminads 500 → 502 analytics_query_failed", async () => {
+test("endpoint: Engine 500 → 502 analytics_query_failed", async () => {
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 500,
     analyticsBody: { error: "clickhouse_down" },
   });
@@ -272,26 +272,32 @@ test("endpoint: staminads 500 → 502 analytics_query_failed", async () => {
   assert.equal(body.error, "analytics_query_failed");
 });
 
-test("endpoint: appelle analytics.query avec workspace_id snake_case + dateRange 30j", async () => {
+test("endpoint: 2 queries natives (sessions+goals) avec preset 30j + Bearer M2M", async () => {
   fake.setBehavior({
-    setupCompleted: true,
     analyticsStatus: 200,
-    analyticsBody: { rows: [{ pageviews: 100, goals: 1 }] },
+    analyticsBodyByTable: {
+      sessions: { data: [{ pageviews: 100 }] },
+      goals: { data: [{ goals: 1 }] },
+    },
   });
   await fetch(`${bridgeUrl}/api/admin/tenant/ws_check/score`, {
     headers: { Authorization: `Bearer ${ADMIN_KEY}` },
   });
-  const queryCall = fake
+  const queries = fake
     .getCalls()
-    .find((c) => c.path === "/api/analytics.query");
-  assert.ok(queryCall, "staminads analytics.query doit avoir été appelé");
-  const sent = queryCall.body as {
-    workspace_id: string;
-    metrics: string[];
-    dateRange: { type: string };
-  };
-  assert.equal(sent.workspace_id, "ws_check");
-  assert.ok(sent.metrics.includes("pageviews"));
-  assert.ok(sent.metrics.includes("goals"));
-  assert.equal(sent.dateRange.type, "last_30_days");
+    .filter((c) => c.path === "/api/admin/platform/analytics.query");
+  assert.equal(queries.length, 2, "le score doit faire 2 queries (1 par table)");
+
+  for (const q of queries) {
+    assert.equal(q.headers["authorization"], `Bearer ${PLATFORM_KEY}`);
+    const sent = q.body as {
+      workspace_id: string;
+      dateRange: { preset: string };
+      table: string;
+    };
+    assert.equal(sent.workspace_id, "ws_check");
+    assert.equal(sent.dateRange.preset, "previous_30_days");
+  }
+  const tables = queries.map((q) => (q.body as { table: string }).table).sort();
+  assert.deepEqual(tables, ["goals", "sessions"]);
 });

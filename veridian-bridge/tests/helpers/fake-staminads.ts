@@ -1,18 +1,18 @@
 /**
- * Faux serveur staminads pour tests d'intégration du bridge.
+ * Faux serveur Engine (Staminads fork) pour tests d'intégration du bridge.
  *
- * Le bridge appelle staminads via HTTP. Pour tester en isolation sans docker,
- * on monte un vrai serveur HTTP local qui imite les endpoints staminads utilisés :
- *   - GET  /api/setup.status
- *   - POST /api/setup.initialize
- *   - POST /api/auth.login
- *   - POST /api/workspaces.create
- *   - POST /api/apiKeys.create
- *   - POST /api/track
- *   - POST /api/analytics.query
+ * Depuis la migration M2M (2026-06-16, retrait de l'anti-pattern getAdminToken),
+ * le bridge ne parle PLUS à l'Engine via un login super_admin
+ * (setup.status / setup.initialize / auth.login / workspaces.create /
+ * apiKeys.create). Il tape les endpoints M2M natifs (Bearer
+ * PLATFORM_ADMIN_API_KEY) :
+ *   - POST /api/admin/platform/tenants.provision
+ *   - POST /api/admin/platform/workspaces.provisionApiKey
+ *   - POST /api/admin/platform/analytics.query
+ *   - POST /api/track  (collecte d'events, inchangé)
  *
- * Chaque test peut configurer le comportement (succès, erreur 500, body custom)
- * via setBehavior() avant d'appeler le bridge.
+ * Chaque test configure le comportement (succès, erreur, body custom) via
+ * setBehavior() avant d'appeler le bridge.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -26,35 +26,53 @@ export interface RecordedCall {
 }
 
 export interface Behavior {
-  setupCompleted?: boolean;
-  initializeStatus?: number;
-  initializeBody?: unknown;
-  loginStatus?: number;
-  loginBody?: unknown;
-  workspaceCreateStatus?: number;
-  workspaceCreateBody?: unknown;
-  apiKeyCreateStatus?: number;
-  apiKeyCreateBody?: unknown;
+  /** POST /api/admin/platform/tenants.provision */
+  provisionStatus?: number;
+  provisionBody?: unknown;
+  /** POST /api/admin/platform/workspaces.provisionApiKey */
+  provisionApiKeyStatus?: number;
+  provisionApiKeyBody?: unknown;
+  /** POST /api/track */
   trackStatus?: number;
   trackBody?: unknown;
+  /** POST /api/admin/platform/analytics.query — réponse NATIVE { data, meta } */
   analyticsStatus?: number;
   analyticsBody?: unknown;
+  /**
+   * Réponse analytics routée par `table` (sessions/goals). Le score fait 2
+   * queries (une par table) → permet de renvoyer des data différentes. Si la
+   * table demandée n'a pas d'override ici, on retombe sur `analyticsBody`.
+   */
+  analyticsBodyByTable?: Partial<Record<"sessions" | "goals", unknown>>;
 }
 
 const DEFAULT_BEHAVIOR: Required<Behavior> = {
-  setupCompleted: false,
-  initializeStatus: 201,
-  initializeBody: { access_token: "fake-admin-token-from-init", user: { id: "u1" } },
-  loginStatus: 200,
-  loginBody: { access_token: "fake-admin-token-from-login" },
-  workspaceCreateStatus: 201,
-  workspaceCreateBody: { id: "ws_fake_abc", name: "Test WS" },
-  apiKeyCreateStatus: 201,
-  apiKeyCreateBody: { id: "key_fake_xyz", key: "sk_live_fake_apikey_for_tests" },
+  provisionStatus: 201,
+  provisionBody: {
+    workspace_id: "ws_fake_abc",
+    owner_user_id: "u1",
+    api_key: "sk_live_fake_apikey_for_tests",
+    snippet_html: '<script src="x"></script>',
+    dashboard_url: "https://analytics-engine.app.veridian.site/workspaces/ws_fake_abc",
+    password_reset_url: "https://analytics-engine.app.veridian.site/reset-password/tok",
+    phone_numbers: [],
+    user_created: true,
+  },
+  provisionApiKeyStatus: 201,
+  provisionApiKeyBody: {
+    workspace_id: "ws_fake_abc",
+    api_key: "sk_live_fake_apikey_refreshed",
+    key_prefix: "sk_live_f",
+  },
   trackStatus: 200,
   trackBody: { success: true },
   analyticsStatus: 200,
-  analyticsBody: { rows: [{ utm_source: "veridian-poc", pageviews: 3, sessions: 1 }] },
+  // Format natif : { data: [...] } (PAS le legacy { rows: [...] }).
+  analyticsBody: {
+    data: [{ utm_source: "veridian-poc", pageviews: 3, sessions: 1 }],
+    meta: { total_rows: 1 },
+  },
+  analyticsBodyByTable: {},
 };
 
 export class FakeStaminads {
@@ -131,36 +149,39 @@ export class FakeStaminads {
       body,
     });
 
-    if (path === "/api/setup.status" && req.method === "GET") {
-      this.send(res, 200, { setupCompleted: this.behavior.setupCompleted });
+    if (
+      path === "/api/admin/platform/tenants.provision" &&
+      req.method === "POST"
+    ) {
+      this.send(res, this.behavior.provisionStatus, this.behavior.provisionBody);
       return;
     }
-    if (path === "/api/setup.initialize" && req.method === "POST") {
-      this.send(res, this.behavior.initializeStatus, this.behavior.initializeBody);
-      return;
-    }
-    if (path === "/api/auth.login" && req.method === "POST") {
-      this.send(res, this.behavior.loginStatus, this.behavior.loginBody);
-      return;
-    }
-    if (path === "/api/workspaces.create" && req.method === "POST") {
+    if (
+      path === "/api/admin/platform/workspaces.provisionApiKey" &&
+      req.method === "POST"
+    ) {
       this.send(
         res,
-        this.behavior.workspaceCreateStatus,
-        this.behavior.workspaceCreateBody
+        this.behavior.provisionApiKeyStatus,
+        this.behavior.provisionApiKeyBody,
       );
       return;
     }
-    if (path === "/api/apiKeys.create" && req.method === "POST") {
-      this.send(res, this.behavior.apiKeyCreateStatus, this.behavior.apiKeyCreateBody);
+    if (
+      path === "/api/admin/platform/analytics.query" &&
+      req.method === "POST"
+    ) {
+      const table = (body as { table?: "sessions" | "goals" } | undefined)
+        ?.table;
+      const override =
+        table && this.behavior.analyticsBodyByTable[table] !== undefined
+          ? this.behavior.analyticsBodyByTable[table]
+          : this.behavior.analyticsBody;
+      this.send(res, this.behavior.analyticsStatus, override);
       return;
     }
     if (path === "/api/track" && req.method === "POST") {
       this.send(res, this.behavior.trackStatus, this.behavior.trackBody);
-      return;
-    }
-    if (path === "/api/analytics.query" && req.method === "POST") {
-      this.send(res, this.behavior.analyticsStatus, this.behavior.analyticsBody);
       return;
     }
 

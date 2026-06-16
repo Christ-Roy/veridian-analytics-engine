@@ -1,13 +1,15 @@
 /**
- * Tests POST /api/admin/provision-tenant.
+ * Tests POST /api/admin/provision-tenant (endpoint POC interne).
+ *
+ * Depuis la migration M2M (2026-06-16) : un SEUL appel natif
+ * `POST /api/admin/platform/tenants.provision` (Bearer PLATFORM_ADMIN_API_KEY),
+ * plus de flow setup.status / auth.login / workspaces.create / apiKeys.create.
  *
  * Couvre :
- *   - happy path (setup déjà fait → login → workspaces.create → apiKeys.create)
- *   - happy path (first setup → setup.initialize → workspaces.create → apiKeys.create)
+ *   - happy path (1 call tenants.provision → workspace + apiKey)
  *   - body invalide (manque tenantSlug, website pas une URL, etc.)
- *   - staminads workspaces.create échoue → 502
- *   - staminads apiKeys.create échoue → 502
- *   - staminads down (setup.status retourne 500) → 500 internal
+ *   - Engine provision échoue (502) → 502 provision_failed
+ *   - email owner dérivé bot+<slug>@veridian.site
  */
 
 import { test, beforeEach, afterEach } from "node:test";
@@ -16,19 +18,19 @@ import { createApp } from "../src/app.js";
 import { FakeStaminads, startAppOnEphemeralPort } from "./helpers/fake-staminads.js";
 
 const ADMIN_KEY = "veridian-test-admin-key-32-chars!";
+const PLATFORM_KEY = "veridian-test-platform-key-32-chars!!";
 
 let fake: FakeStaminads;
 let bridgeUrl: string;
 let closeBridge: () => Promise<void>;
 
-// Fresh bridge+fake par test pour éviter le state partagé (token caché entre tests).
+// Fresh bridge+fake par test pour éviter le state partagé.
 beforeEach(async () => {
   fake = new FakeStaminads();
   await fake.start();
   const app = createApp({
     staminadsUrl: fake.url,
-    adminEmail: "admin@veridian.local",
-    adminPassword: "test-pass-2026",
+    platformAdminApiKey: PLATFORM_KEY,
     veridianAdminApiKey: ADMIN_KEY,
   });
   const started = await startAppOnEphemeralPort(app);
@@ -61,8 +63,7 @@ async function provision(body: unknown, headers: Record<string, string> = {}) {
   });
 }
 
-test("provision: happy path first-setup (setupCompleted=false)", async () => {
-  fake.setBehavior({ setupCompleted: false });
+test("provision: happy path → 1 call M2M tenants.provision", async () => {
   const res = await provision(VALID_BODY);
   assert.equal(res.status, 200);
   const body = (await res.json()) as {
@@ -77,33 +78,29 @@ test("provision: happy path first-setup (setupCompleted=false)", async () => {
   assert.equal(body.trackingSnippet.workspaceId, "ws_fake_abc");
   assert.equal(body.trackingSnippet.endpoint, fake.url);
 
-  // Vérif que le bon flow staminads a été appelé (setup → init → ws.create → key.create)
+  // Un SEUL appel natif M2M, plus de cascade setup/login/create.
   const paths = fake.getCalls().map((c) => c.path);
-  assert.ok(paths.includes("/api/setup.status"));
-  assert.ok(paths.includes("/api/setup.initialize"));
-  assert.ok(paths.includes("/api/workspaces.create"));
-  assert.ok(paths.includes("/api/apiKeys.create"));
+  assert.deepEqual(paths, ["/api/admin/platform/tenants.provision"]);
 });
 
-test("provision: happy path setup déjà fait → login", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  const res = await provision(VALID_BODY);
-  assert.equal(res.status, 200);
-
-  const paths = fake.getCalls().map((c) => c.path);
-  assert.ok(paths.includes("/api/setup.status"));
-  assert.ok(paths.includes("/api/auth.login"));
-  assert.ok(!paths.includes("/api/setup.initialize"), "setup.initialize ne doit pas être appelé");
-});
-
-test("provision: token est caché entre 2 appels (pas de double login)", async () => {
-  fake.setBehavior({ setupCompleted: true });
+test("provision: appelle le natif avec Bearer PLATFORM_ADMIN_API_KEY", async () => {
   await provision(VALID_BODY);
-  fake.resetCalls();
-  await provision({ ...VALID_BODY, tenantSlug: "second-tenant" });
-  const paths = fake.getCalls().map((c) => c.path);
-  assert.ok(!paths.includes("/api/auth.login"), "login ne doit pas être rappelé");
-  assert.ok(paths.includes("/api/workspaces.create"));
+  const call = fake
+    .getCalls()
+    .find((c) => c.path === "/api/admin/platform/tenants.provision");
+  assert.ok(call);
+  assert.equal(call.headers["authorization"], `Bearer ${PLATFORM_KEY}`);
+});
+
+test("provision: email owner dérivé bot+<slug>@veridian.site", async () => {
+  await provision(VALID_BODY);
+  const call = fake
+    .getCalls()
+    .find((c) => c.path === "/api/admin/platform/tenants.provision");
+  const sent = call!.body as { email: string; name: string; siteUrl: string };
+  assert.equal(sent.email, "bot+veridian-test@veridian.site");
+  assert.equal(sent.name, VALID_BODY.tenantName);
+  assert.equal(sent.siteUrl, VALID_BODY.website);
 });
 
 test("provision: body manque tenantSlug → 400 invalid_body", async () => {
@@ -131,97 +128,28 @@ test("provision: tenantName trop long (>120) → 400", async () => {
   assert.equal(res.status, 400);
 });
 
-test("provision: defaults timezone=UTC + currency=EUR si omis", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  const { timezone: _t, currency: _c, ...minimal } = VALID_BODY;
-  const res = await provision(minimal);
-  assert.equal(res.status, 200);
-  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
-  assert.ok(wsCall);
-  const sent = wsCall.body as { timezone: string; currency: string };
-  assert.equal(sent.timezone, "UTC");
-  assert.equal(sent.currency, "EUR");
-});
-
-test("provision: workspaces.create échoue → 502 workspace_create_failed", async () => {
+test("provision: Engine renvoie 500 → 502 provision_failed", async () => {
   fake.setBehavior({
-    setupCompleted: true,
-    workspaceCreateStatus: 422,
-    workspaceCreateBody: { error: "duplicate_name" },
+    provisionStatus: 500,
+    provisionBody: { error: "provisioning_failed" },
   });
   const res = await provision(VALID_BODY);
   assert.equal(res.status, 502);
   const body = (await res.json()) as { error: string; status: number };
-  assert.equal(body.error, "workspace_create_failed");
-  assert.equal(body.status, 422);
+  assert.equal(body.error, "provision_failed");
+  assert.equal(body.status, 500);
 });
 
-test("provision: apiKeys.create échoue → 502 apikey_create_failed", async () => {
+test("provision: Engine renvoie 409 (email exists) → 502 provision_failed", async () => {
   fake.setBehavior({
-    setupCompleted: true,
-    apiKeyCreateStatus: 500,
-    apiKeyCreateBody: { error: "internal" },
+    provisionStatus: 409,
+    provisionBody: { error: "email_already_exists" },
   });
   const res = await provision(VALID_BODY);
   assert.equal(res.status, 502);
-  const body = (await res.json()) as { error: string };
-  assert.equal(body.error, "apikey_create_failed");
-});
-
-test("provision: setup.status retourne 500 → 500 internal", async () => {
-  // On simule un staminads complètement HS via behavior anormal
-  // En faisant pointer initializeStatus à un truc impossible, le code va lever
-  fake.setBehavior({
-    setupCompleted: false,
-    initializeStatus: 500,
-    initializeBody: { error: "boom" },
-  });
-  const res = await provision(VALID_BODY);
-  assert.equal(res.status, 500);
-  const body = (await res.json()) as { error: string };
-  assert.equal(body.error, "internal");
-});
-
-test("provision: payload staminads workspaces.create contient bien les champs Veridian", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  await provision(VALID_BODY);
-  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
-  assert.ok(wsCall);
-  const sent = wsCall.body as Record<string, string>;
-  assert.equal(sent.name, VALID_BODY.tenantName);
-  assert.equal(sent.website, VALID_BODY.website);
-  assert.equal(sent.timezone, VALID_BODY.timezone);
-  assert.equal(sent.currency, VALID_BODY.currency);
-});
-
-test("provision: apiKey name contient le tenantSlug pour traçabilité", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  await provision(VALID_BODY);
-  const keyCall = fake.getCalls().find((c) => c.path === "/api/apiKeys.create");
-  assert.ok(keyCall);
-  const sent = keyCall.body as { name: string; role: string; workspace_id: string };
-  assert.match(sent.name, /veridian-tenant-veridian-test/);
-  assert.equal(sent.role, "admin");
-  // staminads attend snake_case
-  assert.equal(sent.workspace_id, "ws_fake_abc");
-});
-
-test("provision: payload contient un id staminads valide [a-z][a-z0-9_]*", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  await provision({ ...VALID_BODY, tenantSlug: "phase1-test" });
-  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
-  assert.ok(wsCall);
-  const sent = wsCall.body as { id: string };
-  assert.match(sent.id, /^[a-z][a-z0-9_]*$/, "id doit matcher la regex staminads");
-  assert.equal(sent.id, "phase1_test", "tirets convertis en underscores");
-});
-
-test("provision: id force préfixe 'v_' si tenantSlug commence par chiffre", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  await provision({ ...VALID_BODY, tenantSlug: "123client" });
-  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
-  const sent = wsCall!.body as { id: string };
-  assert.match(sent.id, /^[a-z]/, "id doit commencer par une lettre");
+  const body = (await res.json()) as { error: string; status: number };
+  assert.equal(body.error, "provision_failed");
+  assert.equal(body.status, 409);
 });
 
 test("provision: endpoint snippet = publicStaminadsUrl si fourni", async () => {
@@ -229,12 +157,10 @@ test("provision: endpoint snippet = publicStaminadsUrl si fourni", async () => {
   await fake.stop();
   fake = new FakeStaminads();
   await fake.start();
-  fake.setBehavior({ setupCompleted: true });
   const app = createApp({
     staminadsUrl: fake.url,
     publicStaminadsUrl: "https://analytics-engine.staging.veridian.site",
-    adminEmail: "admin@veridian.local",
-    adminPassword: "test-pass-2026",
+    platformAdminApiKey: PLATFORM_KEY,
     veridianAdminApiKey: ADMIN_KEY,
   });
   const started = await startAppOnEphemeralPort(app);
@@ -247,27 +173,13 @@ test("provision: endpoint snippet = publicStaminadsUrl si fourni", async () => {
   assert.equal(
     body.trackingSnippet.endpoint,
     "https://analytics-engine.staging.veridian.site",
-    "Le snippet doit pointer sur l'URL publique pas l'URL réseau interne"
+    "Le snippet doit pointer sur l'URL publique pas l'URL réseau interne",
   );
 });
 
 test("provision: endpoint fallback sur staminadsUrl si publicStaminadsUrl absent", async () => {
-  fake.setBehavior({ setupCompleted: true });
   const res = await provision(VALID_BODY);
   assert.equal(res.status, 200);
   const body = (await res.json()) as { trackingSnippet: { endpoint: string } };
   assert.equal(body.trackingSnippet.endpoint, fake.url);
-});
-
-test("provision: id tronqué à 50 chars max (limite staminads)", async () => {
-  fake.setBehavior({ setupCompleted: true });
-  // Slug à 60 chars (< limite Zod 64). Après slug, > 50 chars donc doit être tronqué.
-  const longSlug = "veridian-client-acme-corp-international-" + "x".repeat(20);
-  assert.ok(longSlug.length > 50 && longSlug.length <= 64, "longSlug doit être > 50 et ≤ 64 chars");
-  const res = await provision({ ...VALID_BODY, tenantSlug: longSlug });
-  assert.equal(res.status, 200, "provision doit réussir");
-  const wsCall = fake.getCalls().find((c) => c.path === "/api/workspaces.create");
-  assert.ok(wsCall, "workspaces.create doit être appelé");
-  const sent = wsCall.body as { id: string };
-  assert.ok(sent.id.length <= 50, `id length ${sent.id.length} > 50`);
 });

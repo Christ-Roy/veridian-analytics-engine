@@ -7,6 +7,7 @@ import { UsersModule } from '../users/users.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { MailModule } from '../mail/mail.module';
+import { AnalyticsModule } from '../analytics/analytics.module';
 
 /**
  * Module exposing platform-level (M2M) admin endpoints.
@@ -37,6 +38,7 @@ import { MailModule } from '../mail/mail.module';
     forwardRef(() => WorkspacesModule),
     forwardRef(() => ApiKeysModule),
     forwardRef(() => MailModule),
+    forwardRef(() => AnalyticsModule),
   ],
   controllers: [AdminPlatformController],
   providers: [AdminPlatformService, PlatformAdminGuard],

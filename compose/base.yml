@@ -116,8 +116,11 @@ services:
       # refuse SKIP_HMAC=true si NODE_ENV ∉ {test, development}. dev.yml l'override.
       NODE_ENV: ${NODE_ENV:-production}
       STAMINADS_URL: http://engine:3000
-      STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
-      STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
+      # Auth M2M bridge → Engine (Bearer PLATFORM_ADMIN_API_KEY, PlatformAdminGuard).
+      # MÊME valeur que le service `engine` ci-dessus. Remplace l'ancien couple
+      # super_admin STAMINADS_ADMIN_EMAIL/PASSWORD (anti-pattern getAdminToken,
+      # retiré 2026-06-16 — cf veridian-bridge/docs ../docs/PLATFORM-ADMIN-API.md).
+      PLATFORM_ADMIN_API_KEY: ${PLATFORM_ADMIN_API_KEY:?PLATFORM_ADMIN_API_KEY requis (M2M, 32+ chars)}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis (32+ chars)}
       # URL publique du dashboard renvoyée au Hub à la réponse /provision (CONTRAT-HUB §5.1)
       PUBLIC_DASHBOARD_URL: ${PUBLIC_DASHBOARD_URL:-https://analytics.app.veridian.site}

@@ -16,6 +16,7 @@ import { UsersService } from '../users/users.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 
 describe('AdminPlatformService.provisionTenant', () => {
   let service: AdminPlatformService;
@@ -76,6 +77,12 @@ describe('AdminPlatformService.provisionTenant', () => {
               };
               return env[key] ?? def;
             }),
+          },
+        },
+        {
+          provide: AnalyticsService,
+          useValue: {
+            query: jest.fn().mockResolvedValue({ data: [], meta: {} }),
           },
         },
       ],

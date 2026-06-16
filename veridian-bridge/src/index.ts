@@ -8,6 +8,7 @@
  */
 
 import { createApp, validateConfig, type BridgeConfig } from "./app.js";
+import { createEngineM2mClient } from "./engine-m2m.js";
 import { assertSkipHmacAllowed } from "./hub-hmac.js";
 import { registerGscRoutes } from "./gsc/routes.js";
 import { readOauthConfigFromEnv, OauthConfigError } from "./gsc/index.js";
@@ -48,8 +49,7 @@ console.log(
 const cfg: BridgeConfig = {
   staminadsUrl: process.env.STAMINADS_URL ?? "http://staminads:3000",
   publicStaminadsUrl: process.env.PUBLIC_STAMINADS_URL,
-  adminEmail: process.env.STAMINADS_ADMIN_EMAIL ?? "admin@veridian.local",
-  adminPassword: process.env.STAMINADS_ADMIN_PASSWORD ?? "poc-admin-pass-2026",
+  platformAdminApiKey: process.env.PLATFORM_ADMIN_API_KEY ?? "",
   veridianAdminApiKey: process.env.VERIDIAN_ADMIN_API_KEY ?? "",
   hub: {
     hmacSecret: hubHmacSecret,
@@ -210,66 +210,32 @@ try {
   }
 
   /**
-   * Hook staminads pour provision-existing : login admin (token court-vécu,
-   * pas de cache — l'endpoint est appelé 5x au plus pendant une migration)
-   * puis workspaces.create + apiKeys.create.
+   * Hook Engine M2M pour provision-existing (migration D2 des clients legacy).
+   * Adopte un id de workspace EXPLICITE (legacy) via le natif
+   * tenants.provision avec `workspace_id` imposé. Plus de login super_admin :
+   * un seul secret M2M (PLATFORM_ADMIN_API_KEY).
+   *
+   * On dérive un email owner de service (le natif exige un email + crée le
+   * user owner ; pour une migration le user est piloté par le Hub ensuite).
    */
+  const migrationEngineM2m = createEngineM2mClient({
+    engineUrl: cfg.staminadsUrl,
+    platformAdminApiKey: cfg.platformAdminApiKey,
+  });
+
   async function createStaminadsWorkspaceForMigration(input: {
     workspaceId: string;
     workspaceName: string;
     domain: string;
   }): Promise<{ workspaceId: string; apiKey: string }> {
-    const loginRes = await fetch(`${cfg.staminadsUrl}/api/auth.login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: cfg.adminEmail,
-        password: cfg.adminPassword,
-      }),
+    const result = await migrationEngineM2m.provisionTenant({
+      email: `bot+${input.workspaceId}@veridian.site`,
+      name: input.workspaceName,
+      siteUrl: `https://${input.domain}`,
+      workspace_id: input.workspaceId,
+      timezone: "Europe/Paris",
     });
-    if (!loginRes.ok) {
-      throw new Error(`staminads auth.login failed: ${loginRes.status}`);
-    }
-    const { access_token: token } = (await loginRes.json()) as {
-      access_token: string;
-    };
-
-    const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        id: input.workspaceId,
-        name: input.workspaceName,
-        website: `https://${input.domain}`,
-        timezone: "Europe/Paris",
-        currency: "EUR",
-      }),
-    });
-    if (!wsRes.ok) {
-      throw new Error(`staminads workspaces.create failed: ${wsRes.status}`);
-    }
-    const ws = (await wsRes.json()) as { id: string };
-
-    const keyRes = await fetch(`${cfg.staminadsUrl}/api/apiKeys.create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        workspace_id: ws.id,
-        name: `veridian-migration-${input.workspaceId}`,
-        role: "admin",
-      }),
-    });
-    if (!keyRes.ok) {
-      throw new Error(`staminads apiKeys.create failed: ${keyRes.status}`);
-    }
-    const apiKey = (await keyRes.json()) as { key: string };
-    return { workspaceId: ws.id, apiKey: apiKey.key };
+    return { workspaceId: result.workspace_id, apiKey: result.api_key };
   }
 
   registerProvisionExistingRoutes(app, {

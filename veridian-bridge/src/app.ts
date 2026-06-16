@@ -34,6 +34,11 @@ import {
 import { provisionHandler } from "./hub/provision.js";
 import { attachOwnerHandler } from "./hub/attach-owner.js";
 import { healthHandler, type HealthStats } from "./hub/health.js";
+import {
+  createEngineM2mClient,
+  EngineM2mError,
+  type EngineM2mClient,
+} from "./engine-m2m.js";
 
 export interface BridgeConfig {
   staminadsUrl: string;
@@ -43,8 +48,12 @@ export interface BridgeConfig {
    * Ex en staging : https://analytics-engine.staging.veridian.site
    */
   publicStaminadsUrl?: string;
-  adminEmail: string;
-  adminPassword: string;
+  /**
+   * Clé M2M partagée bridge ↔ Engine (Bearer PLATFORM_ADMIN_API_KEY côté
+   * Engine `PlatformAdminGuard`). Remplace l'ancien couple
+   * adminEmail/adminPassword (anti-pattern super_admin login, retiré 2026-06-16).
+   */
+  platformAdminApiKey: string;
   veridianAdminApiKey: string;
   /**
    * Hub integration (B3). Si absent, les routes `/api/tenants/*` sont
@@ -74,11 +83,6 @@ export interface BridgeConfig {
   };
 }
 
-export interface AdminToken {
-  token: string;
-  expiresAt: number;
-}
-
 const ProvisionSchema = z.object({
   tenantSlug: z.string().min(1).max(64),
   tenantName: z.string().min(1).max(120),
@@ -104,11 +108,10 @@ export function validateConfig(cfg: BridgeConfig): void {
   if (!cfg.staminadsUrl.startsWith("http")) {
     throw new Error("staminadsUrl must be a valid http(s) URL");
   }
-  if (!cfg.adminEmail.includes("@")) {
-    throw new Error("adminEmail invalid");
-  }
-  if (!cfg.adminPassword || cfg.adminPassword.length < 8) {
-    throw new Error("adminPassword too short (need >= 8 chars)");
+  if (!cfg.platformAdminApiKey || cfg.platformAdminApiKey.length < 32) {
+    throw new Error(
+      "platformAdminApiKey missing or too short (need >= 32 chars)",
+    );
   }
 }
 
@@ -129,6 +132,12 @@ export interface CreateAppOptions {
    * on en construit un qui interroge staminads via analytics.query (24h).
    */
   recentActivityFetcher?: RecentActivityFetcher;
+  /**
+   * Override du client M2M Engine (provision + analytics). Par défaut, on en
+   * construit un qui tape `/api/admin/platform/*` avec
+   * `cfg.platformAdminApiKey`. Les tests injectent un fake.
+   */
+  engineM2m?: EngineM2mClient;
 }
 
 export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Express {
@@ -142,57 +151,16 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
     return express.json({ limit: "256kb" })(req, res, next);
   });
 
-  let cachedAdminToken: AdminToken | null = null;
-
-  async function getAdminToken(): Promise<string> {
-    if (cachedAdminToken && cachedAdminToken.expiresAt > Date.now() + 60_000) {
-      return cachedAdminToken.token;
-    }
-
-    const setupRes = await fetch(`${cfg.staminadsUrl}/api/setup.status`);
-    if (!setupRes.ok) {
-      throw new Error(`setup.status failed: ${setupRes.status}`);
-    }
-    const setupBody = (await setupRes.json()) as { setupCompleted: boolean };
-
-    if (!setupBody.setupCompleted) {
-      const initRes = await fetch(`${cfg.staminadsUrl}/api/setup.initialize`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: cfg.adminEmail,
-          password: cfg.adminPassword,
-          name: "Veridian Admin",
-        }),
-      });
-      if (!initRes.ok) {
-        const text = await initRes.text();
-        throw new Error(`setup.initialize failed: ${initRes.status} ${text}`);
-      }
-      const initBody = (await initRes.json()) as { access_token: string };
-      cachedAdminToken = {
-        token: initBody.access_token,
-        expiresAt: Date.now() + 6 * 24 * 60 * 60 * 1000,
-      };
-      return cachedAdminToken.token;
-    }
-
-    const loginRes = await fetch(`${cfg.staminadsUrl}/api/auth.login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: cfg.adminEmail, password: cfg.adminPassword }),
+  // Client M2M natif Engine — remplace l'anti-pattern getAdminToken
+  // (super_admin email/password + JWT caché 6j). Auth = un seul secret
+  // partagé Bearer PLATFORM_ADMIN_API_KEY, validé timing-safe côté Engine
+  // (PlatformAdminGuard). Cf. src/engine-m2m.ts + docs/PLATFORM-ADMIN-API.md.
+  const engineM2m: EngineM2mClient =
+    opts.engineM2m ??
+    createEngineM2mClient({
+      engineUrl: cfg.staminadsUrl,
+      platformAdminApiKey: cfg.platformAdminApiKey,
     });
-    if (!loginRes.ok) {
-      const text = await loginRes.text();
-      throw new Error(`auth.login failed: ${loginRes.status} ${text}`);
-    }
-    const loginBody = (await loginRes.json()) as { access_token: string };
-    cachedAdminToken = {
-      token: loginBody.access_token,
-      expiresAt: Date.now() + 6 * 24 * 60 * 60 * 1000,
-    };
-    return cachedAdminToken.token;
-  }
 
   function requireVeridianAdmin(
     req: Request,
@@ -224,70 +192,45 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
     }
 
     try {
-      const adminToken = await getAdminToken();
-
-      // staminads id : [a-z][a-z0-9_]*, 2-50 chars (cf workspaces.create DTO).
-      // On transforme le tenantSlug Veridian (qui autorise les tirets) en id
-      // staminads valide. Tirets → underscores, lowercase forcé.
-      const staminadsWorkspaceId = parsed.data.tenantSlug
+      // Endpoint POC interne (le flux Hub réel passe par /api/tenants/provision
+      // HMAC). Le natif tenants.provision exige un email owner — ce POC n'en a
+      // pas, on dérive un email de service bot+<slug>@veridian.site (jamais
+      // utilisé pour un vrai login : le user owner est piloté par le Hub via
+      // le flux HMAC). Le natif slugifie lui-même name → workspace_id.
+      const slug = parsed.data.tenantSlug
         .toLowerCase()
-        .replace(/[^a-z0-9_]/g, "_")
-        .replace(/^[^a-z]/, "v_$&")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
         .slice(0, 50);
+      const derivedEmail = `bot+${slug || "tenant"}@veridian.site`;
 
-      const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({
-          id: staminadsWorkspaceId,
+      let result;
+      try {
+        result = await engineM2m.provisionTenant({
+          email: derivedEmail,
+          siteUrl: parsed.data.website,
           name: parsed.data.tenantName,
-          website: parsed.data.website,
           timezone: parsed.data.timezone,
           currency: parsed.data.currency,
-        }),
-      });
-      if (!wsRes.ok) {
-        const text = await wsRes.text();
-        res
-          .status(502)
-          .json({ error: "workspace_create_failed", status: wsRes.status, body: text });
-        return;
-      }
-      const ws = (await wsRes.json()) as { id: string; name: string };
-
-      const keyRes = await fetch(`${cfg.staminadsUrl}/api/apiKeys.create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({
-          // staminads attend snake_case (vérifié sur l'API en staging, DTO `workspace_id`)
-          workspace_id: ws.id,
-          name: `veridian-tenant-${parsed.data.tenantSlug}`,
-          role: "admin",
-        }),
-      });
-      if (!keyRes.ok) {
-        const text = await keyRes.text();
-        res.status(502).json({
-          error: "apikey_create_failed",
-          status: keyRes.status,
-          body: text,
         });
-        return;
+      } catch (err) {
+        if (err instanceof EngineM2mError) {
+          res.status(502).json({
+            error: "provision_failed",
+            status: err.status,
+            body: err.body,
+          });
+          return;
+        }
+        throw err;
       }
-      const apiKey = (await keyRes.json()) as { key: string; id: string };
 
       res.json({
         tenantSlug: parsed.data.tenantSlug,
-        staminadsWorkspaceId: ws.id,
-        staminadsApiKey: apiKey.key,
+        staminadsWorkspaceId: result.workspace_id,
+        staminadsApiKey: result.api_key,
         trackingSnippet: {
-          workspaceId: ws.id,
+          workspaceId: result.workspace_id,
           // URL publique du tracker (à coller dans le <script> côté site client)
           endpoint: cfg.publicStaminadsUrl ?? cfg.staminadsUrl,
         },
@@ -394,55 +337,63 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
     "/api/admin/tenant/:workspaceId/score",
     requireVeridianAdmin,
     async (req, res) => {
-      const workspaceId = req.params.workspaceId;
+      // Express 5 type Params : string | string[]. Sur une route :workspaceId
+      // simple on n'a jamais un array, mais TS l'exige.
+      const rawId = req.params.workspaceId;
+      const workspaceId = Array.isArray(rawId) ? rawId[0] : rawId;
       if (!workspaceId || workspaceId.length === 0) {
         res.status(400).json({ error: "missing_workspace_id" });
         return;
       }
 
       try {
-        const adminToken = await getAdminToken();
-        const queryRes = await fetch(
-          `${cfg.staminadsUrl}/api/analytics.query`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${adminToken}`,
-            },
-            body: JSON.stringify({
+        // Contrat natif : une query = UNE table. `pageviews` vit dans la
+        // table `sessions`, `goals` dans la table `goals` — on ne peut pas
+        // les mélanger dans une même query (≠ legacy Staminads). Deux queries
+        // M2M, puis fusion des rows pour `buildCountsFromStaminadsRows`.
+        let pageviewRows: Array<Record<string, unknown>>;
+        let goalRows: Array<Record<string, unknown>>;
+        try {
+          const [pvRes, goalRes] = await Promise.all([
+            engineM2m.analyticsQuery({
               workspace_id: workspaceId,
-              // Métriques utilisées par V1 du score :
-              //   - pageviews : ingestion tracker
-              //   - goals     : proxy "form_submission" en attendant table bridge B1
-              metrics: ["pageviews", "goals"],
+              metrics: ["pageviews"],
               dimensions: [],
-              dateRange: { type: "last_30_days" },
+              dateRange: { preset: "previous_30_days" },
+              table: "sessions",
             }),
-          },
-        );
-
-        // staminads renvoie 404 ou 400 si le workspace n'existe pas ou n'est
-        // pas accessible — on traduit en 404 propre côté bridge.
-        if (queryRes.status === 404 || queryRes.status === 400) {
-          res.status(404).json({ error: "workspace_not_found", workspaceId });
-          return;
-        }
-        if (!queryRes.ok) {
-          const text = await queryRes.text();
+            engineM2m.analyticsQuery({
+              metrics: ["goals"], // proxy "form_submission" en attendant table bridge B1
+              workspace_id: workspaceId,
+              dimensions: [],
+              dateRange: { preset: "previous_30_days" },
+              table: "goals",
+            }),
+          ]);
+          pageviewRows = pvRes.data ?? [];
+          goalRows = goalRes.data ?? [];
+        } catch (err) {
+          // 400/404 natif (workspace inconnu) → 404 propre ; sinon 502.
+          const status =
+            err instanceof EngineM2mError ? err.status : undefined;
+          if (status === 404 || status === 400) {
+            res
+              .status(404)
+              .json({ error: "workspace_not_found", workspaceId });
+            return;
+          }
           res.status(502).json({
             error: "analytics_query_failed",
-            status: queryRes.status,
-            body: text,
+            status: status ?? 500,
+            body: err instanceof EngineM2mError ? err.body : String(err),
           });
           return;
         }
 
-        const queryBody = (await queryRes.json()) as {
-          rows?: Array<Record<string, unknown>>;
-        };
-        const rows = Array.isArray(queryBody.rows) ? queryBody.rows : [];
-        const counts = buildCountsFromStaminadsRows(rows);
+        const counts = buildCountsFromStaminadsRows([
+          ...pageviewRows,
+          ...goalRows,
+        ]);
         const result = computeScore(counts);
 
         res.json({
@@ -466,24 +417,26 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
       return;
     }
     try {
-      const adminToken = await getAdminToken();
-      const queryRes = await fetch(`${cfg.staminadsUrl}/api/analytics.query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${adminToken}`,
-        },
-        body: JSON.stringify({
-          // staminads DTO mixte : workspace_id snake_case, dateRange camelCase
-          workspace_id: wsId,
-          metrics: ["pageviews", "sessions"],
-          dimensions: ["utm_source"],
-          dateRange: { type: "last_24_hours" },
-        }),
+      // pageviews + sessions vivent tous deux dans la table `sessions` → 1
+      // seule query M2M native. Preset natif `today` (≈ la fenêtre 24h de
+      // l'ancien `last_24_hours`).
+      const result = await engineM2m.analyticsQuery({
+        workspace_id: wsId,
+        metrics: ["pageviews", "sessions"],
+        dimensions: ["utm_source"],
+        dateRange: { preset: "today" },
+        table: "sessions",
       });
-      const body = await queryRes.text();
-      res.status(queryRes.status).type("application/json").send(body);
+      res.json(result);
     } catch (err) {
+      if (err instanceof EngineM2mError) {
+        res.status(502).json({
+          error: "analytics_query_failed",
+          status: err.status,
+          body: err.body,
+        });
+        return;
+      }
       res.status(500).json({ error: "internal", message: (err as Error).message });
     }
   });
@@ -508,10 +461,7 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
   const tenantStatusBuilder = createTenantStatusBuilder({
     fetchPageviews30d:
       opts.pageviewsFetcher ??
-      makeStaminadsPageviewsFetcher({
-        staminadsUrl: cfg.staminadsUrl,
-        getAdminToken,
-      }),
+      makeStaminadsPageviewsFetcher({ engine: engineM2m }),
   });
 
   app.get(
@@ -558,10 +508,7 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
   const checkTrackerHandler = createCheckTrackerHandler({
     fetchRecentActivity:
       opts.recentActivityFetcher ??
-      makeStaminadsRecentActivityFetcher({
-        staminadsUrl: cfg.staminadsUrl,
-        getAdminToken,
-      }),
+      makeStaminadsRecentActivityFetcher({ engine: engineM2m }),
   });
 
   app.get(
@@ -603,55 +550,38 @@ export function createApp(cfg: BridgeConfig, opts: CreateAppOptions = {}): Expre
     skipHmac: hubSkip,
   });
 
-  // Default staminads hook : appelle l'API workspaces.create / apiKeys.create
-  // via le pipeline admin token déjà existant.
+  // Default Engine hook (M2M natif) : provisionne workspace + apiKey.
+  // Idempotent — cf. ProvisionDeps.createStaminadsWorkspace :
+  //   - Cas A (nouveau)    → tenants.provision (crée workspace+user+apiKey).
+  //   - Cas B (ré-attach)  → workspaces.provisionApiKey sur le workspace
+  //     existant (régénère juste la key, pas de 409 email_already_exists).
   const defaultStaminadsHook = async (input: {
     hubTenantId: string;
     workspaceName: string;
     ownerEmail: string;
+    existingWorkspaceId?: string;
   }) => {
-    const adminToken = await getAdminToken();
-    const wsId = input.hubTenantId
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "_")
-      .replace(/^[^a-z]/, "v_$&")
-      .slice(0, 50);
-    const wsRes = await fetch(`${cfg.staminadsUrl}/api/workspaces.create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${adminToken}`,
-      },
-      body: JSON.stringify({
-        id: wsId,
-        name: input.workspaceName,
-        website: `https://${wsId}.veridian.site`,
-        timezone: "UTC",
-        currency: "EUR",
-      }),
-    });
-    if (!wsRes.ok) {
-      throw new Error(`workspace_create_failed:${wsRes.status}`);
-    }
-    const ws = (await wsRes.json()) as { id: string };
-
-    const keyRes = await fetch(`${cfg.staminadsUrl}/api/apiKeys.create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${adminToken}`,
-      },
-      body: JSON.stringify({
-        workspace_id: ws.id,
+    // Cas B : ré-attach → régénère une apiKey sur le workspace existant.
+    if (input.existingWorkspaceId) {
+      const result = await engineM2m.provisionApiKey({
+        workspace_id: input.existingWorkspaceId,
         name: `veridian-hub-${input.hubTenantId}`,
         role: "admin",
-      }),
-    });
-    if (!keyRes.ok) {
-      throw new Error(`apikey_create_failed:${keyRes.status}`);
+      });
+      return { workspaceId: result.workspace_id, apiKey: result.api_key };
     }
-    const apiKey = (await keyRes.json()) as { key: string };
-    return { workspaceId: ws.id, apiKey: apiKey.key };
+
+    // Cas A : nouveau tenant → provision complet (le natif slugifie name→id).
+    const result = await engineM2m.provisionTenant({
+      email: input.ownerEmail,
+      name: input.workspaceName,
+      siteUrl: `https://${input.workspaceName
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 50) || "tenant"}.veridian.site`,
+    });
+    return { workspaceId: result.workspace_id, apiKey: result.api_key };
   };
 
   app.post(

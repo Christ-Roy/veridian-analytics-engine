@@ -41,11 +41,21 @@ const ProvisionSchema = z.object({
 
 export interface ProvisionDeps {
   store: TenantStore;
-  /** Hook staminads : crée workspace + apiKey, retourne identifiants. */
+  /**
+   * Hook staminads/Engine : provisionne le workspace + apiKey, retourne les
+   * identifiants. Idempotent :
+   *   - Cas A (nouveau tenant)   → `existingWorkspaceId` absent → crée tout
+   *     (workspace + user owner + apiKey) via le natif tenants.provision.
+   *   - Cas B (ré-attach)        → `existingWorkspaceId` fourni → régénère
+   *     UNIQUEMENT une apiKey sur ce workspace existant (workspaces.provisionApiKey).
+   *     Ne recrée NI le workspace NI le user (sinon le natif renvoie 409
+   *     email_already_exists).
+   */
   createStaminadsWorkspace(input: {
     hubTenantId: string;
     workspaceName: string;
     ownerEmail: string;
+    existingWorkspaceId?: string;
   }): Promise<{ workspaceId: string; apiKey: string }>;
   /** URL publique dashboard (utilisée dans la réponse). */
   publicDashboardUrl?: string;
@@ -78,12 +88,13 @@ export function provisionHandler(deps: ProvisionDeps) {
         return;
       }
 
-      // Cas B : ré-attach même owner → refresh apiKey
+      // Cas B : ré-attach même owner → refresh apiKey (workspace déjà créé)
       if (existing) {
         const { apiKey } = await deps.createStaminadsWorkspace({
           hubTenantId,
           workspaceName: workspace_name,
           ownerEmail: owner_email,
+          existingWorkspaceId: existing.workspaceId,
         });
         const refreshed = await deps.store.refreshApiKey(hubTenantId, apiKey);
         res.json({

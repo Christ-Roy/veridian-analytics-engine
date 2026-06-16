@@ -57,8 +57,7 @@ async function bootBridge(
   const app = createApp(
     {
       staminadsUrl: "http://127.0.0.1:1", // jamais appelé (fetcher injecté)
-      adminEmail: "admin@veridian.local",
-      adminPassword: "test-pass-2026",
+      platformAdminApiKey: "veridian-test-platform-key-32-chars!!",
       veridianAdminApiKey: ADMIN_KEY,
     },
     { recentActivityFetcher: fetcher },
@@ -193,73 +192,62 @@ test("check-tracker: exception du fetcher → 500 internal", async () => {
   assert.equal(body.message, "boom staminads");
 });
 
-// ─── makeStaminadsRecentActivityFetcher (helper HTTP) ─────────────────────
+// ─── makeStaminadsRecentActivityFetcher (helper M2M natif) ────────────────
 
-test("recentActivityFetcher: somme les pageviews + earliest date", async () => {
-  let captured: unknown = null;
-  // On monte un faux staminads minimal qui renvoie 3 jours de data.
-  const { createServer } = await import("node:http");
-  const server = createServer((req, res) => {
-    let raw = "";
-    req.on("data", (c) => (raw += c));
-    req.on("end", () => {
-      const parsed = JSON.parse(raw || "{}") as { workspace_id?: string };
-      captured = parsed.workspace_id;
-      res.setHeader("Content-Type", "application/json");
-      res.end(
-        JSON.stringify({
-          rows: [
-            { date: "2026-05-22", pageviews: 5 },
-            { date: "2026-05-20", pageviews: 12 },
-            { date: "2026-05-21", pageviews: 0 },
-          ],
-        }),
-      );
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 0;
+test("recentActivityFetcher: somme les pageviews + firstSeenAt si activité", async () => {
+  let captured:
+    | { workspace_id: string; dateRange: { preset?: string }; table?: string }
+    | null = null;
   const fetcher = makeStaminadsRecentActivityFetcher({
-    staminadsUrl: `http://127.0.0.1:${port}`,
-    getAdminToken: async () => "fake-token",
+    engine: {
+      async analyticsQuery(input) {
+        captured = input;
+        // Réponse native { data } — agrégat single-row (preset today, pas de dim).
+        return { data: [{ pageviews: 17 }] };
+      },
+    },
   });
 
+  const before = Date.now();
   const activity = await fetcher("ws_demo");
-  await new Promise<void>((resolve) => server.close(() => resolve()));
 
-  assert.equal(captured, "ws_demo");
-  assert.equal(activity.totalEvents24h, 17); // 5 + 12 + 0
-  // earliest date AVEC pageviews > 0 → 2026-05-20 (le 21 a 0 PV, ignoré)
-  assert.equal(activity.firstSeenAt, "2026-05-20T00:00:00.000Z");
+  assert.equal(captured!.workspace_id, "ws_demo");
+  // Contrat natif : preset today + table sessions.
+  assert.equal(captured!.dateRange.preset, "today");
+  assert.equal(captured!.table, "sessions");
+  assert.equal(activity.totalEvents24h, 17);
+  // firstSeenAt = horodatage de détection (best-effort) dès qu'il y a activité.
+  assert.ok(activity.firstSeenAt, "firstSeenAt non null quand activité > 0");
+  assert.ok(
+    new Date(activity.firstSeenAt!).getTime() >= before,
+    "firstSeenAt ≈ now (détection)",
+  );
 });
 
-test("recentActivityFetcher: staminads down → activité nulle (fail-safe)", async () => {
-  // Aucun serveur n'écoute → fetch rejette → on retourne 0 plutôt que throw.
+test("recentActivityFetcher: 0 pageview → activité nulle, firstSeenAt null", async () => {
   const fetcher = makeStaminadsRecentActivityFetcher({
-    staminadsUrl: "http://127.0.0.1:1",
-    getAdminToken: async () => "fake-token",
+    engine: {
+      async analyticsQuery() {
+        return { data: [{ pageviews: 0 }] };
+      },
+    },
   });
-  const activity = await fetcher("ws_any");
+  const activity = await fetcher("ws_zero");
   assert.equal(activity.totalEvents24h, 0);
   assert.equal(activity.firstSeenAt, null);
 });
 
-test("recentActivityFetcher: staminads renvoie 500 → activité nulle", async () => {
-  const { createServer } = await import("node:http");
-  const server = createServer((_req, res) => {
-    res.statusCode = 500;
-    res.end("clickhouse_down");
-  });
-  await new Promise<void>((resolve) => server.listen(0, resolve));
-  const addr = server.address();
-  const port = typeof addr === "object" && addr ? addr.port : 0;
+test("recentActivityFetcher: Engine en erreur → activité nulle (fail-safe)", async () => {
+  // Le client M2M throw (Engine down / query refusée) → on retourne 0 plutôt
+  // que de planter l'onboarding wizard.
   const fetcher = makeStaminadsRecentActivityFetcher({
-    staminadsUrl: `http://127.0.0.1:${port}`,
-    getAdminToken: async () => "fake-token",
+    engine: {
+      async analyticsQuery() {
+        throw new Error("engine down");
+      },
+    },
   });
   const activity = await fetcher("ws_any");
-  await new Promise<void>((resolve) => server.close(() => resolve()));
   assert.equal(activity.totalEvents24h, 0);
   assert.equal(activity.firstSeenAt, null);
 });

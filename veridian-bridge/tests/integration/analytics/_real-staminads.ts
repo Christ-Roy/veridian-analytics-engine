@@ -8,8 +8,9 @@
  * (`api/`) dans le process de test serait fragile et lourd (install séparé,
  * bootstrap schéma, auth JWT, event-buffer…). On fait mieux et plus honnête :
  *
- *   `RealStaminads` est un serveur HTTP qui sert `/api/analytics.query` en
- *   exécutant une VRAIE requête d'agrégation sur le ClickHouse de test
+ *   `RealStaminads` est un serveur HTTP qui sert l'endpoint M2M natif
+ *   `/api/admin/platform/analytics.query` en exécutant une VRAIE requête
+ *   d'agrégation sur le ClickHouse de test
  *   (`compose/test.yml`, service `clickhouse`). Les pageviews / goals sont
  *   comptés par ClickHouse — un moteur columnar réel — à partir de lignes
  *   d'événements RÉELLEMENT insérées. Rien n'est codé en dur : un workspace
@@ -23,10 +24,10 @@
  *     la métrique `pageviews` de l'API staminads, cf
  *     `api/src/analytics/constants/metrics.ts`).
  *
- * Le contrat HTTP servi est celui ATTENDU PAR LE BRIDGE (`{ rows: [...] }`).
- * Le bridge porté (tickets A1/A2) parse `body.rows` : on sert donc ce shape.
- * Toute évolution du contrat staminads ↔ bridge est du ressort des agents
- * A1/A2 — T5 teste le comportement actuel du code livré.
+ * Le contrat HTTP servi est le NATIF ATTENDU PAR LE BRIDGE depuis la
+ * migration M2M (`{ data: [...] }`, une query = une table). Le bridge parse
+ * `body.data` : on sert donc ce shape. Toute évolution du contrat Engine ↔
+ * bridge est du ressort de l'agent analytics-engine.
  *
  * ─── Schéma ClickHouse ──────────────────────────────────────────────────────
  *
@@ -181,12 +182,17 @@ export class RealStaminads {
   }
 
   /**
-   * Sert `/api/analytics.query` : agrège les pageviews/goals du workspace
-   * demandé en interrogeant RÉELLEMENT ClickHouse.
+   * Sert l'endpoint M2M natif `/api/admin/platform/analytics.query` en
+   * agrégeant RÉELLEMENT ClickHouse. Depuis la migration M2M (2026-06-16) le
+   * bridge ne se logue plus en super_admin — il tape ce seul endpoint avec un
+   * Bearer PLATFORM_ADMIN_API_KEY (on ne vérifie pas la clé ici : le test
+   * prouve le chemin data, pas l'auth — couverte par les tests unit guard).
    *
-   * Réponse au format attendu par le bridge porté : `{ rows: [{ pageviews,
-   * goals }] }`. Un workspace sans événement → `rows: [{ pageviews: 0,
-   * goals: 0 }]` (le bridge le traduit en score 0).
+   * Contrat NATIF : réponse `{ data: [...] }` (PAS le legacy `{ rows }`), une
+   * query = UNE table. On route donc selon `body.table` :
+   *   - `sessions` (ou défaut) → { data: [{ pageviews: N }] }
+   *   - `goals`                → { data: [{ goals: N }] }
+   * Un workspace sans event → metric 0 (le bridge le traduit en score 0).
    */
   private async handle(
     req: IncomingMessage,
@@ -194,27 +200,20 @@ export class RealStaminads {
   ): Promise<void> {
     const path = (req.url ?? "").split("?")[0];
 
-    // Le bridge appelle setup.status/auth.login au préalable pour obtenir un
-    // token admin staminads — on répond comme une staminads déjà initialisée.
-    if (path === "/api/setup.status" && req.method === "GET") {
-      this.send(res, 200, { setupCompleted: true });
-      return;
-    }
-    if (path === "/api/auth.login" && req.method === "POST") {
-      this.send(res, 200, { access_token: "t5-real-staminads-admin-token" });
-      return;
-    }
-
-    if (path === "/api/analytics.query" && req.method === "POST") {
+    if (
+      path === "/api/admin/platform/analytics.query" &&
+      req.method === "POST"
+    ) {
       const body = (await this.readBody(req)) as
-        | { workspace_id?: string }
+        | { workspace_id?: string; table?: "sessions" | "goals" }
         | undefined;
       const workspaceId = body?.workspace_id;
       if (!workspaceId || typeof workspaceId !== "string") {
-        // staminads renvoie 400 quand le workspace_id manque / est invalide.
+        // L'Engine renvoie 400 quand le workspace_id manque / est invalide.
         this.send(res, 400, { error: "missing_workspace_id" });
         return;
       }
+      const table = body?.table ?? "sessions";
 
       try {
         const wsEsc = workspaceId.replace(/'/g, "''");
@@ -234,16 +233,13 @@ export class RealStaminads {
         };
         const agg = parsed.data[0] ?? { pageviews: "0", goals: "0" };
         // ClickHouse renvoie les count() en String (UInt64) → on coerce en
-        // number pour respecter le shape attendu côté bridge (score.ts ne
-        // somme que les valeurs `number`).
-        this.send(res, 200, {
-          rows: [
-            {
-              pageviews: Number(agg.pageviews),
-              goals: Number(agg.goals),
-            },
-          ],
-        });
+        // number (score.ts/tenant-status.ts ne somment que les `number`).
+        // Format natif { data }, métrique scopée à la table demandée.
+        const row =
+          table === "goals"
+            ? { goals: Number(agg.goals) }
+            : { pageviews: Number(agg.pageviews) };
+        this.send(res, 200, { data: [row], meta: { total_rows: 1 } });
       } catch (err) {
         this.send(res, 500, {
           error: "clickhouse_error",

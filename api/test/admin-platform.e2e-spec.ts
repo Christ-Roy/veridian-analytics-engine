@@ -295,4 +295,89 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
       expect(res.body.key_prefix).toMatch(/^stam_live_/);
     });
   });
+
+  describe('tenants.provision with explicit workspace_id (D2 migration)', () => {
+    it('adopts the explicit workspace_id verbatim', async () => {
+      const explicitId = `legacy_${Date.now().toString(36)}`;
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: `explicit-${Date.now()}@test.com`,
+          siteUrl: 'https://legacy.example.com',
+          name: 'Legacy Client',
+          workspace_id: explicitId,
+        })
+        .expect(201);
+      expect(res.body.workspace_id).toBe(explicitId);
+    });
+
+    it('rejects an explicit workspace_id that breaks the id regex (409)', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: `badid-${Date.now()}@test.com`,
+          siteUrl: 'https://badid.example.com',
+          name: 'Bad Id Client',
+          workspace_id: '1-invalid-Caps', // doit matcher ^[a-z][a-z0-9_]*$
+        })
+        .expect(409);
+    });
+  });
+
+  describe('POST /api/admin/platform/analytics.query', () => {
+    it('returns 401 without a Bearer token', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.query')
+        .send({
+          workspace_id: 'whatever',
+          metrics: ['pageviews'],
+          dateRange: { preset: 'previous_30_days' },
+        })
+        .expect(401);
+    });
+
+    it('returns 400 on invalid body (no metrics)', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.query')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: 'ws_x',
+          dateRange: { preset: 'previous_30_days' },
+        })
+        .expect(400);
+    });
+
+    it('runs a query for a provisioned workspace (M2M, no workspace key)', async () => {
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Analytics Probe Co',
+          email: `aq-${Date.now()}@test.com`,
+          siteUrl: 'https://aq.test',
+        })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.query')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: wsId,
+          metrics: ['pageviews'],
+          dimensions: [],
+          dateRange: { preset: 'previous_30_days' },
+          table: 'sessions',
+        })
+        .expect(200);
+
+      // Réponse native { data, meta } — un workspace neuf renvoie data vide.
+      expect(res.body).toHaveProperty('data');
+      expect(Array.isArray(res.body.data)).toBe(true);
+      expect(res.body).toHaveProperty('meta');
+    });
+  });
 });

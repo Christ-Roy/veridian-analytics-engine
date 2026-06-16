@@ -16,11 +16,13 @@
 #   BRIDGE_IMAGE_TAG          = staging-<sha7>
 #   CLICKHOUSE_PASSWORD       = mot de passe ClickHouse staging
 #   ENCRYPTION_KEY            = 32+ chars (openssl rand -hex 32)
-#   STAMINADS_ADMIN_PASSWORD  = mot de passe admin console staminads
 #   VERIDIAN_ADMIN_API_KEY    = clé API utilisée par Hub pour appeler le bridge
 #   PLATFORM_ADMIN_API_KEY    = secret M2M des endpoints /api/admin/platform/*
-#                               (provisionApiKey, tenants.provision). Sans lui,
-#                               PlatformAdminGuard refuse tout (fail-closed).
+#                               (provisionApiKey, tenants.provision, analytics.query).
+#                               Partagé engine ↔ bridge. Sans lui, PlatformAdminGuard
+#                               refuse tout (fail-closed) ET le bridge crashe au boot
+#                               (validateConfig). Remplace l'ancien
+#                               STAMINADS_ADMIN_PASSWORD (super_admin, retiré 2026-06-16).
 # ============================================================================
 
 services:

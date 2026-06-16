@@ -94,6 +94,57 @@ on assume la compensation manuelle.
 | 409 | `email_already_exists` (V1) |
 | 500 | `provisioning_failed` (workspace/api_key insertion) — user compensé |
 
+### `POST /api/admin/platform/workspaces.provisionApiKey`
+
+(Ré)génère une API key workspace-scoped pour un workspace EXISTANT géré par
+la plateforme (sans membre). Utilisé par le bridge pour le **cas B** du flow
+HMAC Hub (ré-attach d'un tenant existant → refresh de la clé) sans recréer ni
+user ni workspace (ce qui renverrait 409).
+
+**Auth** : `Authorization: Bearer <PLATFORM_ADMIN_API_KEY>`
+
+**Body** : `{ "workspace_id": "boulangerie_dupont", "name": "veridian-hub-...", "role": "admin" }`
+
+**Réponse 201** : `{ "workspace_id", "api_key", "key_prefix" }`
+
+### `POST /api/admin/platform/analytics.query`
+
+Lance une query analytics pour N'IMPORTE QUEL workspace, en M2M. Même contrat
+que `POST /api/analytics.query` (DTO natif `AnalyticsQueryDto` : `dateRange.preset`,
+métriques scopées à UNE table) mais gardé par `PlatformAdminGuard` au lieu de
+`WorkspaceAuthGuard`. Délègue à `AnalyticsService.query()`.
+
+**Pourquoi** : le bridge lit le score / status / check-tracker des tenants. Il
+n'a ni JWT user ni clé workspace — avant la migration M2M (2026-06-16) il se
+loguait en super_admin (`getAdminToken`). Désormais il tape cet endpoint M2M.
+
+**Auth** : `Authorization: Bearer <PLATFORM_ADMIN_API_KEY>`
+
+**Body** (contrat natif, PAS le legacy `{type}`/`{rows}`) :
+
+```json
+{
+  "workspace_id": "boulangerie_dupont",
+  "metrics": ["pageviews"],
+  "dimensions": [],
+  "dateRange": { "preset": "previous_30_days" },
+  "table": "sessions"
+}
+```
+
+⚠️ Une query = UNE table. `pageviews` vit dans `sessions`, `goals` dans
+`goals` — pour les deux, faire deux queries (cf. le score côté bridge).
+
+**Réponse 200** : `{ "data": [...], "meta": {...}, "query": {...} }`
+
+### Provisioning avec `workspace_id` explicite (migration D2)
+
+`tenants.provision` accepte un champ optionnel `workspace_id`. Quand fourni, il
+est utilisé verbatim (au lieu de slugifier `name`) — utilisé par la migration
+D2 des clients legacy qui doivent garder leur id de workspace historique. Doit
+matcher `^[a-z][a-z0-9_]*$` (2..50) ; si un workspace existe déjà avec cet id →
+409. Omis → slug auto depuis `name` (flux par défaut).
+
 ## Variables d'env requises
 
 | Var | Where | Required |
@@ -184,10 +235,19 @@ Le snippet `<script>` est directement utilisable. Le Hub persiste
 
 ## Ce qui reste à câbler après cette PR
 
-- [ ] **Côté Hub** : remplacer `getAdminToken` + cascade de calls par un
-      seul fetch vers `/api/admin/platform/tenants.provision`.
+- [x] **Côté bridge** : `getAdminToken` (super_admin pwd+JWT) SUPPRIMÉ
+      (2026-06-16, Lot B). Le bridge tape `tenants.provision` /
+      `workspaces.provisionApiKey` / `analytics.query` en M2M. Config bridge :
+      `STAMINADS_ADMIN_EMAIL`/`STAMINADS_ADMIN_PASSWORD` retirés →
+      `PLATFORM_ADMIN_API_KEY`.
+- [ ] **Côté Hub** : remplacer son propre client legacy (`x-admin-key` vers
+      `analytics.app.veridian.site`) par un fetch vers
+      `/api/admin/platform/tenants.provision` (Lot A — ticket croisé Hub).
 - [ ] **Côté skill `analytics-provision`** : idem, simplifier le flow.
-- [ ] **Côté Dokploy Engine** : ajouter `PLATFORM_ADMIN_API_KEY` (+ valeur générée) dans le compose `Ri8lnog40Jgxn5xWOhaQg`.
+- [ ] **Côté Dokploy** : ajouter `PLATFORM_ADMIN_API_KEY` (même valeur) dans
+      le compose Engine `Ri8lnog40Jgxn5xWOhaQg` ET dans le compose bridge.
+      ⚠️ DÉPLOIEMENT : poser l'ENV AVANT de déployer le bridge migré, sinon
+      `validateConfig` fail-closed le crashe au boot (cf [[feedback_env_wire_compose_same_commit]]).
 - [ ] **Côté bridge `phone-source-dim` agent** : confirmer l'endpoint exact (`POST /api/admin/tenant/:wsId/phone-numbers` assumé ici). Adapter si nécessaire.
 - [ ] **Audit log** : ticket P2 à ouvrir — chaque provisioning doit
       laisser une trace dans `audit_logs` (qui a appelé, quel tenant créé).

@@ -9,8 +9,7 @@ import { validateConfig, createApp, type BridgeConfig } from "../src/app.js";
 
 const VALID: BridgeConfig = {
   staminadsUrl: "http://staminads:3000",
-  adminEmail: "admin@veridian.local",
-  adminPassword: "valid-password-2026",
+  platformAdminApiKey: "x".repeat(48),
   veridianAdminApiKey: "x".repeat(32),
 };
 
@@ -45,17 +44,17 @@ test("validateConfig: accepte https", () => {
   );
 });
 
-test("validateConfig: rejette email sans @", () => {
+test("validateConfig: rejette platformAdminApiKey trop courte", () => {
   assert.throws(
-    () => validateConfig({ ...VALID, adminEmail: "admin.veridian.local" }),
-    /adminEmail/
+    () => validateConfig({ ...VALID, platformAdminApiKey: "short" }),
+    /platformAdminApiKey/
   );
 });
 
-test("validateConfig: rejette password trop court", () => {
+test("validateConfig: rejette platformAdminApiKey vide", () => {
   assert.throws(
-    () => validateConfig({ ...VALID, adminPassword: "short" }),
-    /adminPassword/
+    () => validateConfig({ ...VALID, platformAdminApiKey: "" }),
+    /platformAdminApiKey/
   );
 });
 

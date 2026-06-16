@@ -83,71 +83,59 @@ export function createCheckTrackerHandler(deps: {
 }
 
 /**
- * Helper : construit un `RecentActivityFetcher` qui interroge staminads via
- * /api/analytics.query. Utilisé par app.ts. La logique HTTP est isolée ici
- * pour pouvoir la mocker en test sans rejouer un faux serveur.
+ * Capacité minimale dont ce module a besoin du client Engine M2M : lancer une
+ * query analytics native. Interface étroite pour que les tests mockent juste
+ * `analyticsQuery`.
+ */
+export interface EngineAnalyticsQuerier {
+  analyticsQuery(input: {
+    workspace_id: string;
+    metrics: string[];
+    dimensions?: string[];
+    dateRange: { preset?: string; start?: string; end?: string };
+    table?: "sessions" | "goals";
+  }): Promise<{ data: Array<Record<string, unknown>> }>;
+}
+
+/**
+ * Helper : construit un `RecentActivityFetcher` qui interroge l'Engine via le
+ * client M2M natif (`/api/admin/platform/analytics.query`, Bearer
+ * PLATFORM_ADMIN_API_KEY). Utilisé par app.ts. Logique isolée pour pouvoir la
+ * mocker en test sans rejouer un faux serveur.
  *
- * On interroge avec la dimension `date` sur la fenêtre `last_24_hours` :
- *   - somme des `pageviews` de toutes les lignes → totalEvents24h
- *   - plus petite `date` non vide (pageviews > 0) → firstSeenAt
+ * On interroge `pageviews` sur le preset natif `today` (le contrat natif n'a
+ * PAS de fenêtre `last_24_hours` glissante ni de dimension `date` — `today`
+ * couvre le besoin onboarding "le tracker a-t-il commencé à émettre ?") :
+ *   - somme des `pageviews` → totalEvents24h
+ *   - `firstSeenAt` = horodatage de détection (now) dès qu'un event est vu.
+ *     Le wizard ne l'affiche qu'à titre indicatif ; le natif day-dimension
+ *     est un nombre (jour du mois), pas une date reconstructible — on assume
+ *     un firstSeenAt approximatif côté détection plutôt qu'un bricolage.
  *
- * staminads renvoie les dates au format `YYYY-MM-DD` (granularité jour). On
- * normalise en ISO en plaçant minuit UTC — c'est suffisant pour le wizard
- * qui n'affiche `firstSeenAt` qu'à titre indicatif.
- *
- * Tout échec staminads (workspace vide, query refusée) → activité nulle
- * plutôt qu'une exception : c'est l'état d'un site qui n'a jamais ingéré.
+ * Tout échec Engine (workspace vide, query refusée, injoignable) → activité
+ * nulle plutôt qu'une exception : c'est l'état d'un site qui n'a jamais ingéré.
  */
 export function makeStaminadsRecentActivityFetcher(opts: {
-  staminadsUrl: string;
-  getAdminToken: () => Promise<string>;
+  engine: EngineAnalyticsQuerier;
 }): RecentActivityFetcher {
   return async (workspaceId: string): Promise<RecentActivity> => {
-    let token: string;
+    let data: Array<Record<string, unknown>>;
     try {
-      token = await opts.getAdminToken();
-    } catch {
-      return { totalEvents24h: 0, firstSeenAt: null };
-    }
-
-    let queryRes: globalThis.Response;
-    try {
-      queryRes = await fetch(`${opts.staminadsUrl}/api/analytics.query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          workspace_id: workspaceId,
-          metrics: ["pageviews"],
-          dimensions: ["date"],
-          dateRange: { type: "last_24_hours" },
-        }),
+      const res = await opts.engine.analyticsQuery({
+        workspace_id: workspaceId,
+        metrics: ["pageviews"],
+        dimensions: [],
+        dateRange: { preset: "today" },
+        table: "sessions",
       });
+      data = res.data ?? [];
     } catch {
-      // staminads injoignable → on considère le tracker pas encore actif.
+      // Engine injoignable / query refusée → tracker pas encore actif.
       return { totalEvents24h: 0, firstSeenAt: null };
     }
 
-    if (!queryRes.ok) {
-      return { totalEvents24h: 0, firstSeenAt: null };
-    }
-
-    let body: { rows?: Array<Record<string, unknown>> };
-    try {
-      body = (await queryRes.json()) as {
-        rows?: Array<Record<string, unknown>>;
-      };
-    } catch {
-      return { totalEvents24h: 0, firstSeenAt: null };
-    }
-
-    const rows = Array.isArray(body.rows) ? body.rows : [];
     let total = 0;
-    let earliestDate: string | null = null;
-
-    for (const row of rows) {
+    for (const row of data) {
       const pvRaw = row["pageviews"];
       const pv =
         typeof pvRaw === "number"
@@ -156,32 +144,11 @@ export function makeStaminadsRecentActivityFetcher(opts: {
             ? Number(pvRaw) || 0
             : 0;
       total += pv;
-
-      if (pv > 0) {
-        const dateRaw = row["date"];
-        const date = typeof dateRaw === "string" ? dateRaw : null;
-        if (date && (earliestDate === null || date < earliestDate)) {
-          earliestDate = date;
-        }
-      }
     }
 
     return {
       totalEvents24h: total,
-      firstSeenAt: toIsoOrNull(earliestDate),
+      firstSeenAt: total > 0 ? new Date().toISOString() : null,
     };
   };
-}
-
-/**
- * Normalise une date staminads (`YYYY-MM-DD` ou déjà ISO) en ISO 8601.
- * Retourne `null` si la valeur n'est pas parsable.
- */
-function toIsoOrNull(date: string | null): string | null {
-  if (!date) return null;
-  // `YYYY-MM-DD` → on place minuit UTC pour avoir un ISO complet.
-  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date)
-    ? new Date(`${date}T00:00:00.000Z`)
-    : new Date(date);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }

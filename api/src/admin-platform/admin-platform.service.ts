@@ -12,6 +12,8 @@ import { UsersService } from '../users/users.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
+import { AnalyticsService } from '../analytics/analytics.service';
+import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
 import { generateId, generateToken } from '../common/crypto';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 import {
@@ -37,6 +39,7 @@ export class AdminPlatformService {
     private readonly apiKeysService: ApiKeysService,
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
   /**
@@ -73,8 +76,11 @@ export class AdminPlatformService {
       });
     }
 
-    // 2. Slugify with collision resolution.
-    const workspaceId = await this.findFreeWorkspaceId(dto.name);
+    // 2. Resolve workspace_id: explicit (D2 migration adopting a legacy id)
+    //    or slugified from name with collision resolution (default flow).
+    const workspaceId = dto.workspace_id
+      ? await this.useExplicitWorkspaceId(dto.workspace_id)
+      : await this.findFreeWorkspaceId(dto.name);
 
     // 3. Create owner user.
     const randomPassword = randomBytes(24).toString('base64url');
@@ -201,6 +207,25 @@ export class AdminPlatformService {
     };
   }
 
+  /**
+   * Run an analytics query on behalf of the platform (M2M).
+   *
+   * The normal `POST /api/analytics.query` is gated by `WorkspaceAuthGuard`
+   * (workspace-scoped API key OR member JWT). The bridge has neither — it
+   * used to authenticate with a hidden super_admin login (`getAdminToken`).
+   * This M2M path lets the bridge read any workspace's analytics behind the
+   * single shared `PLATFORM_ADMIN_API_KEY` (PlatformAdminGuard) instead.
+   *
+   * We delegate straight to `AnalyticsService.query()`: it owns metric/table
+   * validation, workspace existence check and caching. No auth logic here —
+   * that is the guard's job. The DTO is the canonical native
+   * `AnalyticsQueryDto` (preset date ranges, per-table metrics) — callers
+   * must speak the native contract, not the legacy Staminads `{type}` shape.
+   */
+  async analyticsQuery(dto: AnalyticsQueryDto) {
+    return this.analyticsService.query(dto);
+  }
+
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
@@ -246,6 +271,29 @@ export class AdminPlatformService {
     throw new InternalServerErrorException(
       `Could not find a free workspace_id slug for "${name}" after ${MAX_SLUG_COLLISION_ATTEMPTS} attempts`,
     );
+  }
+
+  /**
+   * Validate + reserve an explicit workspace_id (D2 migration path). The id
+   * must match the same regex `CreateWorkspaceDto` enforces (`^[a-z][a-z0-9_]*$`,
+   * 2..50) and must not already exist (→ 409, the caller adopts an id, not
+   * overwrites a live workspace).
+   */
+  private async useExplicitWorkspaceId(id: string): Promise<string> {
+    if (!/^[a-z][a-z0-9_]*$/.test(id) || id.length < 2 || id.length > 50) {
+      throw new ConflictException({
+        error: 'invalid_workspace_id',
+        message:
+          'Explicit workspace_id must match ^[a-z][a-z0-9_]*$ and be 2..50 chars.',
+      });
+    }
+    if (await this.workspaceExists(id)) {
+      throw new ConflictException({
+        error: 'workspace_already_exists',
+        message: `Workspace ${id} already exists.`,
+      });
+    }
+    return id;
   }
 
   private async workspaceExists(id: string): Promise<boolean> {

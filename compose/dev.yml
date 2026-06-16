@@ -76,6 +76,9 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
       ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
       ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
+      # Secret M2M des endpoints /api/admin/platform/* (PlatformAdminGuard).
+      # MÊME valeur que le service `bridge` ci-dessous.
+      PLATFORM_ADMIN_API_KEY: ${PLATFORM_ADMIN_API_KEY:-dev-platform-admin-key-not-for-prod-000000}
       IS_DEMO: "false"
       # Hot reload : chokidar a besoin de polling dans Docker pour voir les
       # changements depuis un bind-mount sur certains systèmes de fichiers.
@@ -125,8 +128,9 @@ services:
       PORT: "3002"
       NODE_ENV: development
       STAMINADS_URL: http://engine:3000
-      STAMINADS_ADMIN_EMAIL: ${STAMINADS_ADMIN_EMAIL:-admin@veridian.site}
-      STAMINADS_ADMIN_PASSWORD: ${STAMINADS_ADMIN_PASSWORD:?STAMINADS_ADMIN_PASSWORD requis}
+      # Auth M2M bridge → Engine (remplace super_admin pwd, 2026-06-16).
+      # MÊME valeur que le service `engine` (PlatformAdminGuard).
+      PLATFORM_ADMIN_API_KEY: ${PLATFORM_ADMIN_API_KEY:-dev-platform-admin-key-not-for-prod-000000}
       VERIDIAN_ADMIN_API_KEY: ${VERIDIAN_ADMIN_API_KEY:?VERIDIAN_ADMIN_API_KEY requis}
       PUBLIC_STAMINADS_URL: https://analytics-engine-dev.staging.veridian.site
       PUBLIC_DASHBOARD_URL: https://analytics-engine-dev.staging.veridian.site

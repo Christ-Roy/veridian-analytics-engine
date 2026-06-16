@@ -70,6 +70,19 @@ export class ProvisionTenantDto {
   name: string;
 
   /**
+   * OPTIONAL explicit workspace_id (e.g. legacy id adopted during the D2
+   * migration of existing clients). When provided, it is used verbatim
+   * instead of slugifying `name` — so a migrated workspace keeps its legacy
+   * id. Must match the workspace id regex `^[a-z][a-z0-9_]*$` (2..50). If a
+   * workspace already exists with this id → 409. When omitted, the id is
+   * slugified from `name` (default flow).
+   */
+  @IsOptional()
+  @IsString()
+  @Length(2, 50)
+  workspace_id?: string;
+
+  /**
    * IANA timezone (default: Europe/Paris if omitted).
    */
   @IsOptional()

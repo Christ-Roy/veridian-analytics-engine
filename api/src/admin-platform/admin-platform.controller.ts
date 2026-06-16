@@ -6,6 +6,7 @@ import { ProvisionTenantResponseDto } from './dto/provision-tenant-response.dto'
 import { ProvisionApiKeyDto } from './dto/provision-api-key.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
+import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
 
 /**
  * Platform-level (M2M) admin endpoints.
@@ -53,5 +54,15 @@ export class AdminPlatformController {
       name: dto.name,
       role: dto.role,
     });
+  }
+
+  @Post('analytics.query')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Run an analytics query for any workspace (M2M). Same contract as POST /api/analytics.query but gated by the platform admin key instead of a workspace-scoped key. Used by the bridge for tenant score/status/check-tracker.',
+  })
+  analyticsQuery(@Body() dto: AnalyticsQueryDto) {
+    return this.adminPlatformService.analyticsQuery(dto);
   }
 }

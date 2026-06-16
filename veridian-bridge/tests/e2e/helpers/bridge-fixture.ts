@@ -119,8 +119,7 @@ export async function bootBridgeWithStaminads(
   const app = createApp(
     {
       staminadsUrl,
-      adminEmail: "admin@veridian.local",
-      adminPassword: "test-pass-2026",
+      platformAdminApiKey: "veridian-test-platform-key-32-chars!!",
       veridianAdminApiKey: ADMIN_KEY,
       hub: {
         hmacSecret: TEST_SECRET,

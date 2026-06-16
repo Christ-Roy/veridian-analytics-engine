@@ -287,8 +287,7 @@ export async function bootBridgeWithRealDB(
   // 5. App de base + Hub HMAC.
   const app: Express = createApp({
     staminadsUrl: opts.staminadsUrl ?? "http://127.0.0.1:9",
-    adminEmail: "admin@veridian.local",
-    adminPassword: "integration-test-pass-2026",
+      platformAdminApiKey: "veridian-test-platform-key-32-chars!!",
     veridianAdminApiKey: TEST_ADMIN_KEY,
     hub: {
       hmacSecret: TEST_HMAC_SECRET,

@@ -59,6 +59,21 @@ export interface SiteStatus {
  */
 export type PageviewsFetcher = (workspaceId: string) => Promise<number>;
 
+/**
+ * Capacité minimale dont ce module a besoin du client Engine M2M : lancer
+ * une query analytics native. On dépend de cette interface étroite (pas du
+ * client complet) pour que les tests mockent juste `analyticsQuery`.
+ */
+export interface EngineAnalyticsQuerier {
+  analyticsQuery(input: {
+    workspace_id: string;
+    metrics: string[];
+    dimensions?: string[];
+    dateRange: { preset?: string; start?: string; end?: string };
+    table?: "sessions" | "goals";
+  }): Promise<{ data: Array<Record<string, unknown>> }>;
+}
+
 export interface TenantStatusDeps {
   fetchPageviews30d: PageviewsFetcher;
 }
@@ -114,45 +129,39 @@ export function createTenantStatusBuilder(
 }
 
 /**
- * Helper : construit un PageviewsFetcher qui interroge staminads via
- * /api/analytics.query. Utilisé par app.ts. Garde la logique HTTP isolée
- * pour pouvoir la mocker en test sans rejouer un faux serveur.
+ * Helper : construit un PageviewsFetcher qui interroge l'Engine via le client
+ * M2M natif (`/api/admin/platform/analytics.query`, Bearer
+ * PLATFORM_ADMIN_API_KEY). Utilisé par app.ts. Garde la logique isolée pour
+ * pouvoir la mocker en test sans rejouer un faux serveur.
  *
- * staminads renvoie soit `{ rows: [{ pageviews: number, ... }, ...] }` soit
- * un format avec dimensions (rows agrégées). Sans dimensions, la query
- * retourne UNE ligne avec la métrique globale. On somme par sécurité au cas
- * où plusieurs lignes seraient renvoyées (futur).
+ * Contrat natif (≠ legacy Staminads) :
+ *   - `dateRange.preset: "previous_30_days"` (PAS `{type:"last_30_days"}`)
+ *   - réponse `{ data: [...] }` (PAS `{ rows: [...] }`)
+ * Sans dimensions, la query retourne UNE ligne avec la métrique globale. On
+ * somme par sécurité au cas où plusieurs lignes seraient renvoyées.
  */
 export function makeStaminadsPageviewsFetcher(opts: {
-  staminadsUrl: string;
-  getAdminToken: () => Promise<string>;
+  engine: EngineAnalyticsQuerier;
 }): PageviewsFetcher {
   return async (workspaceId: string) => {
-    const token = await opts.getAdminToken();
-    const res = await fetch(`${opts.staminadsUrl}/api/analytics.query`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
+    let data: Array<Record<string, unknown>>;
+    try {
+      const res = await opts.engine.analyticsQuery({
         workspace_id: workspaceId,
         metrics: ["pageviews"],
         dimensions: [],
-        dateRange: { preset: "last_30_days" },
-      }),
-    });
-    if (!res.ok) {
+        dateRange: { preset: "previous_30_days" },
+        table: "sessions",
+      });
+      data = res.data ?? [];
+    } catch {
       // Workspace vide ou query refusée → on retourne 0 plutôt que de planter
       // l'endpoint tenant-status, c'est l'état d'un site qui n'a jamais ingéré.
       return 0;
     }
-    const body = (await res.json()) as {
-      rows?: Array<Record<string, unknown>>;
-    };
-    if (!body.rows || body.rows.length === 0) return 0;
+    if (data.length === 0) return 0;
     let total = 0;
-    for (const row of body.rows) {
+    for (const row of data) {
       const pv = row["pageviews"];
       if (typeof pv === "number") total += pv;
       else if (typeof pv === "string") total += Number(pv) || 0;
