@@ -5,6 +5,7 @@ import { Button, Spin, Alert } from 'antd'
 import { CheckCircleFilled, LoadingOutlined } from '@ant-design/icons'
 import { api } from '../../../../lib/api'
 import { CodeSnippet } from '../../../../components/setup/CodeSnippet'
+import { buildTrackerSnippet } from '../../../../veridian/snippet'
 
 export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/install-sdk')({
   component: InstallSDK
@@ -69,15 +70,12 @@ function InstallSDK() {
     navigate({ to: '/workspaces/$workspaceId', params: { workspaceId } })
   }
 
-  // Generate the SDK snippet with workspace_id pre-filled
-  const sdkSnippet = `<!-- Staminads -->
-<script>
-window.StaminadsConfig = {
-  workspace_id: '${workspaceId}',
-  endpoint: '${window.location.origin}'
-};
-</script>
-<script async src="${window.location.origin}/sdk/staminads_${__APP_VERSION__}.min.js"></script>`
+  // Snippet généré depuis la source unique (cf. veridian/snippet.ts) — pointe
+  // sur /sdk/v1/tracker.js (le seul chemin servi par le backend SdkController).
+  const sdkSnippet = buildTrackerSnippet({
+    workspaceId,
+    endpoint: window.location.origin,
+  })
 
   return (
     <div className="flex-1 p-6">

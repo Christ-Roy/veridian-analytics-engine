@@ -16,7 +16,13 @@ import {
 import { Card, CardContent } from '../ui/card';
 import { cn } from '../utils';
 import { fetchCheckTracker, BridgeApiError } from '../api';
+import { buildTrackerSnippet } from '../snippet';
 import '../theme.css';
+
+// Réexporté pour la compat des imports existants (`from '../welcome'`).
+// La génération du snippet vit désormais dans `../snippet` (source unique
+// partagée avec install-sdk.tsx + l'onglet SDK de settings.tsx).
+export { buildTrackerSnippet };
 
 /**
  * VeridianWelcomePage — onboarding wizard `/welcome` (ticket U4 / ex-C3).
@@ -72,30 +78,6 @@ const STEPS: Array<{ label: string; short: string }> = [
 const DEFAULT_POLL_MS = 5000;
 const DEFAULT_TIMEOUT_MS = 60000;
 const DEFAULT_REDIRECT_MS = 3000;
-
-/**
- * Construit le snippet `<script>` Veridian Analytics à coller dans le `<head>`.
- * Pointe vers l'endpoint public du tracker (analytics-engine) avec le
- * workspaceId pré-rempli. Le tracking visiteur est actif par défaut côté SDK.
- */
-export function buildTrackerSnippet(opts: {
-  workspaceId: string;
-  endpoint: string;
-}): string {
-  // On retire un éventuel slash final pour un endpoint propre.
-  const endpoint = opts.endpoint.replace(/\/+$/, '');
-  return `<!-- Veridian Analytics -->
-<script>
-  window.StaminadsConfig = {
-    workspace_id: ${JSON.stringify(opts.workspaceId)},
-    endpoint: ${JSON.stringify(endpoint)},
-    trackSPA: true,
-    trackScroll: true
-  };
-</script>
-<script async src="${endpoint}/sdk/staminads.min.js"></script>
-<!-- /Veridian Analytics -->`;
-}
 
 export function VeridianWelcomePage({
   workspaceId,

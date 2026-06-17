@@ -14,6 +14,7 @@ import { SmtpPage } from '../../../../pages/settings/smtp'
 import { ApiKeysPage } from '../../../../pages/settings/api-keys'
 import { VoIPSettingsPanel } from '../../../../veridian/settings-panels/voip-panel'
 import { SearchConsoleSettingsPanel } from '../../../../veridian/settings-panels/search-console-panel'
+import { buildTrackerSnippet } from '../../../../veridian/snippet'
 import { z } from 'zod'
 
 // Vision Veridian 2026-05-25 : pas de sous-route/onglet "Veridian" custom.
@@ -538,15 +539,12 @@ function Settings() {
     </div>
   )
 
-  // Generate the SDK snippet with workspace_id pre-filled and version for cache busting
-  const sdkSnippet = `<!-- Staminads -->
-<script>
-window.StaminadsConfig = {
-  workspace_id: '${workspaceId}',
-  endpoint: '${window.location.origin}'
-};
-</script>
-<script async src="${window.location.origin}/sdk/staminads_${__APP_VERSION__}.min.js"></script>`
+  // Snippet généré depuis la source unique (cf. veridian/snippet.ts) — pointe
+  // sur /sdk/v1/tracker.js (le seul chemin servi par le backend SdkController).
+  const sdkSnippet = buildTrackerSnippet({
+    workspaceId,
+    endpoint: window.location.origin,
+  })
 
   const sdkContent = (
     <div className="max-w-xl">

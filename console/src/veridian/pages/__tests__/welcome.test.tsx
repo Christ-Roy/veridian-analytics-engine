@@ -96,7 +96,19 @@ describe('buildTrackerSnippet', () => {
       endpoint: 'https://example.com/',
     });
     expect(snippet).not.toContain('example.com//');
-    expect(snippet).toContain('https://example.com/sdk/staminads.min.js');
+    expect(snippet).toContain('https://example.com/sdk/v1/tracker.js');
+  });
+
+  it('points the <script src> at the backend contract /sdk/v1/tracker.js', () => {
+    const snippet = buildTrackerSnippet({
+      workspaceId: 'ws1',
+      endpoint: ENDPOINT,
+    });
+    // Le backend (SdkController @Controller('sdk/v1')) ne sert QUE ce chemin.
+    expect(snippet).toContain(`${ENDPOINT}/sdk/v1/tracker.js`);
+    // Régression : ne plus jamais générer les anciennes URLs 404.
+    expect(snippet).not.toContain('staminads.min.js');
+    expect(snippet).not.toMatch(/staminads_[\d.]+\.min\.js/);
   });
 });
 
