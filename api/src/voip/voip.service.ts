@@ -5,7 +5,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { ZodError } from 'zod';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { generateId } from '../common/crypto';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
@@ -14,6 +13,7 @@ import {
   ClearCreds,
   ConnectionTestResult,
   VOIP_CREDENTIAL_KINDS,
+  VoipCredsValidationError,
   getProvider,
   kindToProvider,
 } from './voip.providers';
@@ -87,11 +87,11 @@ export class VoipService {
     try {
       parsed = provider.parse(rawCreds);
     } catch (err) {
-      if (err instanceof ZodError) {
+      if (err instanceof VoipCredsValidationError) {
         throw new BadRequestException({
           code: 'INVALID_CREDS',
           message: `Identifiants ${provider.label} invalides : ${err.issues
-            .map((i) => `${i.path.join('.') || 'creds'} ${i.message}`)
+            .map((i) => `${i.field || 'creds'} ${i.message}`)
             .join('; ')}`,
         });
       }

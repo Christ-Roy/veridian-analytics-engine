@@ -16,26 +16,27 @@ import { VoipService } from './voip.service';
 function makeClickhouseMock(): jest.Mocked<ClickHouseService> {
   const tables = new Map<string, Record<string, unknown>[]>();
 
-  function filter(
-    rows: Record<string, unknown>[],
+  // WHERE clause — applied AFTER the FINAL dedup (real ClickHouse semantics:
+  // ReplacingMergeTree collapses by ORDER BY key first, then the WHERE runs).
+  // Applying deleted_at IS NULL before dedup would let a soft-deleted row's
+  // older (non-tombstoned) version resurface — the bug this fix prevents.
+  function matchesWhere(
+    row: Record<string, unknown>,
     sql: string,
     params: Record<string, unknown>,
-  ) {
-    return rows.filter((row) => {
-      if (/deleted_at IS NULL/.test(sql) && row.deleted_at) return false;
-      if (
-        sql.includes('workspace_id = {workspace_id:String}') &&
-        row.workspace_id !== params.workspace_id
-      )
-        return false;
-      if (sql.includes('kind = {kind:String}') && row.kind !== params.kind)
-        return false;
-      if (sql.includes('id = {id:String}') && row.id !== params.id)
-        return false;
-      if (sql.includes('e164 = {e164:String}') && row.e164 !== params.e164)
-        return false;
-      return true;
-    });
+  ): boolean {
+    if (/deleted_at IS NULL/.test(sql) && row.deleted_at) return false;
+    if (
+      sql.includes('workspace_id = {workspace_id:String}') &&
+      row.workspace_id !== params.workspace_id
+    )
+      return false;
+    if (sql.includes('kind = {kind:String}') && row.kind !== params.kind)
+      return false;
+    if (sql.includes('id = {id:String}') && row.id !== params.id) return false;
+    if (sql.includes('e164 = {e164:String}') && row.e164 !== params.e164)
+      return false;
+    return true;
   }
 
   return {
@@ -44,16 +45,21 @@ function makeClickhouseMock(): jest.Mocked<ClickHouseService> {
         const match = sql.match(/FROM\s+(\w+)/i);
         if (!match) return [];
         const rows = tables.get(match[1]) ?? [];
-        const filtered = filter(rows, sql, params);
+        // 1) FINAL: collapse to the latest version per id. Insertion order is
+        //    the tie-breaker when updated_at is equal (last write wins), which
+        //    matches how the service re-inserts a tombstone after the original.
         const byId = new Map<string, Record<string, unknown>>();
-        for (const r of filtered) {
+        for (const r of rows) {
           const id = r.id as string;
           const cur = byId.get(id);
           if (!cur || (r.updated_at as string) >= (cur.updated_at as string)) {
             byId.set(id, r);
           }
         }
-        return Array.from(byId.values());
+        // 2) WHERE: filter the collapsed rows.
+        return Array.from(byId.values()).filter((r) =>
+          matchesWhere(r, sql, params),
+        );
       },
     ),
     insertSystem: jest.fn(async (table: string, values: unknown[]) => {

@@ -7,11 +7,8 @@ import {
   MaxLength,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import {
-  PHONE_NUMBER_SOURCES,
-  PhoneSource,
-  VoipCredentialKind,
-} from '../voip.types';
+import { PHONE_NUMBER_SOURCES } from '../voip.types';
+import type { PhoneSource, VoipCredentialKind } from '../voip.types';
 
 const KINDS: VoipCredentialKind[] = ['voip_ovh', 'voip_telnyx'];
 const SOURCES = PHONE_NUMBER_SOURCES as readonly string[];
