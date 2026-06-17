@@ -258,14 +258,26 @@ jobs:
             # Pre-pull le tag IMMUABLE exact (pas latest — sinon docker ne re-pull pas)
             docker pull ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_TAG}
             docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_TAG}
-            # 1. compose.update : pin ENGINE_IMAGE_TAG/BRIDGE_IMAGE_TAG (vrais noms attendus par base.yml)
-            #    sur le tag immuable de ce SHA. Sans ça, le compose garde latest mouvant = container figé.
-            ENV_BODY="ENGINE_IMAGE_TAG=${ENGINE_TAG}\nBRIDGE_IMAGE_TAG=${BRIDGE_TAG}"
+            # 1. compose.update : pin ENGINE_IMAGE_TAG/BRIDGE_IMAGE_TAG (vrais noms attendus par base.yml).
+            #
+            # ⚠️ MERGE, PAS REPLACE : Dokploy compose.update {env} REMPLACE l'env entier.
+            #    Envoyer seulement les 2 tags EFFACE les 21 autres vars (CLICKHOUSE_PASSWORD,
+            #    VERIDIAN_ADMIN_API_KEY...) → `compose up` fail-closed sur ${VAR:?}, container figé
+            #    sur l'ancienne image (incident vécu 2026-06-17, promo bafe9d9). Donc : fetch l'env
+            #    COURANT, remplace SEULEMENT les 2 lignes de tag, renvoie le TOUT.
+            CUR_ENV=$(curl -sf -H "x-api-key: $DKEY" \
+              "http://localhost:3000/api/trpc/compose.one?input=$(python3 -c "import urllib.parse,json;print(urllib.parse.quote(json.dumps({'json':{'composeId':'${DOKPLOY_COMPOSE_ID}'}})))")" \
+              | python3 -c "import sys,json;print(json.load(sys.stdin)['result']['data']['json'].get('env') or '')")
+            echo "$CUR_ENV" | grep -q '^VERIDIAN_ADMIN_API_KEY=' || { echo "::error::env Dokploy courant vide/incomplet — abandon (ne pas écraser)"; exit 1; }
+            NEW_ENV=$(printf '%s\n' "$CUR_ENV" \
+              | grep -vE '^(ENGINE_IMAGE_TAG|BRIDGE_IMAGE_TAG)=' \
+              | { cat; printf 'ENGINE_IMAGE_TAG=%s\nBRIDGE_IMAGE_TAG=%s\n' "$ENGINE_TAG" "$BRIDGE_TAG"; })
+            ENV_JSON=$(python3 -c "import json,sys;print(json.dumps(sys.stdin.read()))" <<< "$NEW_ENV")
             curl -sf -X POST \
               -H "x-api-key: $DKEY" \
               -H "Content-Type: application/json" \
-              -d "{\"json\":{\"composeId\":\"${DOKPLOY_COMPOSE_ID}\",\"env\":\"${ENV_BODY}\"}}" \
-              http://localhost:3000/api/trpc/compose.update && echo "tag pinned: ${ENGINE_TAG}"
+              -d "{\"json\":{\"composeId\":\"${DOKPLOY_COMPOSE_ID}\",\"env\":${ENV_JSON}}}" \
+              http://localhost:3000/api/trpc/compose.update && echo "tag pinned (env mergé, $(echo "$NEW_ENV" | grep -c =) vars): ${ENGINE_TAG}"
             # 2. compose.deploy : re-clone Git + up avec le nouvel ENGINE_IMAGE_TAG (auto-pull du tag pinné)
             curl -sf -X POST \
               -H "x-api-key: $DKEY" \
@@ -280,25 +292,30 @@ jobs:
         run: |
           # Vérifie l'ENGINE (pas le bridge) ET que la version déployée porte bien
           # le nouveau code — sinon "deploy success" est un faux positif (container figé
-          # sur l'ancienne image, cf incident promo prod 2026-06-14).
+          # sur l'ancienne image : incident 2026-06-14 ET 2026-06-17 où l'env Dokploy
+          # écrasé a empêché le recreate, prod restée sur l'ancienne version).
+          #
+          # Le check `provisionApiKey ≠404` ne suffit PAS : cet endpoint existe depuis
+          # le Lot B, donc il répond 200/401 même sur un VIEUX container → faux positif.
+          # On compare la VERSION /api/health (APP_VERSION) à celle du code qu'on déploie.
+          EXPECTED_VERSION=$(node -e "console.log(require('./api/src/version.ts'.replace('.ts',''))?.APP_VERSION || '')" 2>/dev/null || \
+            grep -oE "APP_VERSION = '[^']+'" api/src/version.ts | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          echo "Version attendue (code déployé): ${EXPECTED_VERSION:-?}"
           for i in $(seq 1 18); do
             BODY=$(curl -sf https://analytics-engine.app.veridian.site/api/health 2>/dev/null || echo "")
             if [ -n "$BODY" ]; then
-              echo "✓ engine prod healthy after $((i*10))s — $BODY"
-              # Smoke du nouveau endpoint déployé : provisionApiKey doit exister (≠404).
-              EP=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-                https://analytics-engine.app.veridian.site/api/admin/platform/workspaces.provisionApiKey \
-                -H "Content-Type: application/json" -d '{}' 2>/dev/null || echo "000")
-              if [ "$EP" = "404" ]; then
-                echo "::error::engine répond mais le NOUVEAU code n'est pas déployé (provisionApiKey=404 = image figée). Deploy non effectif."
-                exit 1
+              LIVE_VERSION=$(echo "$BODY" | python3 -c "import sys,json;print(json.load(sys.stdin).get('version',''))" 2>/dev/null || echo "")
+              echo "engine prod healthy after $((i*10))s — live version=$LIVE_VERSION (attendu=$EXPECTED_VERSION)"
+              if [ -n "$EXPECTED_VERSION" ] && [ "$LIVE_VERSION" != "$EXPECTED_VERSION" ]; then
+                echo "::warning::version prod ($LIVE_VERSION) ≠ attendue ($EXPECTED_VERSION) — container peut-être figé, on attend le recreate..."
+                sleep 10; continue
               fi
-              echo "✓ nouveau code déployé (provisionApiKey=$EP, ≠404)"
+              echo "✓ nouveau code déployé (version $LIVE_VERSION confirmée en prod)"
               exit 0
             fi
             sleep 10
           done
-          echo "::error::engine prod not healthy after 3min"
+          echo "::error::engine prod pas healthy OU version jamais alignée après 3min (container figé ? env Dokploy écrasé ?). Deploy non effectif."
           exit 1
 
       - name: Cleanup
