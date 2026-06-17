@@ -46,10 +46,13 @@ console Solid + ClickHouse).
 > locale qui le miroir) : `git fetch upstream && git merge upstream/main`
 > depuis `staging`.
 
-**Note 2026-05-21** : `prod-ci.yml` est câblé mais le compose Dokploy prod
-n'est pas encore créé (cf. §16 "Reste à câbler"). Le deploy-prod skip avec
-warning tant que `ANALYTICS_DOKPLOY_COMPOSE_ID` n'est pas set dans les vars
-GitHub Actions.
+**MAJ 2026-06-17** : le compose Dokploy prod analytics-engine **existe et
+tourne** (composeId `RH8yiQGFLxTzVXtrvlNmB`, name `analytics-engine-prod`,
+projet Docker `analytics-engine-prod-gkggyk`). Il a été **basculé de
+`sourceType=raw` → `sourceType=git`** (GitOps réel) : Dokploy clone le repo
+sur `main` et applique l'overlay via un `command` custom
+`docker compose -p analytics-engine-prod-gkggyk --env-file compose/.env -f
+compose/base.yml -f compose/prod.yml up -d --remove-orphans`. Cf. §3.4bis.
 
 ## §2. Husky hooks — qualité avant push
 
@@ -262,15 +265,41 @@ Promotion staging → main + deploy prod + smoke + rollback.
 | 1 | build prod (engine + bridge → :latest GHCR) | ✅ |
 | 1.b | trivy-bridge (bloquant) | ✅ |
 | 1.c | trivy-engine (warn-only) | ⚠ |
-| 2 | deploy-prod (Dokploy API redeploy) | ✅ |
+| 2 | deploy-prod (Dokploy API : compose.update tag + compose.deploy) | ✅ |
 | 3 | e2e-prod-smoke (Playwright sur URL prod) | ✅ |
 | 4 | rollback-prod (retag :rollback → :latest + redeploy) | conditional |
 
 **Tag `:rollback`** : posé automatiquement AVANT chaque deploy (`docker tag`
 sur l'image `:latest` actuelle). Permet le rollback instantané sans re-build.
 
-> ⚠️ Le compose Dokploy prod analytics-engine **n'existe pas encore** (cf. §16).
-> `deploy-prod` skip avec un warning si `ANALYTICS_DOKPLOY_COMPOSE_ID` absent.
+### §3.4bis Mode GitOps prod (compose Dokploy `sourceType=git`, depuis 2026-06-17)
+
+Le compose prod (`RH8yiQGFLxTzVXtrvlNmB`) est en **GitOps réel** : la source de
+vérité est le **repo** (`compose/base.yml` + `compose/prod.yml`), plus l'UI
+Dokploy. Avant, il était en `sourceType=raw` (composeFile édité à la main dans
+l'UI) → tout commit compose était ignoré en prod, et chaque ENV/service ajouté
+devait être re-câblé manuellement (source de 2 incidents le 2026-06-17, cf.
+memory `project_bridge_m2m_native_lot_b`). Le `prod-ci.yml` croyait déjà faire du
+GitOps (`compose.deploy` "re-clone Git") — c'était faux sur un raw. Corrigé.
+
+Réglages Dokploy (via `compose.update`) :
+- `sourceType=git`, `customGitUrl=…/veridian-analytics-engine.git`, `customGitBranch=main`
+- `composePath=./compose/base.yml` — **fichier réel** (sinon Dokploy plante
+  "Compose file not found" à `writeDomainsToCompose`) ; sert aussi d'ancre où
+  Dokploy écrit le `.env` (= `code/compose/.env`).
+- `command` custom (overlay multi-fichiers) :
+  `compose -p analytics-engine-prod-gkggyk --env-file compose/.env -f compose/base.yml -f compose/prod.yml up -d --remove-orphans`
+  — Dokploy lance `docker <command>` depuis `code/` (CWD), d'où le `--env-file
+  compose/.env` explicite (le `.env` n'est PAS à la racine de `code/`).
+
+⚠️ **Volumes** : tout volume DOIT avoir un `name:` explicite dans `prod.yml`
+(sinon Docker le préfixe par le project name → volume VIERGE = perte de données).
+Bug latent corrigé sur `postgres-bridge-data` au passage GitOps (commit ec325c1).
+
+Le `prod-ci.yml` reste inchangé : il pin `ENGINE/BRIDGE_IMAGE_TAG` (compose.update)
+puis `compose.deploy` — qui maintenant re-clone réellement `main` et applique
+l'overlay. Pas de webhook GitHub push→Dokploy (vérifié : 0 hook) → `prod-ci.yml`
+est le **seul** déclencheur, pas de double-deploy malgré `autoDeploy=true`.
 
 ### §3.5 `security-cron.yml` (daily 03h UTC)
 

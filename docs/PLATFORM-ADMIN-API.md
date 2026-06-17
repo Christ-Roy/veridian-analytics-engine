@@ -251,7 +251,10 @@ Le snippet `<script>` est directement utilisable. Le Hub persiste
       `/api/admin/platform/tenants.provision` (Lot A — ticket croisé Hub).
 - [ ] **Côté skill `analytics-provision`** : idem, simplifier le flow.
 - [ ] **Côté Dokploy** : ajouter `PLATFORM_ADMIN_API_KEY` (même valeur) dans
-      le compose Engine `Ri8lnog40Jgxn5xWOhaQg` ET dans le compose bridge.
+      le compose Engine `RH8yiQGFLxTzVXtrvlNmB` (name `analytics-engine-prod`,
+      projet `analytics-engine-prod-gkggyk`) ET dans le compose bridge (même
+      compose). ⚠️ `Ri8lnog40Jgxn5xWOhaQg` = compose du **LEGACY** Next.js
+      (`analytics.app.veridian.site`), PAS l'engine — ne pas confondre.
       ⚠️ DÉPLOIEMENT : poser l'ENV AVANT de déployer le bridge migré, sinon
       `validateConfig` fail-closed le crashe au boot (cf [[feedback_env_wire_compose_same_commit]]).
 - [ ] **Côté bridge `phone-source-dim` agent** : confirmer l'endpoint exact (`POST /api/admin/tenant/:wsId/phone-numbers` assumé ici). Adapter si nécessaire.
