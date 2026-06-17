@@ -57,6 +57,8 @@ describe('AdminPlatformService.provisionTenant', () => {
           useValue: {
             create: jest.fn(),
             createForPlatform: jest.fn(),
+            revokeForPlatform: jest.fn(),
+            listForPlatform: jest.fn(),
           },
         },
         {
@@ -326,6 +328,78 @@ describe('AdminPlatformService.provisionTenant', () => {
         workspace_id: 'vrd_site_staging',
         name: 'Tunnel key',
         role: 'admin',
+      });
+    });
+  });
+
+  describe('revokeApiKey (M2M, existing workspace)', () => {
+    it('404 when the workspace does not exist', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // workspaceExists → false
+      await expect(
+        service.revokeApiKey({ workspace_id: 'ws_ghost', key_id: 'k1' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(apiKeysService.revokeForPlatform).not.toHaveBeenCalled();
+    });
+
+    it('delegates to revokeForPlatform and returns the revoked metadata', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'vrd_site_prod' }]); // exists
+      apiKeysService.revokeForPlatform.mockResolvedValue({
+        id: 'apikey-9',
+        key_prefix: 'stam_live_dead12',
+        workspace_id: 'vrd_site_prod',
+        status: 'revoked',
+        revoked_at: '2026-06-17 10:00:00',
+      } as never);
+
+      const result = await service.revokeApiKey({
+        workspace_id: 'vrd_site_prod',
+        key_prefix: 'stam_live_dead12',
+      });
+
+      expect(apiKeysService.revokeForPlatform).toHaveBeenCalledWith({
+        workspace_id: 'vrd_site_prod',
+        key_id: undefined,
+        key_prefix: 'stam_live_dead12',
+      });
+      expect(result).toEqual({
+        workspace_id: 'vrd_site_prod',
+        key_id: 'apikey-9',
+        key_prefix: 'stam_live_dead12',
+        status: 'revoked',
+        revoked_at: '2026-06-17 10:00:00',
+      });
+    });
+  });
+
+  describe('listApiKeys (M2M, existing workspace)', () => {
+    it('404 when the workspace does not exist', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // workspaceExists → false
+      await expect(
+        service.listApiKeys({ workspace_id: 'ws_ghost' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(apiKeysService.listForPlatform).not.toHaveBeenCalled();
+    });
+
+    it('returns the workspace keys (metadata only)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'vrd_site_prod' }]); // exists
+      apiKeysService.listForPlatform.mockResolvedValue([
+        { id: 'apikey-1', key_prefix: 'stam_live_aaa', status: 'active' },
+      ] as never);
+
+      const result = await service.listApiKeys({
+        workspace_id: 'vrd_site_prod',
+        status: 'active',
+      });
+
+      expect(apiKeysService.listForPlatform).toHaveBeenCalledWith(
+        'vrd_site_prod',
+        'active',
+      );
+      expect(result).toEqual({
+        workspace_id: 'vrd_site_prod',
+        api_keys: [
+          { id: 'apikey-1', key_prefix: 'stam_live_aaa', status: 'active' },
+        ],
       });
     });
   });

@@ -296,6 +296,161 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     });
   });
 
+  describe('POST /api/admin/platform/workspaces.revokeApiKey + listApiKeys', () => {
+    it('returns 401 without a Bearer token', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .send({ workspace_id: 'whatever', key_id: 'k1' })
+        .expect(401);
+    });
+
+    it('returns 400 when neither key_id nor key_prefix is provided', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: 'ws_x' })
+        .expect(400);
+    });
+
+    it('returns 404 for an unknown workspace', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: 'ws_does_not_exist_xyz', key_id: 'k1' })
+        .expect(404);
+    });
+
+    it('full lifecycle: provision key → works → revoke → rejected → listed as revoked', async () => {
+      // 1. Provision a real tenant + workspace.
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Revoke Lifecycle Co',
+          email: `revoke-life-${Date.now()}@test.com`,
+          siteUrl: 'https://revoke.test',
+        })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      // 2. Provision a fresh workspace-scoped key via the M2M endpoint.
+      const provisioned = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.provisionApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId, name: 'Lifecycle key' })
+        .expect(201);
+      const apiKey: string = provisioned.body.api_key;
+      const keyPrefix: string = provisioned.body.key_prefix;
+      await waitForMutations(ctx.systemClient, 'api_keys');
+
+      // 3. The key WORKS on a workspace-scoped endpoint (active → 200).
+      await request(ctx.app.getHttpServer())
+        .get('/api/members.list')
+        .query({ workspace_id: wsId })
+        .set('Authorization', `Bearer ${apiKey}`)
+        .expect(200);
+
+      // 3b. listApiKeys (M2M) shows it active, never leaking the secret.
+      const beforeList = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.listApiKeys')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId })
+        .expect(200);
+      expect(beforeList.body.api_keys.length).toBeGreaterThanOrEqual(1);
+      const activeEntry = beforeList.body.api_keys.find(
+        (k: { key_prefix: string }) => k.key_prefix === keyPrefix,
+      );
+      expect(activeEntry).toBeDefined();
+      expect(activeEntry.status).toBe('active');
+      expect(activeEntry).not.toHaveProperty('key_hash');
+
+      // 4. Revoke it by key_prefix (the only handle the caller kept).
+      const revoked = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId, key_prefix: keyPrefix })
+        .expect(200);
+      expect(revoked.body.status).toBe('revoked');
+      expect(revoked.body.key_prefix).toBe(keyPrefix);
+      await waitForMutations(ctx.systemClient, 'api_keys');
+
+      // 5. The SAME key is now REFUSED (revoked → 401). This is the whole
+      //    point of the ticket: a revoked key must stop authenticating.
+      await request(ctx.app.getHttpServer())
+        .get('/api/members.list')
+        .query({ workspace_id: wsId })
+        .set('Authorization', `Bearer ${apiKey}`)
+        .expect(401);
+
+      // 6. listApiKeys now reports it as revoked.
+      const afterList = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.listApiKeys')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId, status: 'revoked' })
+        .expect(200);
+      const revokedEntry = afterList.body.api_keys.find(
+        (k: { key_prefix: string }) => k.key_prefix === keyPrefix,
+      );
+      expect(revokedEntry).toBeDefined();
+      expect(revokedEntry.status).toBe('revoked');
+
+      // 7. Re-revoking is idempotent (retry-safe, still 200).
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId, key_prefix: keyPrefix })
+        .expect(200);
+    });
+
+    it('does not revoke a key belonging to another workspace (404)', async () => {
+      // Workspace A with a key.
+      const tenantA = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Cross WS A',
+          email: `cross-a-${Date.now()}@test.com`,
+          siteUrl: 'https://a.test',
+        })
+        .expect(201);
+      const wsA = tenantA.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+      const keyA = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.provisionApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsA })
+        .expect(201);
+      await waitForMutations(ctx.systemClient, 'api_keys');
+
+      // Workspace B tries to revoke A's key by prefix → not found in B.
+      const tenantB = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Cross WS B',
+          email: `cross-b-${Date.now()}@test.com`,
+          siteUrl: 'https://b.test',
+        })
+        .expect(201);
+      const wsB = tenantB.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.revokeApiKey')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsB, key_prefix: keyA.body.key_prefix })
+        .expect(404);
+
+      // A's key still works (was never touched).
+      await request(ctx.app.getHttpServer())
+        .get('/api/members.list')
+        .query({ workspace_id: wsA })
+        .set('Authorization', `Bearer ${keyA.body.api_key}`)
+        .expect(200);
+    });
+  });
+
   describe('tenants.provision with explicit workspace_id (D2 migration)', () => {
     it('adopts the explicit workspace_id verbatim', async () => {
       const explicitId = `legacy_${Date.now().toString(36)}`;

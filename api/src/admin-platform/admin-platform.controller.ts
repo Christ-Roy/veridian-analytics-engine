@@ -4,6 +4,8 @@ import { AdminPlatformService } from './admin-platform.service';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { ProvisionTenantResponseDto } from './dto/provision-tenant-response.dto';
 import { ProvisionApiKeyDto } from './dto/provision-api-key.dto';
+import { RevokeApiKeyDto } from './dto/revoke-api-key.dto';
+import { ListWorkspaceApiKeysDto } from './dto/list-api-keys.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
@@ -53,6 +55,33 @@ export class AdminPlatformController {
       workspace_id: dto.workspace_id,
       name: dto.name,
       role: dto.role,
+    });
+  }
+
+  @Post('workspaces.revokeApiKey')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Revoke a workspace-scoped API key for a platform-managed workspace (no members). Identify by key_id OR key_prefix. M2M only. Symmetric of provisionApiKey.',
+  })
+  revokeApiKey(@Body() dto: RevokeApiKeyDto) {
+    return this.adminPlatformService.revokeApiKey({
+      workspace_id: dto.workspace_id,
+      key_id: dto.key_id,
+      key_prefix: dto.key_prefix,
+    });
+  }
+
+  @Post('workspaces.listApiKeys')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'List the API keys (metadata only, never the secret) of a platform-managed workspace for audit. M2M only.',
+  })
+  listApiKeys(@Body() dto: ListWorkspaceApiKeysDto) {
+    return this.adminPlatformService.listApiKeys({
+      workspace_id: dto.workspace_id,
+      status: dto.status,
     });
   }
 

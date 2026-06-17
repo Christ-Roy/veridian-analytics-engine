@@ -1,5 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { NotFoundException, ForbiddenException } from '@nestjs/common';
+import {
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { ApiKeysService } from './api-keys.service';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { MembersService } from '../members/members.service';
@@ -776,6 +781,150 @@ describe('ApiKeysService', () => {
       const result = await service.revoke(dto);
 
       expect(result).not.toHaveProperty('key_hash');
+    });
+  });
+
+  describe('revokeForPlatform (M2M, no membership)', () => {
+    it('revokes by key_id scoped to workspace', async () => {
+      clickhouse.querySystem.mockResolvedValue([mockApiKeyRow]);
+      clickhouse.commandSystem.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+      const getMembership = jest.spyOn(membersService, 'getMembership');
+
+      const result = await service.revokeForPlatform({
+        workspace_id: 'ws-001',
+        key_id: 'key-test-001',
+      });
+
+      expect(result.status).toBe('revoked');
+      expect(result.revoked_by).toBe('platform-admin');
+      expect(result.revoked_at).toBeDefined();
+      expect(result).not.toHaveProperty('key_hash');
+      // No membership lookup — that is the whole point of the M2M path.
+      expect(getMembership).not.toHaveBeenCalled();
+      // Resolution query is scoped to the workspace.
+      expect(clickhouse.querySystem).toHaveBeenCalledWith(
+        expect.stringContaining('workspace_id = {workspace_id:String}'),
+        expect.objectContaining({ workspace_id: 'ws-001', id: 'key-test-001' }),
+      );
+      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
+        expect.stringContaining("DELETE WHERE id = 'key-test-001'"),
+      );
+    });
+
+    it('revokes by key_prefix when key_id is absent', async () => {
+      clickhouse.querySystem.mockResolvedValue([mockApiKeyRow]);
+      clickhouse.commandSystem.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+
+      const result = await service.revokeForPlatform({
+        workspace_id: 'ws-001',
+        key_prefix: 'stam_live_abc1234',
+      });
+
+      expect(result.status).toBe('revoked');
+      expect(clickhouse.querySystem).toHaveBeenCalledWith(
+        expect.stringContaining('key_prefix = {key_prefix:String}'),
+        expect.objectContaining({
+          workspace_id: 'ws-001',
+          key_prefix: 'stam_live_abc1234',
+        }),
+      );
+    });
+
+    it('throws BadRequest when neither key_id nor key_prefix given', async () => {
+      await expect(
+        service.revokeForPlatform({ workspace_id: 'ws-001' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(clickhouse.querySystem).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFound when key absent in that workspace', async () => {
+      clickhouse.querySystem.mockResolvedValue([]);
+
+      await expect(
+        service.revokeForPlatform({
+          workspace_id: 'ws-001',
+          key_id: 'key-ghost',
+        }),
+      ).rejects.toThrow(NotFoundException);
+      // Never deletes when nothing resolved.
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+    });
+
+    it('does NOT revoke a key belonging to another workspace', async () => {
+      // Resolution query filters by workspace_id, so a foreign key yields
+      // no rows even if the id is correct → NotFound (no cross-ws revoke).
+      clickhouse.querySystem.mockResolvedValue([]);
+
+      await expect(
+        service.revokeForPlatform({
+          workspace_id: 'ws-attacker',
+          key_id: 'key-test-001', // belongs to ws-001
+        }),
+      ).rejects.toThrow(NotFoundException);
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+    });
+
+    it('refuses ambiguous prefix matching multiple keys', async () => {
+      clickhouse.querySystem.mockResolvedValue([
+        mockApiKeyRow,
+        { ...mockApiKeyRow, id: 'key-test-002' },
+      ]);
+
+      await expect(
+        service.revokeForPlatform({
+          workspace_id: 'ws-001',
+          key_prefix: 'stam_live_abc1234',
+        }),
+      ).rejects.toThrow(ConflictException);
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+    });
+
+    it('is idempotent: revoking an already-revoked key is a no-op success', async () => {
+      const revokedRow = {
+        ...mockApiKeyRow,
+        status: 'revoked',
+        revoked_by: 'platform-admin',
+        revoked_at: '2026-06-14 12:00:00',
+      };
+      clickhouse.querySystem.mockResolvedValue([revokedRow]);
+
+      const result = await service.revokeForPlatform({
+        workspace_id: 'ws-001',
+        key_id: 'key-test-001',
+      });
+
+      expect(result.status).toBe('revoked');
+      // No DB write on the second revoke — it returns the existing state.
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+      expect(clickhouse.insertSystem).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('listForPlatform (M2M)', () => {
+    it('lists keys pinned to the workspace', async () => {
+      clickhouse.querySystem.mockResolvedValue([mockApiKeyRow]);
+
+      const result = await service.listForPlatform('ws-001');
+
+      expect(result).toHaveLength(1);
+      expect(result[0]).not.toHaveProperty('key_hash');
+      expect(clickhouse.querySystem).toHaveBeenCalledWith(
+        expect.stringContaining('workspace_id = {workspace_id:String}'),
+        expect.objectContaining({ workspace_id: 'ws-001' }),
+      );
+    });
+
+    it('forwards an optional status filter', async () => {
+      clickhouse.querySystem.mockResolvedValue([]);
+
+      await service.listForPlatform('ws-001', 'revoked');
+
+      expect(clickhouse.querySystem).toHaveBeenCalledWith(
+        expect.stringContaining('status = {status:String}'),
+        expect.objectContaining({ workspace_id: 'ws-001', status: 'revoked' }),
+      );
     });
   });
 });

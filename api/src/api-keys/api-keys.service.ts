@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   ForbiddenException,
+  BadRequestException,
+  ConflictException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -15,6 +17,7 @@ import {
   ApiKey,
   PublicApiKey,
   ApiKeyRole,
+  ApiKeyStatus,
 } from '../common/entities/api-key.entity';
 import { generateId, generateApiKeyToken, hashToken } from '../common/crypto';
 import { hasPermission, ROLE_HIERARCHY } from '../common/permissions';
@@ -171,6 +174,127 @@ export class ApiKeysService {
     };
     await this.clickhouse.insertSystem('api_keys', [serializeApiKey(apiKey)]);
     return { key, apiKey: toPublicApiKey(apiKey) };
+  }
+
+  /**
+   * Revoke a workspace-scoped API key on behalf of the PLATFORM (M2M).
+   *
+   * The symmetric of createForPlatform: it is only ever reached behind
+   * PlatformAdminGuard, so there is NO membership / JWT check (a
+   * platform-managed workspace has no members — cf createForPlatform).
+   *
+   * The key is resolved by `id` OR by `key_prefix` (the prefix is the only
+   * stable handle the caller keeps — provisionApiKey returns `key_prefix`,
+   * never the internal `id`). In BOTH cases the resolved key MUST belong to
+   * the given workspace: a mismatch throws NotFound rather than silently
+   * revoking another workspace's key. This makes the operation auditable and
+   * prevents cross-workspace revocation by id-guessing even with the
+   * platform secret.
+   *
+   * Idempotent on an already-revoked key: re-revoking returns the existing
+   * revoked key unchanged (no error) so retries are safe.
+   */
+  async revokeForPlatform(params: {
+    workspace_id: string;
+    key_id?: string;
+    key_prefix?: string;
+  }): Promise<PublicApiKey> {
+    if (!params.key_id && !params.key_prefix) {
+      throw new BadRequestException(
+        'Either key_id or key_prefix must be provided to revoke a key.',
+      );
+    }
+
+    const apiKey = await this.resolveWorkspaceKey(params);
+
+    // Idempotent: a key already revoked is returned as-is.
+    if (apiKey.status === 'revoked') {
+      return toPublicApiKey(apiKey);
+    }
+
+    const now = toClickHouseDateTime();
+    const updated: ApiKey = {
+      ...apiKey,
+      status: 'revoked',
+      revoked_by: 'platform-admin',
+      revoked_at: now,
+      updated_at: now,
+    };
+
+    // Delete + re-insert (ClickHouse pattern, mirrors revoke()). `id` is a
+    // system-generated value (never raw caller input) so the literal
+    // interpolation is safe here.
+    await this.clickhouse.commandSystem(
+      `ALTER TABLE api_keys DELETE WHERE id = '${apiKey.id}'`,
+    );
+    await this.clickhouse.insertSystem('api_keys', [serializeApiKey(updated)]);
+
+    return toPublicApiKey(updated);
+  }
+
+  /**
+   * List the API keys of a workspace on behalf of the PLATFORM (M2M).
+   *
+   * Thin wrapper over list() pinned to a workspace, exposed for audit
+   * behind PlatformAdminGuard (the JWT-only apiKeys.list cannot be reached
+   * by a memberless platform-managed workspace).
+   */
+  async listForPlatform(
+    workspaceId: string,
+    status?: ApiKeyStatus,
+  ): Promise<PublicApiKey[]> {
+    return this.list({ workspace_id: workspaceId, status });
+  }
+
+  /**
+   * Resolve a single API key by (workspace_id + id) or (workspace_id +
+   * key_prefix), enforcing workspace ownership. Throws NotFound if the key
+   * does not exist or belongs to another workspace.
+   */
+  private async resolveWorkspaceKey(params: {
+    workspace_id: string;
+    key_id?: string;
+    key_prefix?: string;
+  }): Promise<ApiKey> {
+    const whereClauses = ['workspace_id = {workspace_id:String}'];
+    const queryParams: Record<string, unknown> = {
+      workspace_id: params.workspace_id,
+    };
+    if (params.key_id) {
+      whereClauses.push('id = {id:String}');
+      queryParams.id = params.key_id;
+    }
+    if (params.key_prefix) {
+      whereClauses.push('key_prefix = {key_prefix:String}');
+      queryParams.key_prefix = params.key_prefix;
+    }
+
+    const dedupCondition = `(id, updated_at) IN (
+      SELECT id, max(updated_at) FROM api_keys GROUP BY id
+    )`;
+
+    const rows = await this.clickhouse.querySystem<ApiKeyRow>(
+      `SELECT * FROM api_keys
+       WHERE ${whereClauses.join(' AND ')} AND ${dedupCondition}
+       ORDER BY created_at DESC`,
+      queryParams,
+    );
+
+    if (rows.length === 0) {
+      throw new NotFoundException(
+        params.key_id
+          ? `API key ${params.key_id} not found in workspace ${params.workspace_id}`
+          : `API key with prefix ${params.key_prefix} not found in workspace ${params.workspace_id}`,
+      );
+    }
+    if (rows.length > 1) {
+      // key_prefix is not guaranteed unique; refuse to guess which to revoke.
+      throw new ConflictException(
+        `Multiple API keys match prefix ${params.key_prefix} in workspace ${params.workspace_id}; revoke by key_id instead.`,
+      );
+    }
+
+    return parseApiKey(rows[0]);
   }
 
   async list(dto: ListApiKeysDto = {}): Promise<PublicApiKey[]> {

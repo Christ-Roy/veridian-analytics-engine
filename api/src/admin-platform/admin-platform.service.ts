@@ -208,6 +208,68 @@ export class AdminPlatformService {
   }
 
   /**
+   * Revoke a workspace-scoped API key for a platform-managed workspace (M2M).
+   * Symmetric of provisionApiKey. The key is identified by key_id OR
+   * key_prefix (the latter is the only handle provisionApiKey returns).
+   *
+   * Delegates the ownership check + revocation to
+   * ApiKeysService.revokeForPlatform (no @JwtOnly path) — a platform-managed
+   * workspace has no member, so the JWT-only apiKeys.revoke is unreachable.
+   * Idempotent: revoking an already-revoked key is a no-op success.
+   */
+  async revokeApiKey(params: {
+    workspace_id: string;
+    key_id?: string;
+    key_prefix?: string;
+  }): Promise<{
+    workspace_id: string;
+    key_id: string;
+    key_prefix: string;
+    status: string;
+    revoked_at: string | null;
+  }> {
+    if (!(await this.workspaceExists(params.workspace_id))) {
+      throw new NotFoundException({
+        error: 'workspace_not_found',
+        message: `Workspace ${params.workspace_id} does not exist.`,
+      });
+    }
+    const revoked = await this.apiKeysService.revokeForPlatform({
+      workspace_id: params.workspace_id,
+      key_id: params.key_id,
+      key_prefix: params.key_prefix,
+    });
+    return {
+      workspace_id: params.workspace_id,
+      key_id: revoked.id,
+      key_prefix: revoked.key_prefix,
+      status: revoked.status,
+      revoked_at: revoked.revoked_at,
+    };
+  }
+
+  /**
+   * List the API keys of a platform-managed workspace for audit (M2M).
+   * Returns public keys (no key_hash, no plaintext) — only metadata.
+   */
+  async listApiKeys(params: {
+    workspace_id: string;
+    status?: 'active' | 'revoked' | 'expired';
+  }) {
+    if (!(await this.workspaceExists(params.workspace_id))) {
+      throw new NotFoundException({
+        error: 'workspace_not_found',
+        message: `Workspace ${params.workspace_id} does not exist.`,
+      });
+    }
+    const keys = await this.apiKeysService.listForPlatform(
+      params.workspace_id,
+      params.status,
+    );
+    return { workspace_id: params.workspace_id, api_keys: keys };
+  }
+
+  /**
    * Run an analytics query on behalf of the platform (M2M).
    *
    * The normal `POST /api/analytics.query` is gated by `WorkspaceAuthGuard`
