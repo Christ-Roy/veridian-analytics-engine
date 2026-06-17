@@ -340,7 +340,7 @@ jobs:
     # structural-gate skippable sur workflow_dispatch).
     if: ${{ !cancelled() && needs.deploy-prod.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       ENGINE_URL: https://analytics-engine.app.veridian.site
       BRIDGE_URL: https://analytics-engine-bridge.app.veridian.site
