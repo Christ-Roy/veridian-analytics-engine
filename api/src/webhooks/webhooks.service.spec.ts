@@ -3,7 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { WebhookCrypto } from './webhook-crypto';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { WebhookTransformEngine } from './webhook-transform-engine';
 import { WebhooksService } from './webhooks.service';
 
@@ -95,7 +95,7 @@ describe('WebhooksService', () => {
         WebhooksService,
         { provide: ClickHouseService, useValue: clickhouse },
         { provide: WebhookCrypto, useValue: makeCryptoSpy() },
-        WebhookSsrfGuard,
+        SsrfGuard,
         WebhookTransformEngine,
         {
           provide: ConfigService,

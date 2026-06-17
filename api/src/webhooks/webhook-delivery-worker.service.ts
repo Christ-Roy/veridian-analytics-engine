@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { WebhooksService } from './webhooks.service';
 import { WebhookTransformEngine } from './webhook-transform-engine';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import {
   WebhookAuthType,
@@ -50,7 +50,7 @@ export class WebhookDeliveryWorker {
   constructor(
     private readonly webhooks: WebhooksService,
     private readonly transformEngine: WebhookTransformEngine,
-    private readonly ssrf: WebhookSsrfGuard,
+    private readonly ssrf: SsrfGuard,
     private readonly config: ConfigService,
     private readonly twenty: TwentyConnectorService,
   ) {}

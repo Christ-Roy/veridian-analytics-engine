@@ -69,5 +69,6 @@ byte-identical activity → Twenty-side dedup is deterministic.
 
 ## Anti-loop / SSRF
 
-The SSRF guard (`webhook-ssrf-guard.ts`) refuses a `url` pointing at the engine
-itself or at private/loopback addresses, on both create and delivery.
+The shared SSRF guard (`common/ssrf-guard.ts`, `SsrfGuard`) refuses a `url`
+pointing at the engine itself or at private/loopback addresses, on both create
+and delivery. The same guard protects the public `tools/` fetch endpoints.

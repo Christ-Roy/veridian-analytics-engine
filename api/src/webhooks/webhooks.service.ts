@@ -30,7 +30,7 @@ import {
   WebhookDelivery,
 } from './entities/webhook-delivery.entity';
 import { WebhookCrypto } from './webhook-crypto';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { WebhookTransformEngine } from './webhook-transform-engine';
 
 interface WebhookRow {
@@ -80,7 +80,7 @@ export class WebhooksService {
   constructor(
     private readonly clickhouse: ClickHouseService,
     private readonly crypto: WebhookCrypto,
-    private readonly ssrf: WebhookSsrfGuard,
+    private readonly ssrf: SsrfGuard,
     private readonly transformEngine: WebhookTransformEngine,
     private readonly config: ConfigService,
   ) {}

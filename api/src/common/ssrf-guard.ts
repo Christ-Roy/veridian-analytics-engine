@@ -1,23 +1,27 @@
 import { ForbiddenException, Injectable } from '@nestjs/common';
 
 /**
- * SSRF allowlist — cf PATTERNS-WEBHOOKS.md §9.
+ * Shared SSRF allowlist — cf PATTERNS-WEBHOOKS.md §9.
+ *
+ * Used by every module that performs an outbound `fetch` toward a
+ * caller-controlled URL: webhook delivery AND the public `tools/`
+ * endpoints (websiteMeta / favicon).
  *
  * Refuses (raises ForbiddenException with code FORBIDDEN_TARGET):
  * - localhost / loopback / `0.0.0.0`
  * - RFC1918 private ranges (10/8, 172.16/12, 192.168/16)
  * - Link-local 169.254/16 (cloud metadata!)
  * - IPv6 loopback / unique-local / link-local
- * - non-HTTPS scheme when WEBHOOK_ALLOW_HTTP != "true"
+ * - non-HTTPS scheme when allowHttp is not set (code INVALID_URL)
  * - URLs targeting the engine itself (anti-loop guard)
  *
  * V1 limitation (cf PATTERNS-WEBHOOKS.md §9): we check the hostname
- * literal at create/update/delivery time, NOT the resolved IP. DNS
- * rebinding (`evil.com → 127.0.0.1`) is therefore not blocked here.
- * Phase 2 will add DNS resolution + force-IP via custom http.Agent.
+ * literal at validation time, NOT the resolved IP. DNS rebinding
+ * (`evil.com → 127.0.0.1`) is therefore not blocked here. Phase 2 will
+ * add DNS resolution + force-IP via custom http.Agent.
  */
 @Injectable()
-export class WebhookSsrfGuard {
+export class SsrfGuard {
   /** Returns true if the literal hostname appears to be a private/loopback address. */
   static isPrivateHostname(hostname: string): boolean {
     const lower = hostname.toLowerCase().replace(/^\[/, '').replace(/\]$/, '');
@@ -56,11 +60,11 @@ export class WebhookSsrfGuard {
   }
 
   /**
-   * Assert that the URL is safe to call from the webhook worker.
+   * Assert that the URL is safe to call from an outbound fetch.
    * @param url - The destination URL
    * @param opts.allowHttp - Allow non-HTTPS schemes (staging/dev only). Defaults to false.
    * @param opts.allowPrivate - Permit RFC1918/loopback addresses (TEST ONLY). Defaults to false.
-   * @throws ForbiddenException with code FORBIDDEN_TARGET on rejection.
+   * @throws ForbiddenException with code FORBIDDEN_TARGET / INVALID_URL on rejection.
    */
   assertSafeUrl(
     url: string,
@@ -88,7 +92,7 @@ export class WebhookSsrfGuard {
       throw new ForbiddenException({
         code: 'INVALID_URL',
         message:
-          'http:// is not allowed in production. Use https:// or set WEBHOOK_ALLOW_HTTP=true on staging/dev.',
+          'http:// is not allowed in production. Use https:// or enable http on staging/dev.',
       });
     }
 
@@ -100,14 +104,14 @@ export class WebhookSsrfGuard {
       });
     }
 
-    if (!opts.allowPrivate && WebhookSsrfGuard.isPrivateHostname(hostname)) {
+    if (!opts.allowPrivate && SsrfGuard.isPrivateHostname(hostname)) {
       throw new ForbiddenException({
         code: 'FORBIDDEN_TARGET',
         message: `Hostname ${hostname} is a private / loopback address`,
       });
     }
 
-    if (WebhookSsrfGuard.isEngineSelfHostname(hostname)) {
+    if (SsrfGuard.isEngineSelfHostname(hostname)) {
       throw new ForbiddenException({
         code: 'FORBIDDEN_TARGET',
         message: `Hostname ${hostname} targets the engine itself (loop guard)`,

@@ -1,15 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { ConfigService } from '@nestjs/config';
 import type { Cache } from 'cache-manager';
 import * as cheerio from 'cheerio';
 import * as crypto from 'crypto';
 import sharp from 'sharp';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { FaviconResult } from './dto/favicon.dto';
 import { WebsiteMetaResponse } from './dto/website-meta.dto';
 
 const FAVICON_FETCH_TIMEOUT = 10_000; // 10 seconds
 const FAVICON_MAX_SIZE = 1_000_000; // 1MB
 const FAVICON_TARGET_SIZE = 32; // 32x32 px
+// Caller-controlled fetches follow at most this many redirects, re-checking
+// every hop against the SSRF guard (a public site could 302 to 169.254.x).
+const MAX_REDIRECTS = 5;
 const USER_AGENT =
   'Mozilla/5.0 (compatible; StaminadsBot/1.0; +https://staminads.com)';
 
@@ -23,14 +28,19 @@ type CheerioAPI = ReturnType<typeof cheerio.load>;
 
 @Injectable()
 export class ToolsService {
-  constructor(@Inject(CACHE_MANAGER) private cacheManager: Cache) {}
+  constructor(
+    @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private readonly ssrf: SsrfGuard,
+    private readonly config: ConfigService,
+  ) {}
 
   async getWebsiteMeta(url: string): Promise<WebsiteMetaResponse> {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent':
-          'Mozilla/5.0 (compatible; StaminadsBot/1.0; +https://staminads.com)',
-      },
+    // SSRF guard: these endpoints are @Public(). Block private/loopback/metadata
+    // targets BEFORE any outbound fetch (cf common/ssrf-guard.ts).
+    this.ssrf.assertSafeUrl(url, { allowHttp: this.httpAllowed() });
+
+    const response = await this.safeFetch(url, {
+      headers: { 'User-Agent': USER_AGENT },
     });
 
     if (!response.ok) {
@@ -111,10 +121,10 @@ export class ToolsService {
     // 5. Default /favicon.ico
     const defaultFavicon = this.resolveUrl(baseUrl, '/favicon.ico');
     try {
-      const res = await fetch(defaultFavicon, { method: 'HEAD' });
+      const res = await this.safeFetch(defaultFavicon, { method: 'HEAD' });
       if (res.ok) return defaultFavicon;
     } catch {
-      // ignore
+      // ignore (includes SSRF rejection)
     }
 
     return undefined;
@@ -126,7 +136,7 @@ export class ToolsService {
   ): Promise<string | undefined> {
     try {
       const manifestUrl = this.resolveUrl(baseUrl, manifestHref);
-      const res = await fetch(manifestUrl);
+      const res = await this.safeFetch(manifestUrl);
       if (!res.ok) return undefined;
 
       const manifest = (await res.json()) as {
@@ -173,11 +183,13 @@ export class ToolsService {
   // ============================================
 
   async getFavicon(urlString: string): Promise<FaviconResult> {
-    // Validate URL
+    // Validate URL + SSRF guard. @Public() endpoint: reject private/loopback/
+    // metadata targets BEFORE any fetch (cf common/ssrf-guard.ts).
     const parsedUrl = this.validateUrl(urlString);
     if (!parsedUrl) {
       return { buffer: FALLBACK_IMAGE, contentType: 'image/png' };
     }
+    this.ssrf.assertSafeUrl(urlString, { allowHttp: this.httpAllowed() });
 
     // Check cache
     const cacheKey = this.createFaviconCacheKey(urlString);
@@ -270,7 +282,7 @@ export class ToolsService {
         FAVICON_FETCH_TIMEOUT,
       );
 
-      const response = await fetch(pageUrl.toString(), {
+      const response = await this.safeFetch(pageUrl.toString(), {
         headers: { 'User-Agent': USER_AGENT },
         signal: controller.signal,
       });
@@ -295,8 +307,9 @@ export class ToolsService {
     const timeout = setTimeout(() => controller.abort(), FAVICON_FETCH_TIMEOUT);
 
     try {
-      const response = await fetch(url.toString(), {
-        redirect: 'follow',
+      // redirect: 'manual' + manual follow so every hop is re-checked by the
+      // SSRF guard — a public favicon URL could 302 to 169.254.169.254.
+      const response = await this.fetchFollowingRedirects(url.toString(), {
         signal: controller.signal,
         headers: {
           'User-Agent': USER_AGENT,
@@ -394,5 +407,56 @@ export class ToolsService {
         processedContentType: 'image/png',
       };
     }
+  }
+
+  // ============================================
+  // SSRF-safe fetch helpers
+  // ============================================
+
+  /** http:// tolerated for tools by default (client sites may not be TLS yet). */
+  private httpAllowed(): boolean {
+    return this.config.get<string>('TOOLS_ALLOW_HTTP') !== 'false';
+  }
+
+  /**
+   * Fetch a caller-influenced URL after re-asserting the SSRF guard, and
+   * forbid any silent redirect (`redirect: 'error'`). Used for non-image
+   * fetches (HTML page, manifest, HEAD probe) where following a redirect to a
+   * private target must NOT happen.
+   */
+  private async safeFetch(
+    url: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    this.ssrf.assertSafeUrl(url, { allowHttp: this.httpAllowed() });
+    return fetch(url, { ...init, redirect: 'error' });
+  }
+
+  /**
+   * Fetch with manual redirect following, re-validating every hop against the
+   * SSRF guard. A public favicon URL could 302 toward 169.254.169.254; with
+   * `redirect: 'follow'` that hop would be invisible, so we resolve hops
+   * ourselves and re-check each one. Caps at MAX_REDIRECTS.
+   */
+  private async fetchFollowingRedirects(
+    url: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    let current = url;
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      this.ssrf.assertSafeUrl(current, { allowHttp: this.httpAllowed() });
+      const response = await fetch(current, { ...init, redirect: 'manual' });
+
+      // Not a redirect → final response.
+      if (response.status < 300 || response.status >= 400) {
+        return response;
+      }
+
+      const location = response.headers.get('location');
+      if (!location) return response; // redirect without target → hand back as-is
+      // Resolve relative redirects against the current URL, then re-check next loop.
+      current = new URL(location, current).toString();
+    }
+    throw new Error(`Too many redirects (>${MAX_REDIRECTS})`);
   }
 }

@@ -4,7 +4,7 @@ import { MembersModule } from '../members/members.module';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
 import { WebhookCrypto } from './webhook-crypto';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { WebhookFilterEngine } from './webhook-filter-engine';
 import { WebhookTransformEngine } from './webhook-transform-engine';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
@@ -18,7 +18,7 @@ import { TwentyConnectorService } from './connectors/twenty-connector.service';
   providers: [
     WebhooksService,
     WebhookCrypto,
-    WebhookSsrfGuard,
+    SsrfGuard,
     WebhookFilterEngine,
     WebhookTransformEngine,
     WebhookDispatcherService,

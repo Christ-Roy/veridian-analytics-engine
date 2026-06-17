@@ -1,11 +1,11 @@
 import { ForbiddenException } from '@nestjs/common';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from './ssrf-guard';
 
-describe('WebhookSsrfGuard', () => {
-  let guard: WebhookSsrfGuard;
+describe('SsrfGuard', () => {
+  let guard: SsrfGuard;
 
   beforeEach(() => {
-    guard = new WebhookSsrfGuard();
+    guard = new SsrfGuard();
   });
 
   describe('isPrivateHostname', () => {
@@ -29,7 +29,7 @@ describe('WebhookSsrfGuard', () => {
       'fd00:1234::1',
       'fe80::1',
     ])('flags %s as private', (host) => {
-      expect(WebhookSsrfGuard.isPrivateHostname(host)).toBe(true);
+      expect(SsrfGuard.isPrivateHostname(host)).toBe(true);
     });
 
     it.each([
@@ -43,7 +43,7 @@ describe('WebhookSsrfGuard', () => {
       'crm.app.veridian.site',
       '2001:db8::1',
     ])('lets %s through', (host) => {
-      expect(WebhookSsrfGuard.isPrivateHostname(host)).toBe(false);
+      expect(SsrfGuard.isPrivateHostname(host)).toBe(false);
     });
   });
 
@@ -53,13 +53,13 @@ describe('WebhookSsrfGuard', () => {
       'analytics-engine.staging.veridian.site',
       'analytics-engine-bridge.app.veridian.site',
     ])('blocks %s (engine self)', (host) => {
-      expect(WebhookSsrfGuard.isEngineSelfHostname(host)).toBe(true);
+      expect(SsrfGuard.isEngineSelfHostname(host)).toBe(true);
     });
 
     it.each(['analytics.app.veridian.site', 'engine.veridian.site', 'foo.veridian.site'])(
       'lets %s through',
       (host) => {
-        expect(WebhookSsrfGuard.isEngineSelfHostname(host)).toBe(false);
+        expect(SsrfGuard.isEngineSelfHostname(host)).toBe(false);
       },
     );
   });

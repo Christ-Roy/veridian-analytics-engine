@@ -3,7 +3,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { WebhookDeliveryWorker } from './webhook-delivery-worker.service';
 import { WebhooksService } from './webhooks.service';
 import { WebhookTransformEngine } from './webhook-transform-engine';
-import { WebhookSsrfGuard } from './webhook-ssrf-guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { WebhookDefinition, DEFAULT_RETRY_CONFIG } from './entities/webhook-definition.entity';
 import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import { TwentyConnectorService } from './connectors/twenty-connector.service';
@@ -69,7 +69,7 @@ describe('WebhookDeliveryWorker', () => {
         WebhookDeliveryWorker,
         { provide: WebhooksService, useValue: webhooks },
         WebhookTransformEngine,
-        WebhookSsrfGuard,
+        SsrfGuard,
         TwentyEventMapper,
         TwentyConnectorService,
         {

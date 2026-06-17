@@ -1,5 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CACHE_MANAGER } from '@nestjs/cache-manager';
+import { ConfigService } from '@nestjs/config';
+import { ForbiddenException } from '@nestjs/common';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { ToolsService } from './tools.service';
 
 // Mock global fetch
@@ -60,9 +63,15 @@ describe('ToolsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ToolsService,
+        SsrfGuard,
         {
           provide: CACHE_MANAGER,
           useValue: mockCacheManager,
+        },
+        {
+          // TOOLS_ALLOW_HTTP unset → httpAllowed() defaults to true.
+          provide: ConfigService,
+          useValue: { get: () => undefined },
         },
       ],
     }).compile();
@@ -630,6 +639,85 @@ describe('ToolsService', () => {
       const result = await service.getWebsiteMeta('https://example.com');
 
       expect(result.logo_url).toBeUndefined();
+    });
+  });
+
+  // ─── SSRF guard on the public tools endpoints ───────────────────────
+  describe('SSRF protection', () => {
+    const PRIVATE_URLS = [
+      'http://127.0.0.1/',
+      'http://169.254.169.254/latest/meta-data/', // cloud metadata
+      'http://10.0.0.1/',
+      'http://192.168.1.1/',
+      'http://172.16.0.1/',
+      'http://localhost:8123/', // ClickHouse internal
+      'https://analytics-engine.app.veridian.site/api/track', // engine self
+    ];
+
+    describe('getWebsiteMeta', () => {
+      it.each(PRIVATE_URLS)('rejects %s without fetching', async (url) => {
+        await expect(service.getWebsiteMeta(url)).rejects.toThrow(
+          ForbiddenException,
+        );
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('lets a legitimate public https site through', async () => {
+        const html = '<html><head><title>OK</title></head></html>';
+        mockFetch.mockResolvedValue(createMockResponse(html));
+
+        const result = await service.getWebsiteMeta('https://example.com');
+
+        expect(result.title).toBe('OK');
+        expect(mockFetch).toHaveBeenCalled();
+      });
+    });
+
+    describe('getFavicon', () => {
+      it.each(PRIVATE_URLS)('rejects %s without fetching', async (url) => {
+        await expect(service.getFavicon(url)).rejects.toThrow(
+          ForbiddenException,
+        );
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('serves a favicon for a legitimate public https site', async () => {
+        const smallPng = Buffer.alloc(100);
+        mockFetch.mockResolvedValue(
+          createMockResponse(smallPng, { contentType: 'image/png' }),
+        );
+
+        const result = await service.getFavicon(
+          'https://example.com/favicon.png',
+        );
+
+        expect(result.contentType).toBe('image/png');
+        expect(mockFetch).toHaveBeenCalled();
+      });
+
+      it('blocks a redirect that hops to cloud metadata', async () => {
+        // First (and only) hop: 302 → 169.254.169.254, must be re-checked
+        // and rejected → fallback PNG, metadata never fetched.
+        mockFetch.mockResolvedValueOnce({
+          status: 302,
+          ok: false,
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'location'
+                ? 'http://169.254.169.254/latest/meta-data/'
+                : null,
+          },
+        });
+
+        const result = await service.getFavicon(
+          'https://example.com/favicon.png',
+        );
+
+        expect(result.contentType).toBe('image/png');
+        expect(result.buffer.length).toBe(FALLBACK_PNG_SIZE);
+        // Exactly one fetch (the initial hop); the metadata hop is blocked.
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
     });
   });
 });
