@@ -1098,6 +1098,37 @@
     Mock HTTP server réutilisable pour les e2e webhooks (port aléatoire,
     behavior configurable 200/4xx/5xx/timeout, log des reqs reçues).
 
+# ─── VOIP natif (todo/2026-06-16-port-natif-voip.md, option A) ─────────────
+
+- sources:
+    - api/src/voip/voip.controller.ts
+  covered_by:
+    - api/test/voip.e2e-spec.ts
+  reason: |
+    VoIP REST : CRUD credentials (chiffrés, jamais de clear-text) + CRUD
+    numéros trackés (E.164 normalisé, duplicate 409, source) + multi-tenant
+    + auth (401 sans token). Le sync réel OVH/Telnyx (réseau) n'est PAS
+    exercé en e2e — couvert en unitaire (voip-sync.service.spec) avec les
+    fetch providers mockés.
+
+- sources:
+    - api/src/voip/voip.providers.ts
+    - api/src/voip/voip.types.ts
+    - api/src/voip/phone-e164.ts
+    - api/src/voip/phone-call-event.ts
+    - api/src/voip/providers/ovh.ts
+    - api/src/voip/providers/telnyx.ts
+  covered_by:
+    - api/src/voip/phone-e164.spec.ts
+    - api/src/voip/phone-call-event.spec.ts
+    - api/src/voip/providers/providers-normalize.spec.ts
+    - api/src/voip/voip.service.spec.ts
+  reason: |
+    Logique pure portée du bridge : normalisation E.164, normalisation CDR
+    OVH/Telnyx, registry providers (mask + parse), construction de l'event
+    goal phone_call. Testée en unitaire (pas de réseau). Le masquage et le
+    parse sont aussi exercés via voip.service.spec (save → list masqué).
+
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #
 # - Quand on ajoute un patch Veridian (cf PATCHES.md), il DOIT venir avec :

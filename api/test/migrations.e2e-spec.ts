@@ -31,6 +31,7 @@ jest.mock('../src/migrations/migrations.registry', () => ({
 
 // Import after mocks are set up
 import { MigrationsRunner } from '../src/migrations/migrations.service';
+import { V8VoipMigration } from '../src/migrations/v8-voip-migration';
 
 describe('Migrations E2E', () => {
   let systemClient: ClickHouseClient;
@@ -263,6 +264,61 @@ describe('Migrations E2E', () => {
 
       expect(rows).toHaveLength(1);
       expect(rows[0].value).toBe('migration_test_value');
+    });
+  });
+
+  describe('V8 VoIP Migration', () => {
+    // The real V8 migration is additive (system-only): it creates the
+    // voip_credentials + tenant_phone_numbers tables. We run its actual
+    // migrateSystem against the test system DB and assert both tables exist
+    // with the expected columns. CREATE TABLE IF NOT EXISTS = idempotent.
+    it('creates voip_credentials and tenant_phone_numbers tables', async () => {
+      expect(V8VoipMigration.majorVersion).toBe(8);
+      expect(V8VoipMigration.hasSystemMigration()).toBe(true);
+      expect(V8VoipMigration.hasWorkspaceMigration()).toBe(false);
+
+      await V8VoipMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+      await waitForClickHouse();
+
+      const tables = await systemClient.query({
+        query: `SELECT name FROM system.tables
+                WHERE database = {db:String}
+                  AND name IN ('voip_credentials', 'tenant_phone_numbers')
+                ORDER BY name`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      const names = (await tables.json<{ name: string }>()).map((r) => r.name);
+      expect(names).toEqual(['tenant_phone_numbers', 'voip_credentials']);
+
+      const cols = await systemClient.query({
+        query: `SELECT name FROM system.columns
+                WHERE database = {db:String} AND table = 'voip_credentials'`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      const colNames = (await cols.json<{ name: string }>()).map((r) => r.name);
+      expect(colNames).toEqual(
+        expect.arrayContaining([
+          'id',
+          'workspace_id',
+          'kind',
+          'creds_encrypted',
+          'status',
+          'last_sync_at',
+          'deleted_at',
+        ]),
+      );
+    });
+
+    it('is idempotent (running twice does not throw)', async () => {
+      await V8VoipMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+      await V8VoipMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+      await waitForClickHouse();
+      // No-op workspace migration must resolve without error.
+      await expect(
+        V8VoipMigration.migrateWorkspace(systemClient, TEST_SYSTEM_DATABASE),
+      ).resolves.toBeUndefined();
     });
   });
 

@@ -75,6 +75,15 @@ services:
       # donc provisionApiKey / tenants.provision répondent "not configured".
       # Requis dès qu'on déploie l'admin platform (cf api/src/admin-platform).
       PLATFORM_ADMIN_API_KEY: ${PLATFORM_ADMIN_API_KEY:?PLATFORM_ADMIN_API_KEY requis (M2M admin platform)}
+      # ─── VoIP natif (port du bridge VoIP, cf voip/) ───────────────────────
+      # Chiffrement des creds VoIP (AES-256-GCM clé-par-workspace). Optionnel :
+      # si vide, VoipCrypto retombe sur ENCRYPTION_KEY (ci-dessus). Définir
+      # uniquement pour faire tourner une clé VoIP indépendante.
+      VOIP_ENCRYPTION_KEY: ${VOIP_ENCRYPTION_KEY:-}
+      # Active le cron de synchro VoIP (@Cron toutes les 15 min). Off par
+      # défaut (fail-soft) : tant qu'aucun client n'a branché OVH/Telnyx, on
+      # ne pull rien. Passer à "true" une fois la téléphonie en prod.
+      VOIP_SYNC_ENABLED: ${VOIP_SYNC_ENABLED:-false}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/setup.status || exit 1"]
       interval: 15s

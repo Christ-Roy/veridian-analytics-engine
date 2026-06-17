@@ -244,6 +244,44 @@ export const SYSTEM_SCHEMAS: Record<string, string> = {
     ORDER BY (workspace_id, webhook_id, id)
     TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE
   `,
+
+  // VoIP connector (port natif du bridge VoIP, cf todo/2026-06-16-port-natif-voip.md).
+  // Credentials VoIP chiffrés par workspace (kind = voip_ovh | voip_telnyx).
+  // 1 cred par (workspace_id, kind). Le clear-text n'existe JAMAIS en DB :
+  // `creds_encrypted` est un blob AES-256-GCM clé-par-workspace (common/crypto).
+  voip_credentials: `
+    CREATE TABLE IF NOT EXISTS {database}.voip_credentials (
+      id String,
+      workspace_id String,
+      kind Enum8('voip_ovh' = 1, 'voip_telnyx' = 2),
+      creds_encrypted String,
+      status Enum8('untested' = 1, 'ok' = 2, 'failed' = 3) DEFAULT 'untested',
+      last_sync_at Nullable(DateTime64(3)),
+      last_tested_at Nullable(DateTime64(3)),
+      last_error String DEFAULT '',
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3),
+      deleted_at Nullable(DateTime64(3))
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY (workspace_id, kind)
+  `,
+
+  // Numéros trackés (1 numéro = 1 source de trafic, vision 2026-05-25).
+  // Le sync enrichit chaque event phone_call avec properties.source après
+  // lookup (workspace_id, e164). Unicité (workspace_id, e164) en service layer.
+  tenant_phone_numbers: `
+    CREATE TABLE IF NOT EXISTS {database}.tenant_phone_numbers (
+      id String,
+      workspace_id String,
+      e164 String,
+      source Enum8('seo' = 1, 'ads' = 2, 'direct' = 3, 'email' = 4, 'social' = 5, 'print' = 6, 'other' = 7) DEFAULT 'direct',
+      label String DEFAULT '',
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3),
+      deleted_at Nullable(DateTime64(3))
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY (workspace_id, e164)
+  `,
 };
 
 // Workspace schemas - stored in staminads_ws_{workspace_id} databases

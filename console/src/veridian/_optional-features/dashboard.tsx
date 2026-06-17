@@ -22,7 +22,9 @@ import {
 import { FormsTabStub } from './dashboard-tabs/forms-tab';
 import { GscTabStub } from './dashboard-tabs/gsc-tab';
 import { PushTabStub } from './dashboard-tabs/push-tab';
-import { CallsTab } from '../pages/dashboard-tabs/calls-tab';
+// Onglet "Appels" retiré : le code Calls custom (calls-tab) a été supprimé au
+// port natif VoIP (ticket 2026-06-16). Les appels vivent dans Live/Explore
+// natifs (events phone_call), plus dans un onglet dédié — cf voip-panel.tsx.
 import { useContext } from 'react';
 import { AuthContext } from '../../lib/AuthContext';
 import { VeridianDemoComingSoon } from './demo-coming-soon';
@@ -71,7 +73,7 @@ type ViewState =
   | { kind: 'error'; error: Error }
   | { kind: 'ready'; data: DashboardPayload };
 
-type ActiveTab = 'overview' | 'forms' | 'gsc' | 'push' | 'calls';
+type ActiveTab = 'overview' | 'forms' | 'gsc' | 'push';
 
 export function VeridianDashboardPage({
   workspaceId,
@@ -178,13 +180,6 @@ export function VeridianDashboardPage({
           />
         )}
 
-        {state.kind === 'ready' && activeTab === 'calls' && (
-          <CallsTab
-            workspaceId={workspaceId}
-            siteDomain={tenantDomain ?? `${workspaceId}.veridian.site`}
-          />
-        )}
-
         {state.kind === 'ready' && activeTab === 'push' && (
           <PushTabStub
             siteDomain={tenantDomain ?? `${workspaceId}.veridian.site`}
@@ -278,7 +273,6 @@ function TabsBar({
     { key: 'overview', label: 'Vue d’ensemble' },
     { key: 'forms', label: 'Formulaires', soon: true },
     { key: 'gsc', label: 'Search Console', soon: true },
-    { key: 'calls', label: 'Appels' },
     { key: 'push', label: 'Notifications', soon: true },
   ];
   return (

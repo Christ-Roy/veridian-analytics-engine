@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
-  Check,
   ChevronDown,
   ChevronRight,
   Hash,
@@ -18,29 +17,27 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { cn } from '../utils';
 import {
-  fetchTenantSettings,
+  fetchVoipSettings,
   saveCredential,
   testCredential,
   deleteCredential,
-  fetchCalls,
   fetchPhoneNumbers,
   createPhoneNumber,
   updatePhoneNumber,
   deletePhoneNumber,
-  BridgeApiError,
-  type TenantSettingsResponse,
-  type CredentialKind,
+  VoipApiError,
+  type VoipSettingsResponse,
+  type VoipCredentialKind as CredentialKind,
   type CredentialView,
-  type CallsResponse,
   type PhoneSource,
   type TrackedPhoneNumber,
-} from '../api';
+} from './voip-api';
 import '../theme.css';
 
 /**
  * Labels FR (vouvoiement) pour les 7 sources de trafic. La liste autorisée
- * est définie par l'enum Prisma `PhoneNumberSource` côté bridge — on garde
- * un fallback `direct` si une nouvelle valeur arrive non-mappée.
+ * est servie par l'engine (`allowedSources`) — on garde un fallback `direct`
+ * si une nouvelle valeur arrive non-mappée.
  */
 const SOURCE_LABELS: Record<PhoneSource, string> = {
   seo: 'SEO (référencement naturel)',
@@ -70,10 +67,15 @@ const SOURCE_BADGE_TONE: Record<PhoneSource, string> = {
  * `/calls` dédiée, les appels remontent comme événements `phone_call` dans
  * les vues natives staminads (Live, Explore, Goals).
  *
+ * Port natif (ticket 2026-06-16) : ce panel consomme les endpoints NATIFS de
+ * l'engine (`/api/voip.*`, auth session console), plus le bridge. Il ne gère
+ * que la CONFIG — connecter OVH/Telnyx, mapper numéros→sources, voir le statut
+ * de synchro — JAMAIS une liste d'appels (vision Robert 2026-05-23).
+ *
  * Sections :
  *   1. Choix opérateur (OVH / Telnyx) + formulaire credentials chiffrés (AES-256-GCM)
  *   2. Liste des credentials enregistrés (masqués) + bouton Tester / Supprimer
- *   3. Mini-récap : X appels syncés sur 30j + lien « Voir les appels dans Live »
+ *   3. Numéros trackés (1 numéro = 1 source de trafic) + lien vers Live/Explore
  *
  * Sécurité : la page n'affiche JAMAIS les credentials en clair — l'API ne
  * renvoie que des valeurs masquées (`••••1234`). La saisie d'un nouveau
@@ -122,7 +124,7 @@ const VOIP_PROVIDERS: Array<{
 type ViewState =
   | { kind: 'loading' }
   | { kind: 'error'; error: Error }
-  | { kind: 'ready'; data: TenantSettingsResponse };
+  | { kind: 'ready'; data: VoipSettingsResponse };
 
 export function VoIPSettingsPanel({ workspaceId }: VoIPSettingsPanelProps) {
   const [state, setState] = useState<ViewState>({ kind: 'loading' });
@@ -133,7 +135,7 @@ export function VoIPSettingsPanel({ workspaceId }: VoIPSettingsPanelProps) {
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setState({ kind: 'loading' });
-    fetchTenantSettings(workspaceId, { signal: ctrl.signal })
+    fetchVoipSettings(workspaceId, { signal: ctrl.signal })
       .then((data) => {
         if (!ctrl.signal.aborted) setState({ kind: 'ready', data });
       })
@@ -239,19 +241,17 @@ function VoipContent({
       {/* Sous-section "Numéros trackés" — 1 numéro = 1 source de trafic */}
       <TrackedNumbersSection workspaceId={workspaceId} />
 
-      {/* Mini-récap appels — visible seulement si au moins un cred OK */}
-      {hasConnectedCred && (
-        <CallsRecap workspaceId={workspaceId} />
-      )}
+      {/* Rappel : où voir les appels — dans les vues natives, pas ici */}
+      {hasConnectedCred && <CallsHint workspaceId={workspaceId} />}
     </>
   );
 }
 
 // ─── Numéros trackés (phone source dimension, 2026-05-25) ───────────────
 //
-// 1 numéro = 1 source de trafic. Le bridge enrichit chaque event `phone_call`
-// poussé vers staminads avec `properties.source` (SEO / Ads / direct / email
-// / social / print / other) après lookup `(tenantId, toNumber)`. Les appels
+// 1 numéro = 1 source de trafic. L'engine enrichit chaque event `phone_call`
+// poussé en interne avec `properties.source` (SEO / Ads / direct / email
+// / social / print / other) après lookup `(workspace, toNumber)`. Les appels
 // apparaissent dans Live/Explore/Goals staminads natifs, sans page custom.
 
 function TrackedNumbersSection({ workspaceId }: { workspaceId: string }) {
@@ -524,13 +524,13 @@ function PhoneNumberModal({
         }
         onSaved();
       } catch (err) {
-        if (err instanceof BridgeApiError) {
-          if (err.message === 'invalid_e164') {
+        if (err instanceof VoipApiError) {
+          if (err.code === 'invalid_e164') {
             setError(
               'Format de numéro invalide. Saisissez un numéro E.164, par exemple +33177123456.',
             );
-          } else if (err.message === 'already_exists') {
-            setError('Ce numéro est déjà enregistré pour ce tenant.');
+          } else if (err.code === 'already_exists') {
+            setError('Ce numéro est déjà enregistré pour ce workspace.');
           } else {
             setError(err.message);
           }
@@ -655,77 +655,26 @@ function PhoneNumberModal({
   );
 }
 
-// ─── Mini-récap appels syncés ─────────────────────────────────────────────
+// ─── Où voir les appels (vues natives, PAS de liste ici) ──────────────────
+//
+// Vision Robert 2026-05-23 : pas de page Calls, pas de liste d'appels dans
+// Settings. Les appels sont des events `phone_call` natifs → on pointe juste
+// l'opérateur vers Live / Explore où ils apparaissent comme n'importe quel
+// goal, filtrables par dimension `source`.
 
-function CallsRecap({ workspaceId }: { workspaceId: string }) {
-  const [state, setState] = useState<
-    | { kind: 'loading' }
-    | { kind: 'ready'; data: CallsResponse }
-    | { kind: 'not-connected' }
-    | { kind: 'error' }
-  >({ kind: 'loading' });
-
-  useEffect(() => {
-    const ctrl = new AbortController();
-    fetchCalls(workspaceId, 30, { signal: ctrl.signal })
-      .then((data) => {
-        if (ctrl.signal.aborted) return;
-        if (!data.voipConnected) {
-          setState({ kind: 'not-connected' });
-        } else {
-          setState({ kind: 'ready', data });
-        }
-      })
-      .catch((err: Error) => {
-        if (ctrl.signal.aborted) return;
-        if (err instanceof BridgeApiError && err.status === 404) {
-          setState({ kind: 'not-connected' });
-          return;
-        }
-        setState({ kind: 'error' });
-      });
-    return () => ctrl.abort();
-  }, [workspaceId]);
-
-  if (state.kind === 'loading') {
-    return (
-      <Card className="border-border/60 bg-card/60">
-        <CardContent className="p-5">
-          <div className="veridian-skeleton h-5 w-40 rounded" />
-          <div className="veridian-skeleton mt-3 h-8 w-24 rounded" />
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (state.kind === 'error' || state.kind === 'not-connected') {
-    return null;
-  }
-
-  const { data } = state;
+function CallsHint({ workspaceId }: { workspaceId: string }) {
   return (
     <Card
       className="veridian-fade-in-delay-2 border-border/60 bg-card/60"
-      data-testid="voip-calls-recap"
+      data-testid="voip-calls-hint"
     >
-      <CardContent className="space-y-4 p-5">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-wider text-muted-foreground/80">
-          <Check className="h-3 w-3 text-emerald-400" />
-          Appels synchronisés sur 30 jours
-        </div>
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <StatTile label="Total" value={data.stats.total.toString()} />
-          <StatTile label="Manqués" value={data.stats.missed.toString()} />
-          <StatTile
-            label="Durée moy."
-            value={formatDuration(data.stats.avgDurationSec)}
-          />
-          <StatTile
-            label="Taux de réponse"
-            value={`${Math.round(data.stats.answerRate * 100)}%`}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-3 pt-2">
+      <CardContent className="space-y-3 p-5">
+        <p className="text-sm text-muted-foreground">
+          Vos appels remontent automatiquement comme objectifs
+          «&nbsp;phone_call&nbsp;» et apparaissent dans vos vues d'analyse,
+          attribués à leur source.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
           <a
             href={`/workspaces/${workspaceId}/live`}
             className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
@@ -743,25 +692,6 @@ function CallsRecap({ workspaceId }: { workspaceId: string }) {
       </CardContent>
     </Card>
   );
-}
-
-function StatTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border/40 bg-background/30 p-3">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/60">
-        {label}
-      </div>
-      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return '—';
-  const m = Math.floor(seconds / 60);
-  const s = Math.round(seconds % 60);
-  if (m === 0) return `${s}s`;
-  return `${m}m${s.toString().padStart(2, '0')}`;
 }
 
 // ─── Credential card ─────────────────────────────────────────────────────
@@ -793,7 +723,7 @@ function CredentialCard({
       setTestMsg({
         ok: false,
         message:
-          err instanceof BridgeApiError
+          err instanceof VoipApiError
             ? err.message
             : 'Test impossible.',
       });
@@ -909,7 +839,7 @@ function CredentialForm({
         onSaved();
       } catch (err) {
         setError(
-          err instanceof BridgeApiError
+          err instanceof VoipApiError
             ? err.message
             : 'Enregistrement impossible.',
         );

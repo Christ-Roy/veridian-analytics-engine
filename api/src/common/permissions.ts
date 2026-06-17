@@ -27,6 +27,11 @@ export const PERMISSIONS = {
   'webhook.delete': ['owner', 'admin'],
   'webhook.test': ['owner', 'admin', 'editor'],
 
+  // VoIP (port natif Calls — cf todo/2026-06-16-port-natif-voip.md)
+  'voip.read': ['owner', 'admin', 'editor', 'viewer'],
+  'voip.write': ['owner', 'admin'],
+  'voip.test': ['owner', 'admin', 'editor'],
+
   // Team management
   'members.invite': ['owner', 'admin'],
   'members.manage': ['owner', 'admin'],
