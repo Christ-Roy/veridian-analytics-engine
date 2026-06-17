@@ -85,3 +85,10 @@ networks:
 volumes:
   clickhouse-data:
     name: analytics-engine-prod-clickhouse-data
+  # name: explicite OBLIGATOIRE — sinon Docker préfixe par le project name
+  # (analytics-engine-prod-gkggyk_postgres-bridge-data) et crée un volume VIERGE,
+  # perdant les données du bridge (tokens GSC, settings tenants). Le composeFile
+  # raw historique avait ce name: en dur ; il manquait au repo (bug latent révélé
+  # au passage GitOps 2026-06-17). Doit matcher le volume existant en prod.
+  postgres-bridge-data:
+    name: analytics-engine-prod-postgres-bridge-data
