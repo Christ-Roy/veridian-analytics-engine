@@ -47,3 +47,26 @@ comme garde-fou bloquant :
 ## Lien
 - Run hang : https://github.com/Christ-Roy/veridian-analytics-engine/actions/runs/27313076161
 - Workflow : `.github/workflows/e2e-full-staging.yml`
+
+---
+
+## MAJ 2026-06-17 (confirmé encore cassé, sprint GIGA vague C)
+
+Le problème persiste. 3 runs cancelled au timeout 35min confirmés :
+- 27692223650 (bafe9d9), 27671748411 (ad14214), 27601058958 (b1c98d2) — tous `cancelled`.
+
+Constats additionnels :
+- Le job inclut `03-forms-leads/` et `04-push-pwa/` = features SUPPRIMÉES/archivées
+  par la vision 2026-05-23. Ces specs traînent/échouent et gonflent la durée pour rien.
+- `|| true` toujours présent sur la step principale (gate ne peut pas échouer).
+
+### Fix proposé (consolidé)
+1. Retirer `|| true` (gate doit pouvoir rouge).
+2. Sharding Playwright `--shard=i/N` en jobs matrix parallèles (chaque < 35min),
+   OU séparer "smoke + modules critiques" (bloquant, rapide) vs "full nightly" (informatif).
+3. Retirer les specs de features mortes (03-forms-leads, 04-push-pwa).
+4. webkit ciblé (responsive/visual) au lieu de partout.
+
+Contournement utilisé pour la promo de la vague revoke+voip+gsc (2026-06-17) :
+CI staging Test&Coverage (E2E API contre ClickHouse RÉEL) + deploy+smoke verts +
+smoke manuel des 3 modules. Le gate Playwright UI full n'a PAS pu servir.
