@@ -298,24 +298,29 @@ jobs:
           # Le check `provisionApiKey ≠404` ne suffit PAS : cet endpoint existe depuis
           # le Lot B, donc il répond 200/401 même sur un VIEUX container → faux positif.
           # On compare la VERSION /api/health (APP_VERSION) à celle du code qu'on déploie.
-          EXPECTED_VERSION=$(node -e "console.log(require('./api/src/version.ts'.replace('.ts',''))?.APP_VERSION || '')" 2>/dev/null || \
-            grep -oE "APP_VERSION = '[^']+'" api/src/version.ts | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+          # Version attendue = APP_VERSION du code déployé (grep direct ; pas de
+          # `node require` sur un .ts qui plante toujours).
+          EXPECTED_VERSION=$(grep -oE "APP_VERSION = '[^']+'" api/src/version.ts | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
           echo "Version attendue (code déployé): ${EXPECTED_VERSION:-?}"
-          for i in $(seq 1 18); do
+          # 30 × 12s = 6 min : laisser le temps au compose.deploy async Dokploy de
+          # recreate + au container de booter AVEC migrate-on-boot v8→v9 (les
+          # migrations majeures + bootstrap NestJS peuvent dépasser 3 min — le check
+          # 3min précédent timeoutait en faux négatif et déclenchait un rollback inutile).
+          for i in $(seq 1 30); do
             BODY=$(curl -sf https://analytics-engine.app.veridian.site/api/health 2>/dev/null || echo "")
             if [ -n "$BODY" ]; then
               LIVE_VERSION=$(echo "$BODY" | python3 -c "import sys,json;print(json.load(sys.stdin).get('version',''))" 2>/dev/null || echo "")
-              echo "engine prod healthy after $((i*10))s — live version=$LIVE_VERSION (attendu=$EXPECTED_VERSION)"
+              echo "engine prod répond after $((i*12))s — live version=$LIVE_VERSION (attendu=$EXPECTED_VERSION)"
               if [ -n "$EXPECTED_VERSION" ] && [ "$LIVE_VERSION" != "$EXPECTED_VERSION" ]; then
-                echo "::warning::version prod ($LIVE_VERSION) ≠ attendue ($EXPECTED_VERSION) — container peut-être figé, on attend le recreate..."
-                sleep 10; continue
+                echo "version pas encore alignée (recreate/migrate en cours), on patiente..."
+                sleep 12; continue
               fi
               echo "✓ nouveau code déployé (version $LIVE_VERSION confirmée en prod)"
               exit 0
             fi
-            sleep 10
+            sleep 12
           done
-          echo "::error::engine prod pas healthy OU version jamais alignée après 3min (container figé ? env Dokploy écrasé ?). Deploy non effectif."
+          echo "::error::engine prod pas healthy OU version jamais alignée après 6min (container figé ? env Dokploy écrasé ?). Deploy non effectif."
           exit 1
 
       - name: Cleanup
