@@ -224,11 +224,14 @@ jobs:
     # structural-gate skippable). trivy-engine est warn-only, non requis.
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.trivy-bridge.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment:
       name: production
       url: https://analytics-engine.app.veridian.site
     steps:
+      # checkout requis : le health-check exécute scripts/ci/wait-dokploy-deploy.sh
+      # (ce job ne clonait pas le repo → "No such file or directory" sur le runner).
+      - uses: actions/checkout@v4
       - name: Trigger Dokploy redeploy
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
