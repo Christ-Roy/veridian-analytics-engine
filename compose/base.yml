@@ -84,6 +84,19 @@ services:
       # défaut (fail-soft) : tant qu'aucun client n'a branché OVH/Telnyx, on
       # ne pull rien. Passer à "true" une fois la téléphonie en prod.
       VOIP_SYNC_ENABLED: ${VOIP_SYNC_ENABLED:-false}
+      # ─── Google Search Console (module natif GSC — migration v9) ──────────
+      # Port du bridge vers l'engine : OAuth + sync + dashboard vivent ici.
+      # Si l'un de ces 3 est absent → feature GSC désactivée (503 sur connect,
+      # cron no-op). Tokens chiffrés avec ENCRYPTION_KEY (clé/workspace).
+      # ⚠️ GOOGLE_OAUTH_REDIRECT_URI doit pointer sur l'ENGINE désormais
+      #    (.../api/gsc/oauth-callback) et être déclarée chez Google Cloud.
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-}
+      # Retour console après consent (onglet Settings → Search Console).
+      GSC_OAUTH_SUCCESS_REDIRECT: ${GSC_OAUTH_SUCCESS_REDIRECT:-}
+      # Kill-switch du cron de sync GSC (1×/jour 04:00).
+      GSC_SYNC_CRON_DISABLED: ${GSC_SYNC_CRON_DISABLED:-}
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/setup.status || exit 1"]
       interval: 15s

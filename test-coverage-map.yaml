@@ -490,13 +490,25 @@
     - api/src/migrations/migrations.registry.ts
     - api/src/migrations/v6-user-id-migration.ts
     - api/src/migrations/v7-webhooks-migration.ts
+    - api/src/migrations/v9-gsc-migration.ts
   covered_by:
     - api/test/migrations.e2e-spec.ts
   reason: |
-    Migration system ClickHouse (V4/V5/V6/V7). CRITIQUE : toute nouvelle
+    Migration system ClickHouse (V4/V5/V6/V7/V9). CRITIQUE : toute nouvelle
     migration DOIT ajouter un test ici sinon le pre-push refuse.
-    V7 (webhooks) couverte par le describe "V7 Webhooks Migration" qui
-    teste CREATE + idempotence + flags hasSystemMigration/hasWorkspaceMigration.
+    V7 (webhooks) couverte par le describe "V7 Webhooks Migration".
+    V9 (gsc) couverte par le describe "V9 GSC Migration" : CREATE
+    gsc_property+gsc_daily + idempotence + flags system-only.
+
+- sources:
+    - api/src/database/clickhouse.service.ts
+  covered_by:
+    - api/test/gsc.e2e-spec.ts
+    - api/test/migrations.e2e-spec.ts
+  reason: |
+    Service d'accès ClickHouse (querySystem/insertSystem/commandSystem +
+    commandSystemWithParams). Exercé bout-en-bout par les e2e GSC (sync /
+    resync → replaceDailyWindow → commandSystemWithParams) et migrations.
 
 - sources:
     - api/src/database/schemas.ts

@@ -282,6 +282,43 @@ export const SYSTEM_SCHEMAS: Record<string, string> = {
     ) ENGINE = ReplacingMergeTree(updated_at)
     ORDER BY (workspace_id, e164)
   `,
+
+  // GSC — Search Console natif (cf migration v9). 1 row property / workspace
+  // (tokens OAuth chiffrés clé-par-workspace) + données daily agrégées.
+  gsc_property: `
+    CREATE TABLE IF NOT EXISTS {database}.gsc_property (
+      id String,
+      workspace_id String,
+      site_url String DEFAULT '',
+      ownership_state Enum8('pending' = 0, 'verified' = 1) DEFAULT 'pending',
+      oauth_tokens_encrypted String DEFAULT '',
+      last_sync_at Nullable(DateTime64(3)),
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3),
+      deleted_at Nullable(DateTime64(3))
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY (workspace_id, id)
+  `,
+
+  gsc_daily: `
+    CREATE TABLE IF NOT EXISTS {database}.gsc_daily (
+      gsc_property_id String,
+      workspace_id String,
+      date Date,
+      query String,
+      page String,
+      country String DEFAULT '',
+      device String DEFAULT '',
+      search_type Enum8('web' = 0, 'image' = 1, 'video' = 2, 'news' = 3, 'discover' = 4, 'googleNews' = 5) DEFAULT 'web',
+      impressions UInt64 DEFAULT 0,
+      clicks UInt64 DEFAULT 0,
+      position Float64 DEFAULT 0,
+      ctr Float64 DEFAULT 0,
+      updated_at DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    PARTITION BY toYYYYMM(date)
+    ORDER BY (gsc_property_id, search_type, date, query, page, country, device)
+  `,
 };
 
 // Workspace schemas - stored in staminads_ws_{workspace_id} databases

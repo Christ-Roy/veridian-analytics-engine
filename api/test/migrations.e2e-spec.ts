@@ -670,4 +670,36 @@ describe('Migrations E2E', () => {
       expect(V7WebhooksMigration.hasWorkspaceMigration()).toBe(false);
     });
   });
+
+  describe('V9 GSC Migration', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { V9GscMigration } = require('../src/migrations/v9-gsc-migration');
+
+    it('creates gsc_property and gsc_daily tables', async () => {
+      await systemClient.command({ query: `DROP TABLE IF EXISTS gsc_property` });
+      await systemClient.command({ query: `DROP TABLE IF EXISTS gsc_daily` });
+
+      await V9GscMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+
+      const result = await systemClient.query({
+        query: `SELECT name FROM system.tables WHERE database = {db:String} AND name IN ('gsc_property', 'gsc_daily') ORDER BY name`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      const tables = (await result.json<{ name: string }>()).map((r) => r.name);
+      expect(tables).toContain('gsc_property');
+      expect(tables).toContain('gsc_daily');
+    });
+
+    it('is idempotent (running twice does not throw)', async () => {
+      await V9GscMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+      await V9GscMigration.migrateSystem(systemClient, TEST_SYSTEM_DATABASE);
+    });
+
+    it('declares system-only migration (no workspace iteration)', () => {
+      expect(V9GscMigration.majorVersion).toBe(9);
+      expect(V9GscMigration.hasSystemMigration()).toBe(true);
+      expect(V9GscMigration.hasWorkspaceMigration()).toBe(false);
+    });
+  });
 });

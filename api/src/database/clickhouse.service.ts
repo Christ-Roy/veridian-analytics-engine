@@ -209,6 +209,23 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Execute a parameterized command on the system database.
+   * Use this for commands with dynamic values (e.g. ALTER TABLE ... DELETE
+   * WHERE col = {x:String}) to avoid SQL injection on the system DB.
+   */
+  async commandSystemWithParams(
+    sql: string,
+    params?: Record<string, unknown>,
+  ): Promise<void> {
+    let finalSql = sql.replace(/{database}/g, this.systemDatabase);
+    finalSql = this.qualifyTableNames(finalSql, this.systemDatabase);
+    await this.client.command({
+      query: finalSql,
+      query_params: params,
+    });
+  }
+
+  /**
    * Execute a command on a workspace database.
    */
   async commandWorkspace(workspaceId: string, sql: string): Promise<void> {

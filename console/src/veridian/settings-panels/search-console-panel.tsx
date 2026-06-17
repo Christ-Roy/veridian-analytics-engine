@@ -4,12 +4,15 @@ import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { cn } from '../utils';
+import { BridgeApiError } from '../api';
 import {
-  fetchTenantSettings,
-  BridgeApiError,
-  type TenantSettingsResponse,
-} from '../api';
-import { fetchGscDashboard } from '../gsc/api';
+  fetchGscDashboard,
+  fetchGscStatus,
+  fetchGscOauthBeginUrl,
+  triggerGscResync,
+  disconnectGsc,
+  type GscStatusResponse,
+} from '../gsc/api';
 import { KpiTile } from '../gsc/kpi-tile';
 import { TimeSeriesChart } from '../gsc/time-series-chart';
 import { GscDataTable } from '../gsc/data-table';
@@ -52,7 +55,7 @@ export interface SearchConsoleSettingsPanelProps {
 type ViewState =
   | { kind: 'loading' }
   | { kind: 'error'; error: Error }
-  | { kind: 'ready'; data: TenantSettingsResponse };
+  | { kind: 'ready'; gsc: GscStatusResponse };
 
 export function SearchConsoleSettingsPanel({
   workspaceId,
@@ -66,9 +69,9 @@ export function SearchConsoleSettingsPanel({
     const ctrl = new AbortController();
     abortRef.current = ctrl;
     setState({ kind: 'loading' });
-    fetchTenantSettings(workspaceId, { signal: ctrl.signal })
-      .then((data) => {
-        if (!ctrl.signal.aborted) setState({ kind: 'ready', data });
+    fetchGscStatus(workspaceId, { signal: ctrl.signal })
+      .then((gsc) => {
+        if (!ctrl.signal.aborted) setState({ kind: 'ready', gsc });
       })
       .catch((err: Error) => {
         if (ctrl.signal.aborted) return;
@@ -95,15 +98,15 @@ export function SearchConsoleSettingsPanel({
           <>
             <GscConnectionSection
               workspaceId={workspaceId}
-              gsc={state.data.gsc}
+              gsc={state.gsc}
               onRefresh={load}
             />
-            {state.data.gsc.connected && (
+            {state.gsc.connected && (
               <GscInlineData
                 workspaceId={workspaceId}
                 siteDomain={
                   siteDomain ??
-                  state.data.gsc.propertyUrl ??
+                  state.gsc.site_url ??
                   `${workspaceId}.veridian.site`
                 }
               />
@@ -123,7 +126,7 @@ function GscConnectionSection({
   onRefresh,
 }: {
   workspaceId: string;
-  gsc: TenantSettingsResponse['gsc'];
+  gsc: GscStatusResponse;
   onRefresh: () => void;
 }) {
   const [busy, setBusy] = useState<null | 'connect' | 'resync' | 'disconnect'>(
@@ -135,8 +138,7 @@ function GscConnectionSection({
     setBusy('connect');
     setError(null);
     try {
-      const { fetchOauthBeginUrl } = await import('../pages/settings-helpers');
-      const url = await fetchOauthBeginUrl(workspaceId);
+      const url = await fetchGscOauthBeginUrl(workspaceId);
       window.location.href = url;
     } catch (err) {
       setError(
@@ -152,7 +154,6 @@ function GscConnectionSection({
     setBusy('resync');
     setError(null);
     try {
-      const { triggerGscResync } = await import('../pages/settings-helpers');
       await triggerGscResync(workspaceId);
       onRefresh();
     } catch (err) {
@@ -170,7 +171,6 @@ function GscConnectionSection({
     setBusy('disconnect');
     setError(null);
     try {
-      const { disconnectGsc } = await import('../pages/settings-helpers');
       await disconnectGsc(workspaceId);
       onRefresh();
     } catch (err) {
@@ -198,15 +198,15 @@ function GscConnectionSection({
         >
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="success">Connecté</Badge>
-            {gsc.propertyUrl && (
+            {gsc.site_url && (
               <span className="text-sm text-muted-foreground">
-                {gsc.propertyUrl}
+                {gsc.site_url}
               </span>
             )}
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             Dernière synchro :{' '}
-            {gsc.lastSyncAt ? formatDate(gsc.lastSyncAt) : 'jamais'}
+            {gsc.last_sync_at ? formatDate(gsc.last_sync_at) : 'jamais'}
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Button

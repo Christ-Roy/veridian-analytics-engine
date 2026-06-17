@@ -32,6 +32,7 @@ import { WorkspacesModule } from './workspaces/workspaces.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { VoipModule } from './voip/voip.module';
+import { GscModule } from './gsc/gsc.module';
 import { TunnelModule } from './tunnel/tunnel.module';
 // IMPORTANT — AdminPlatformModule MUST stay LAST in this ES-module import
 // block. It imports several domain modules (Users/Workspaces/ApiKeys/Mail)
@@ -115,6 +116,7 @@ import { AdminPlatformModule } from './admin-platform/admin-platform.module';
     SubscriptionsModule,
     WebhooksModule,
     VoipModule,
+    GscModule,
     TunnelModule,
     SdkModule,
     AdminPlatformModule,

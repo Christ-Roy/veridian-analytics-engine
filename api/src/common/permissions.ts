@@ -32,6 +32,12 @@ export const PERMISSIONS = {
   'voip.write': ['owner', 'admin'],
   'voip.test': ['owner', 'admin', 'editor'],
 
+  // Search Console (port natif GSC — onglet Settings « search-console »)
+  // Lecture du dashboard = même niveau qu'analytics.view ; (dé)connexion
+  // OAuth / resync = même niveau qu'integrations.manage.
+  'gsc.read': ['owner', 'admin', 'editor', 'viewer'],
+  'gsc.manage': ['owner', 'admin'],
+
   // Team management
   'members.invite': ['owner', 'admin'],
   'members.manage': ['owner', 'admin'],
