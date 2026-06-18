@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { App, Form, Input, InputNumber, Button, Select, Table, Tag, Modal, Avatar, Spin, Tooltip, Switch } from 'antd'
 import { SearchOutlined, EditOutlined, LoadingOutlined, PlusOutlined, InfoCircleOutlined } from '@ant-design/icons'
-import { PhoneCall, Search as SearchIcon } from 'lucide-react'
+import { PhoneCall, Search as SearchIcon, Plug } from 'lucide-react'
 import { api } from '../../../../lib/api'
 import { workspaceQueryOptions } from '../../../../lib/queries'
 import { IntegrationsSettings } from '../../../../components/settings/IntegrationsSettings'
@@ -14,6 +14,7 @@ import { SmtpPage } from '../../../../pages/settings/smtp'
 import { ApiKeysPage } from '../../../../pages/settings/api-keys'
 import { VoIPSettingsPanel } from '../../../../veridian/settings-panels/voip-panel'
 import { SearchConsoleSettingsPanel } from '../../../../veridian/settings-panels/search-console-panel'
+import { ConnectorsSettingsPanel } from '../../../../veridian/settings-panels/connectors-panel'
 import { buildTrackerSnippet } from '../../../../veridian/snippet'
 import { z } from 'zod'
 
@@ -23,7 +24,7 @@ import { z } from 'zod'
 // est interdit — l'ancien onglet `veridian` (page settings tenant) a été
 // retiré, sa page React archivée dans `console/src/veridian/_archive/`.
 const settingsSearchSchema = z.object({
-  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'voip', 'search-console', 'danger']).optional().default('workspace'),
+  section: z.enum(['workspace', 'dimensions', 'team', 'integrations', 'smtp', 'api-keys', 'privacy', 'sdk', 'voip', 'search-console', 'connectors', 'danger']).optional().default('workspace'),
 })
 
 export const Route = createFileRoute('/_authenticated/workspaces/$workspaceId/settings')({
@@ -64,7 +65,7 @@ const currencyOptions = [
   { value: 'BRL', label: 'BRL - Real brésilien' },
 ]
 
-type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'voip' | 'search-console' | 'danger'
+type SettingsSection = 'workspace' | 'dimensions' | 'team' | 'integrations' | 'smtp' | 'api-keys' | 'privacy' | 'sdk' | 'voip' | 'search-console' | 'connectors' | 'danger'
 
 type MenuItem = {
   key: SettingsSection
@@ -84,6 +85,7 @@ const menuItems: MenuItem[] = [
   { key: 'sdk', label: 'Installer le SDK' },
   { key: 'voip', label: 'Téléphonie / VoIP', icon: PhoneCall },
   { key: 'search-console', label: 'Search Console', icon: SearchIcon },
+  { key: 'connectors', label: 'Connecteurs', icon: Plug },
   { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
 ]
 
@@ -731,6 +733,9 @@ function Settings() {
               workspaceId={workspaceId}
               siteDomain={workspace.website || undefined}
             />
+          )}
+          {section === 'connectors' && (
+            <ConnectorsSettingsPanel workspaceId={workspaceId} />
           )}
           {section === 'danger' && isOwner && dangerContent}
         </div>
