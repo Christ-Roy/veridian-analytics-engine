@@ -1384,12 +1384,17 @@ describe('Analytics E2E', () => {
           .expect(200);
 
         expect(response.body.data.length).toBe(5); // 5 different paths
-        expect(response.body.data[0]).toHaveProperty('path');
+        // La dimension `page_path` (column ClickHouse `path`) est désormais
+        // aliasée dans le SELECT (`path as page_path`) → la réponse est keyée
+        // par le nom de dimension `page_path`, pas par la colonne brute `path`.
+        expect(response.body.data[0]).toHaveProperty('page_path');
         expect(response.body.data[0]).toHaveProperty('page_count');
         expect(response.body.data[0]).toHaveProperty('page_duration');
 
         // Each path should have 10 pages (50 total / 5 paths)
-        const paths = response.body.data.map((d: { path: string }) => d.path);
+        const paths = response.body.data.map(
+          (d: { page_path: string }) => d.page_path,
+        );
         expect(paths).toContain('/');
         expect(paths).toContain('/products');
         expect(paths).toContain('/about');
