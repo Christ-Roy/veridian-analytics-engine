@@ -341,6 +341,32 @@ export function DashboardGrid({
     { key: 'sum_goal_value', label: 'Valeur', format: 'currency', currency: workspaceCurrency }
   ]
 
+  // « Pages les plus vues » — table `pages` (analytics par page, peuplée en
+  // continu par pages_mv). Distinct des onglets « Pages d'entrée » / « Sorties »
+  // ci-dessus qui viennent de la table `sessions`.
+  const pageViewsTabConfig: DimensionTabConfig[] = [
+    {
+      key: 'page_views',
+      label: 'Pages les plus vues',
+      dimensionLabel: 'Page',
+      dimension: 'page_path',
+      // La dimension `page_path` est la seule dont la colonne ClickHouse
+      // (`path`) diffère du nom : le query-builder SELECT la colonne brute
+      // sans alias, donc la réponse renvoie `path`, pas `page_path`.
+      dimensionField: 'path',
+      table: 'pages',
+      metrics: ['page_count', 'page_duration', 'page_scroll', 'exit_rate'],
+      order: { page_count: 'desc' }
+    }
+  ]
+
+  const pageViewsColumns: ColumnConfig[] = [
+    { key: 'page_count', label: 'Vues', format: 'number' },
+    { key: 'page_duration', label: 'Temps médian', format: 'duration' },
+    { key: 'page_scroll', label: 'Scroll médian', format: 'percentage' },
+    { key: 'exit_rate', label: 'Taux de sortie', format: 'percentage' }
+  ]
+
   // Mapping from tab key to dimension for click-to-filter
   const tabKeyToDimension: Record<string, string> = useMemo(() => ({
     // Pages
@@ -472,6 +498,20 @@ export function DashboardGrid({
               ) : null
             }
             onRowClick={handleRowClick}
+          />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          {/* Pas de onRowClick : un filtre `page_path` (dimension propre à la
+              table `pages`) propagé aux filtres globaux casserait tous les
+              widgets sur les tables `sessions`/`goals` (le backend rejette une
+              dimension absente de la table interrogée). Widget informatif. */}
+          <DimensionTableWidget
+            title="Pages les plus vues"
+            infoTooltip="Pages les plus consultées, avec le temps médian passé, la profondeur de scroll médiane et le taux de sortie"
+            tabs={pageViewsTabConfig}
+            columns={pageViewsColumns}
+            emptyText="Aucune donnée de page"
           />
         </div>
 
