@@ -27,8 +27,10 @@ const router = createAppRouter(queryClient)
 
 const theme: ThemeConfig = {
   token: {
-    colorPrimary: '#7763F1',
-    colorLink: '#7763F1',
+    // Graphie alignée sur la CSS var --primary (index.css) pour une seule
+    // source de vérité de la teinte primaire.
+    colorPrimary: '#7763f1',
+    colorLink: '#7763f1',
   },
   components: {
     Card: {
