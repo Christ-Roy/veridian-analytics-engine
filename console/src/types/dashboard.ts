@@ -14,7 +14,7 @@ export interface ColumnConfig {
   /** Column header label (e.g., 'Visites uniques', 'Count') */
   label: string
   /** Value formatting type */
-  format: 'number' | 'duration' | 'currency'
+  format: 'number' | 'duration' | 'currency' | 'percentage'
   /** Currency code when format is 'currency' (e.g., 'USD') */
   currency?: string
   /** Show heat map colored dot (for TimeScore) */
