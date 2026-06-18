@@ -244,7 +244,14 @@ export function buildAnalyticsQuery(
     return `${sql} as ${m}`;
   });
 
-  // Validate and get dimension columns
+  // Validate and get dimension columns.
+  // `dimensionCols` holds the raw column expression (used in GROUP BY where it
+  // must match the underlying expression, e.g. `properties['source']`).
+  // `dimensionSelects` holds the SELECT projection: when the column expression
+  // differs from the dimension name (Map accessors like `properties['source']`,
+  // or aliased physical columns like `path` -> `page_path`), we alias it back
+  // to the dimension name so the result column is keyed by the dimension name.
+  // Downstream (fillGaps, console BreakdownTable/CSV export) reads `row[name]`.
   const dimensionCols = (query.dimensions || []).map((d) => {
     const dim = DIMENSIONS[d];
     if (!dim) throw new Error(`Unknown dimension: ${d}`);
@@ -252,6 +259,12 @@ export function buildAnalyticsQuery(
       throw new Error(`Dimension '${d}' is not available for table '${table}'`);
     }
     return dim.column;
+  });
+  const dimensionSelects = (query.dimensions || []).map((d) => {
+    const dim = DIMENSIONS[d];
+    return dim.column === dim.name
+      ? dim.column
+      : `${dim.column} as ${dim.name}`;
   });
 
   // Handle granularity with optional timezone for user-local grouping
@@ -325,10 +338,11 @@ export function buildAnalyticsQuery(
     orderBy = `ORDER BY ${query.metrics[0]} DESC`;
   }
 
-  // Build SELECT clause
+  // Build SELECT clause (dimensions aliased to their name; GROUP BY uses the
+  // raw column expression below)
   const selectParts = [
     ...(granularitySelect ? [granularitySelect] : []),
-    ...dimensionCols,
+    ...dimensionSelects,
     ...metricsSql,
   ];
   const selectClause = selectParts.join(',\n  ');

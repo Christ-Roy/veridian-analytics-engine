@@ -437,6 +437,35 @@ export const DIMENSIONS: Record<string, DimensionDefinition> = {
     tables: ['goals'],
   },
 
+  // Téléphonie (goals only — phone_call events from the VoIP bridge).
+  // The VoIP sync writes the attributed traffic source / direction / status
+  // into the goal event's `properties` Map (api/src/voip/phone-call-event.ts).
+  // These dimensions expose those Map keys so calls can be grouped/filtered
+  // by source ("1 numéro = 1 source") directly in Explore.
+  // Column is a ClickHouse Map accessor; the query-builder aliases it back to
+  // the dimension name in the SELECT projection.
+  phone_source: {
+    name: 'phone_source',
+    column: "properties['source']",
+    type: 'string',
+    category: 'Téléphonie',
+    tables: ['goals'],
+  },
+  phone_direction: {
+    name: 'phone_direction',
+    column: "properties['direction']",
+    type: 'string',
+    category: 'Téléphonie',
+    tables: ['goals'],
+  },
+  phone_status: {
+    name: 'phone_status',
+    column: "properties['status']",
+    type: 'string',
+    category: 'Téléphonie',
+    tables: ['goals'],
+  },
+
   // User
   user_id: {
     name: 'user_id',

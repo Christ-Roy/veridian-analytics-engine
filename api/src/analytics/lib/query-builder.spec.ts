@@ -715,6 +715,84 @@ describe('buildAnalyticsQuery', () => {
       expect(params.f0).toBe('/products');
     });
   });
+
+  describe('phone telephony dimensions (Map accessors on goals)', () => {
+    it('groups by phone_source and aliases the SELECT to the dimension name', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'goals',
+        metrics: ['goals'],
+        dimensions: ['phone_source'],
+      });
+      // SELECT projects the Map accessor aliased back to the dimension name so
+      // the result column is keyed by `phone_source` (read by fillGaps + console)
+      expect(sql).toContain("properties['source'] as phone_source");
+      // GROUP BY uses the raw Map accessor expression
+      expect(sql).toContain("GROUP BY properties['source']");
+    });
+
+    it('exposes phone_direction and phone_status with aliases', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'goals',
+        metrics: ['goals'],
+        dimensions: ['phone_direction', 'phone_status'],
+      });
+      expect(sql).toContain("properties['direction'] as phone_direction");
+      expect(sql).toContain("properties['status'] as phone_status");
+      expect(sql).toMatch(
+        /GROUP BY properties\['direction'\], properties\['status'\]/,
+      );
+    });
+
+    it('filters phone_source in WHERE with a bound param', () => {
+      const { sql, params } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'goals',
+        metrics: ['goals'],
+        dimensions: ['phone_source'],
+        filters: [
+          { dimension: 'phone_source', operator: 'equals', values: ['seo'] },
+        ],
+      });
+      expect(sql).toContain("properties['source'] = {f0:String}");
+      expect(params.f0).toBe('seo');
+    });
+
+    it('throws for phone_source on the sessions table', () => {
+      expect(() =>
+        buildAnalyticsQuery({
+          ...baseQuery,
+          dimensions: ['phone_source'],
+        }),
+      ).toThrow(
+        "Dimension 'phone_source' is not available for table 'sessions'",
+      );
+    });
+
+    // Non-regression: aliased physical columns (name !== column) must also be
+    // projected under their dimension name, not their raw column name.
+    it('aliases page_path (column `path`) to the dimension name in SELECT', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'pages',
+        metrics: ['page_count'],
+        dimensions: ['page_path'],
+      });
+      expect(sql).toContain('path as page_path');
+      expect(sql).toContain('GROUP BY path');
+    });
+
+    it('does not alias simple dimensions where name equals column', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        dimensions: ['utm_source'],
+      });
+      // utm_source column === name, so no redundant alias
+      expect(sql).not.toContain('utm_source as utm_source');
+      expect(sql).toContain('utm_source');
+    });
+  });
 });
 
 describe('buildExtremesQuery', () => {

@@ -264,6 +264,62 @@ describe('buildFilters', () => {
       expect(result.sql).toBe('is_landing = {f0:String}');
     });
   });
+
+  describe('phone telephony dimensions (Map accessors on goals)', () => {
+    it('filters phone_source with a bound param (equals)', () => {
+      const result = buildFilters(
+        [{ dimension: 'phone_source', operator: 'equals', values: ['seo'] }],
+        'f',
+        'goals',
+      );
+      expect(result.sql).toBe("properties['source'] = {f0:String}");
+      expect(result.params.f0).toBe('seo');
+    });
+
+    it('filters phone_source with IN (array bound param)', () => {
+      const result = buildFilters(
+        [{ dimension: 'phone_source', operator: 'in', values: ['seo', 'ads'] }],
+        'f',
+        'goals',
+      );
+      expect(result.sql).toBe("properties['source'] IN {f0:Array(String)}");
+      expect(result.params.f0).toEqual(['seo', 'ads']);
+    });
+
+    it('filters phone_direction and phone_status together', () => {
+      const result = buildFilters(
+        [
+          {
+            dimension: 'phone_direction',
+            operator: 'equals',
+            values: ['inbound'],
+          },
+          {
+            dimension: 'phone_status',
+            operator: 'equals',
+            values: ['answered'],
+          },
+        ],
+        'f',
+        'goals',
+      );
+      expect(result.sql).toBe(
+        "properties['direction'] = {f0:String} AND properties['status'] = {f1:String}",
+      );
+      expect(result.params.f0).toBe('inbound');
+      expect(result.params.f1).toBe('answered');
+    });
+
+    it('throws for phone_source on the sessions table', () => {
+      expect(() =>
+        buildFilters(
+          [{ dimension: 'phone_source', operator: 'equals', values: ['seo'] }],
+          'f',
+          'sessions',
+        ),
+      ).toThrow("Dimension 'phone_source' is not available for table 'sessions'");
+    });
+  });
 });
 
 describe('buildMetricFilters', () => {
