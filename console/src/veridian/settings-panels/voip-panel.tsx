@@ -1,24 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
-  Hash,
-  Info,
-  Loader2,
-  Pencil,
-  Phone,
-  Plus,
-  RefreshCw,
-  RotateCw,
-  Trash2,
-  X,
-} from 'lucide-react';
-import { Card, CardContent } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { cn } from '../utils';
+  App,
+  Alert,
+  Button,
+  Empty,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
+import {
+  PhoneOutlined,
+  NumberOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SyncOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  CheckCircleOutlined,
+} from '@ant-design/icons'
 import {
   fetchVoipSettings,
   saveCredential,
@@ -30,13 +36,16 @@ import {
   deletePhoneNumber,
   syncNow,
   VoipApiError,
-  type VoipSettingsResponse,
-  type VoipCredentialKind as CredentialKind,
-  type CredentialView,
-  type PhoneSource,
-  type TrackedPhoneNumber,
-} from './voip-api';
-import '../theme.css';
+} from './voip-api'
+import type {
+  VoipSettingsResponse,
+  VoipCredentialKind as CredentialKind,
+  CredentialView,
+  PhoneSource,
+  TrackedPhoneNumber,
+} from './voip-api'
+
+const { Title, Text, Paragraph } = Typography
 
 /**
  * Labels FR (vouvoiement) pour les 7 sources de trafic. La liste autorisée
@@ -51,17 +60,25 @@ const SOURCE_LABELS: Record<PhoneSource, string> = {
   social: 'Réseaux sociaux',
   print: 'Print (flyers / cartes de visite)',
   other: 'Autre',
-};
+}
 
-const SOURCE_BADGE_TONE: Record<PhoneSource, string> = {
-  seo: 'border-emerald-400/40 bg-emerald-400/10 text-emerald-300',
-  ads: 'border-amber-400/40 bg-amber-400/10 text-amber-300',
-  direct: 'border-sky-400/40 bg-sky-400/10 text-sky-300',
-  email: 'border-violet-400/40 bg-violet-400/10 text-violet-300',
-  social: 'border-pink-400/40 bg-pink-400/10 text-pink-300',
-  print: 'border-orange-400/40 bg-orange-400/10 text-orange-300',
-  other: 'border-zinc-400/40 bg-zinc-400/10 text-zinc-300',
-};
+/** Couleur de Tag AntD par source (préset clair, cohérent fond blanc). */
+const SOURCE_TAG_COLOR: Record<PhoneSource, string> = {
+  seo: 'green',
+  ads: 'gold',
+  direct: 'blue',
+  email: 'purple',
+  social: 'magenta',
+  print: 'orange',
+  other: 'default',
+}
+
+/**
+ * Texte canonique du secret write-only (aligné sur le panel Connecteurs).
+ * Les identifiants sont chiffrés côté engine et ne sont jamais réaffichés.
+ */
+const SECRET_NOTICE =
+  'Vos identifiants sont chiffrés (AES-256-GCM) avant stockage. Ils ne sont jamais réaffichés en clair.'
 
 /**
  * VoIPSettingsPanel — onglet « Téléphonie / VoIP » dans Settings native.
@@ -72,9 +89,12 @@ const SOURCE_BADGE_TONE: Record<PhoneSource, string> = {
  * les vues natives staminads (Live, Explore, Goals).
  *
  * Port natif (ticket 2026-06-16) : ce panel consomme les endpoints NATIFS de
- * l'engine (`/api/voip.*`, auth session console), plus le bridge. Il ne gère
- * que la CONFIG — connecter OVH/Telnyx, mapper numéros→sources, voir le statut
- * de synchro — JAMAIS une liste d'appels (vision Robert 2026-05-23).
+ * l'engine (`/api/voip.*`, auth session console). Il ne gère que la CONFIG —
+ * connecter OVH/Telnyx, mapper numéros→sources, voir le statut de synchro —
+ * JAMAIS une liste d'appels (vision Robert 2026-05-23).
+ *
+ * Présentation : Ant Design natif (fond clair, primaire violet console), pour
+ * se fondre dans les autres panels Settings (cf TeamSettings / api-keys).
  *
  * Sections :
  *   1. Choix opérateur (OVH / Telnyx) + formulaire credentials chiffrés (AES-256-GCM)
@@ -87,13 +107,13 @@ const SOURCE_BADGE_TONE: Record<PhoneSource, string> = {
  */
 
 export interface VoIPSettingsPanelProps {
-  workspaceId: string;
+  workspaceId: string
 }
 
 const VOIP_PROVIDERS: Array<{
-  kind: CredentialKind;
-  label: string;
-  fields: Array<{ name: string; label: string; placeholder: string }>;
+  kind: CredentialKind
+  label: string
+  fields: Array<{ name: string; label: string; placeholder: string }>
 }> = [
   {
     kind: 'voip_ovh',
@@ -119,61 +139,74 @@ const VOIP_PROVIDERS: Array<{
   {
     kind: 'voip_telnyx',
     label: 'Telnyx',
-    fields: [
-      { name: 'apiKey', label: 'API Key', placeholder: 'KEY...' },
-    ],
+    fields: [{ name: 'apiKey', label: 'API Key', placeholder: 'KEY...' }],
   },
-];
+]
 
 type ViewState =
   | { kind: 'loading' }
   | { kind: 'error'; error: Error }
-  | { kind: 'ready'; data: VoipSettingsResponse };
+  | { kind: 'ready'; data: VoipSettingsResponse }
 
 export function VoIPSettingsPanel({ workspaceId }: VoIPSettingsPanelProps) {
-  const [state, setState] = useState<ViewState>({ kind: 'loading' });
-  const abortRef = useRef<AbortController | null>(null);
+  const [state, setState] = useState<ViewState>({ kind: 'loading' })
+  const abortRef = useRef<AbortController | null>(null)
 
   const load = useCallback(() => {
-    abortRef.current?.abort();
-    const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setState({ kind: 'loading' });
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+    setState({ kind: 'loading' })
     fetchVoipSettings(workspaceId, { signal: ctrl.signal })
       .then((data) => {
-        if (!ctrl.signal.aborted) setState({ kind: 'ready', data });
+        if (!ctrl.signal.aborted) setState({ kind: 'ready', data })
       })
       .catch((err: Error) => {
-        if (ctrl.signal.aborted) return;
-        setState({ kind: 'error', error: err });
-      });
-  }, [workspaceId]);
+        if (ctrl.signal.aborted) return
+        setState({ kind: 'error', error: err })
+      })
+  }, [workspaceId])
 
   useEffect(() => {
-    load();
-    return () => abortRef.current?.abort();
-  }, [load]);
+    load()
+    return () => abortRef.current?.abort()
+  }, [load])
 
   return (
-    <div
-      className="veridian-scope w-full"
-      data-testid="voip-settings-panel"
-    >
-      <div className="space-y-6">
-        {state.kind === 'loading' && <PanelSkeleton />}
-        {state.kind === 'error' && (
-          <PanelError error={state.error} onRetry={load} />
-        )}
-        {state.kind === 'ready' && (
-          <VoipContent
-            workspaceId={workspaceId}
-            credentials={state.data.credentials}
-            onRefresh={load}
-          />
-        )}
-      </div>
+    <div data-testid="voip-settings-panel" className="space-y-6">
+      {state.kind === 'loading' && (
+        <div
+          className="flex justify-center py-16"
+          data-testid="voip-panel-skeleton"
+        >
+          <Spin size="large" tip="Chargement des paramètres VoIP…">
+            <div className="h-24 w-24" />
+          </Spin>
+        </div>
+      )}
+      {state.kind === 'error' && (
+        <Alert
+          type="error"
+          showIcon
+          message="Impossible de charger les paramètres VoIP"
+          description={state.error.message}
+          data-testid="voip-panel-error"
+          action={
+            <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+              Réessayer
+            </Button>
+          }
+        />
+      )}
+      {state.kind === 'ready' && (
+        <VoipContent
+          workspaceId={workspaceId}
+          credentials={state.data.credentials}
+          onRefresh={load}
+        />
+      )}
     </div>
-  );
+  )
 }
 
 function VoipContent({
@@ -181,29 +214,41 @@ function VoipContent({
   credentials,
   onRefresh,
 }: {
-  workspaceId: string;
-  credentials: CredentialView[];
-  onRefresh: () => void;
+  workspaceId: string
+  credentials: CredentialView[]
+  onRefresh: () => void
 }) {
-  const [provider, setProvider] = useState<CredentialKind>('voip_ovh');
+  const [provider, setProvider] = useState<CredentialKind>('voip_ovh')
   const def = useMemo(
     () => VOIP_PROVIDERS.find((p) => p.kind === provider)!,
     [provider],
-  );
+  )
 
-  const hasConnectedCred = credentials.some((c) => c.status === 'ok');
+  const hasConnectedCred = credentials.some((c) => c.status === 'ok')
 
   return (
     <>
-      <Section
-        icon={Phone}
-        title="Téléphonie / VoIP"
-        description="Branchez votre opérateur pour remonter vos appels dans Veridian. Les appels apparaîtront dans la vue En direct et dans Explorer."
-        testId="settings-section-voip"
+      {/* Section opérateur + credentials */}
+      <section
+        className="bg-white p-6 rounded-lg shadow-sm"
+        data-testid="settings-section-voip"
       >
+        <div className="flex items-start gap-3 mb-4">
+          <PhoneOutlined className="text-xl mt-1 text-gray-500" />
+          <div>
+            <Title level={5} className="!mb-1">
+              Téléphonie / VoIP
+            </Title>
+            <Text type="secondary">
+              Branchez votre opérateur pour remonter vos appels dans Veridian.
+              Les appels apparaîtront dans la vue En direct et dans Explorer.
+            </Text>
+          </div>
+        </div>
+
         {/* Credentials déjà enregistrés */}
         {credentials.length > 0 && (
-          <div className="space-y-3" data-testid="voip-credentials-list">
+          <div className="space-y-3 mb-5" data-testid="voip-credentials-list">
             {credentials.map((cred) => (
               <CredentialCard
                 key={cred.kind}
@@ -216,22 +261,20 @@ function VoipContent({
         )}
 
         {/* Formulaire d'ajout / remplacement */}
-        <div className="rounded-lg border border-dashed border-border/60 bg-background/20 p-4">
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
-            Opérateur
-          </label>
-          <select
-            value={provider}
-            onChange={(e) => setProvider(e.target.value as CredentialKind)}
-            className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
-            data-testid="voip-provider-select"
-          >
-            {VOIP_PROVIDERS.map((p) => (
-              <option key={p.kind} value={p.kind}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+        <div className="rounded-lg border border-dashed border-gray-200 p-4">
+          <Form layout="vertical">
+            <Form.Item label="Opérateur" className="!mb-3">
+              <Select
+                value={provider}
+                onChange={(v) => setProvider(v as CredentialKind)}
+                options={VOIP_PROVIDERS.map((p) => ({
+                  value: p.kind,
+                  label: p.label,
+                }))}
+                data-testid="voip-provider-select"
+              />
+            </Form.Item>
+          </Form>
           <CredentialForm
             key={provider}
             workspaceId={workspaceId}
@@ -240,7 +283,7 @@ function VoipContent({
             onSaved={onRefresh}
           />
         </div>
-      </Section>
+      </section>
 
       {/* Sous-section "Numéros trackés" — 1 numéro = 1 source de trafic */}
       <TrackedNumbersSection workspaceId={workspaceId} />
@@ -250,7 +293,7 @@ function VoipContent({
         <CallsHint workspaceId={workspaceId} onRefresh={onRefresh} />
       )}
     </>
-  );
+  )
 }
 
 // ─── Numéros trackés (phone source dimension, 2026-05-25) ───────────────
@@ -260,20 +303,21 @@ function VoipContent({
 // / social / print / other) après lookup `(workspace, toNumber)`. Les appels
 // apparaissent dans Live/Explore/Goals staminads natifs, sans page custom.
 
+type TrackedState =
+  | { kind: 'loading' }
+  | { kind: 'error'; error: Error }
+  | { kind: 'ready'; rows: TrackedPhoneNumber[]; allowedSources: PhoneSource[] }
+
 function TrackedNumbersSection({ workspaceId }: { workspaceId: string }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [state, setState] = useState<
-    | { kind: 'loading' }
-    | { kind: 'error'; error: Error }
-    | { kind: 'ready'; rows: TrackedPhoneNumber[]; allowedSources: PhoneSource[] }
-  >({ kind: 'loading' });
+  const { message } = App.useApp()
+  const [state, setState] = useState<TrackedState>({ kind: 'loading' })
   const [editing, setEditing] = useState<{
-    mode: 'create' | 'edit';
-    row?: TrackedPhoneNumber;
-  } | null>(null);
+    mode: 'create' | 'edit'
+    row?: TrackedPhoneNumber
+  } | null>(null)
 
   const load = useCallback(() => {
-    setState({ kind: 'loading' });
+    setState({ kind: 'loading' })
     fetchPhoneNumbers(workspaceId)
       .then((res) =>
         setState({
@@ -282,211 +326,256 @@ function TrackedNumbersSection({ workspaceId }: { workspaceId: string }) {
           allowedSources: res.allowedSources,
         }),
       )
-      .catch((err: Error) => setState({ kind: 'error', error: err }));
-  }, [workspaceId]);
+      .catch((err: Error) => setState({ kind: 'error', error: err }))
+  }, [workspaceId])
 
   useEffect(() => {
-    load();
-  }, [load]);
+    load()
+  }, [load])
+
+  const handleDelete = useCallback(
+    async (row: TrackedPhoneNumber) => {
+      try {
+        await deletePhoneNumber(workspaceId, row.id)
+        message.success('Numéro supprimé')
+        load()
+      } catch (err) {
+        message.error(
+          err instanceof VoipApiError ? err.message : 'Suppression impossible.',
+        )
+      }
+    },
+    [workspaceId, load, message],
+  )
+
+  const columns = [
+    {
+      title: 'Numéro',
+      dataIndex: 'e164',
+      key: 'e164',
+      render: (e164: string) => (
+        <span className="font-mono tabular-nums">{e164}</span>
+      ),
+    },
+    {
+      title: 'Source',
+      dataIndex: 'source',
+      key: 'source',
+      width: 220,
+      render: (source: PhoneSource) => (
+        <Tag color={SOURCE_TAG_COLOR[source] ?? 'default'}>
+          {SOURCE_LABELS[source] ?? source}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Libellé',
+      dataIndex: 'label',
+      key: 'label',
+      render: (label: string | null) =>
+        label ? label : <Text type="secondary">—</Text>,
+    },
+    {
+      title: '',
+      key: 'actions',
+      width: 90,
+      align: 'right' as const,
+      render: (_: unknown, row: TrackedPhoneNumber) => (
+        <Space size={0}>
+          <Button
+            type="text"
+            size="small"
+            icon={<EditOutlined />}
+            aria-label="Modifier"
+            onClick={() => setEditing({ mode: 'edit', row })}
+            data-testid={`phone-numbers-edit-${row.id}`}
+          />
+          <Popconfirm
+            title="Supprimer le numéro"
+            description="Cette action est irréversible."
+            onConfirm={() => handleDelete(row)}
+            okText="Supprimer"
+            cancelText="Annuler"
+            okButtonProps={{ danger: true }}
+          >
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              aria-label="Supprimer"
+              data-testid={`phone-numbers-delete-${row.id}`}
+            />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
 
   return (
-    <Card
-      className="veridian-fade-in-delay-1 border-border/60 bg-card/80"
+    <section
+      className="bg-white p-6 rounded-lg shadow-sm"
       data-testid="settings-section-phone-numbers"
     >
-      <CardContent className="space-y-4 p-6 sm:p-7">
-        <button
-          type="button"
-          className="flex w-full items-start gap-3 text-left"
-          onClick={() => setCollapsed((c) => !c)}
-          data-testid="phone-numbers-toggle"
-        >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-            <Hash className="h-5 w-5" />
-          </div>
-          <div className="flex-1 space-y-0.5">
-            <h2 className="text-lg font-semibold tracking-tight">
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex items-start gap-3">
+          <NumberOutlined className="text-xl mt-1 text-gray-500" />
+          <div>
+            <Title level={5} className="!mb-1">
               Numéros trackés
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              Associez chaque numéro de téléphone affiché sur vos supports à
-              sa source. Par exemple : votre numéro SEO sur le site web →
+            </Title>
+            <Text type="secondary">
+              Associez chaque numéro de téléphone affiché sur vos supports à sa
+              source. Par exemple : votre numéro SEO sur le site web →
               «&nbsp;SEO&nbsp;», votre numéro Google Ads → «&nbsp;Ads&nbsp;».
               Chaque appel sera automatiquement attribué à sa source dans les
               goals.
-            </p>
+            </Text>
           </div>
-          <div className="pt-1 text-muted-foreground">
-            {collapsed ? (
-              <ChevronRight className="h-5 w-5" />
-            ) : (
-              <ChevronDown className="h-5 w-5" />
-            )}
-          </div>
-        </button>
-
-        {!collapsed && (
-          <div className="space-y-4">
-            {state.kind === 'loading' && (
-              <div className="h-24 animate-pulse rounded-lg border border-border/50 bg-card/40" />
-            )}
-            {state.kind === 'error' && (
-              <PanelError error={state.error} onRetry={load} />
-            )}
-            {state.kind === 'ready' && (
-              <>
-                {state.rows.length === 0 ? (
-                  <EmptyTrackedNumbers
-                    onAdd={() => setEditing({ mode: 'create' })}
-                  />
-                ) : (
-                  <TrackedNumbersTable
-                    rows={state.rows}
-                    onEdit={(row) => setEditing({ mode: 'edit', row })}
-                    onDelete={async (row) => {
-                      try {
-                        await deletePhoneNumber(workspaceId, row.id);
-                        load();
-                      } catch {
-                        /* fail-soft : on garde la row, l'erreur s'affiche au prochain reload */
-                      }
-                    }}
-                  />
-                )}
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={() => setEditing({ mode: 'create' })}
-                    data-testid="phone-numbers-add-btn"
-                  >
-                    <Plus className="h-4 w-4" />
-                    Ajouter un numéro
-                  </Button>
-                </div>
-              </>
-            )}
-
-            {editing && state.kind === 'ready' && (
-              <PhoneNumberModal
-                workspaceId={workspaceId}
-                mode={editing.mode}
-                row={editing.row}
-                allowedSources={state.allowedSources}
-                onClose={() => setEditing(null)}
-                onSaved={() => {
-                  setEditing(null);
-                  load();
-                }}
-              />
-            )}
-          </div>
+        </div>
+        {state.kind === 'ready' && state.rows.length > 0 && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setEditing({ mode: 'create' })}
+            data-testid="phone-numbers-add-btn"
+          >
+            <span className="hidden md:inline">Ajouter un numéro</span>
+            <span className="md:hidden">Ajouter</span>
+          </Button>
         )}
-      </CardContent>
-    </Card>
-  );
+      </div>
+
+      {state.kind === 'loading' && (
+        <div className="flex justify-center py-8">
+          <Spin />
+        </div>
+      )}
+
+      {state.kind === 'error' && (
+        <Alert
+          type="error"
+          showIcon
+          message="Impossible de charger les numéros"
+          description={state.error.message}
+          action={
+            <Button size="small" icon={<ReloadOutlined />} onClick={load}>
+              Réessayer
+            </Button>
+          }
+        />
+      )}
+
+      {state.kind === 'ready' && (
+        <>
+          {state.rows.length === 0 ? (
+            <div className="py-4" data-testid="phone-numbers-empty">
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <span className="text-gray-500">
+                    Aucun numéro tracké pour le moment. Tant qu'un numéro n'est
+                    pas associé à une source, ses appels seront comptabilisés
+                    comme «&nbsp;direct&nbsp;».
+                  </span>
+                }
+              >
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={() => setEditing({ mode: 'create' })}
+                >
+                  Ajouter votre premier numéro
+                </Button>
+              </Empty>
+            </div>
+          ) : (
+            <>
+              {/* Mobile : cartes */}
+              <div className="md:hidden space-y-3">
+                {state.rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="rounded-lg border border-gray-200 p-4"
+                    data-testid={`phone-numbers-row-${row.id}`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-mono tabular-nums font-medium">
+                        {row.e164}
+                      </span>
+                      <Tag color={SOURCE_TAG_COLOR[row.source] ?? 'default'}>
+                        {SOURCE_LABELS[row.source] ?? row.source}
+                      </Tag>
+                    </div>
+                    {row.label && (
+                      <div className="text-gray-500 text-sm mt-1">
+                        {row.label}
+                      </div>
+                    )}
+                    <div className="flex gap-2 mt-3 pt-3 border-t border-gray-100">
+                      <Button
+                        block
+                        size="small"
+                        icon={<EditOutlined />}
+                        onClick={() => setEditing({ mode: 'edit', row })}
+                      >
+                        Modifier
+                      </Button>
+                      <Popconfirm
+                        title="Supprimer le numéro"
+                        description="Cette action est irréversible."
+                        onConfirm={() => handleDelete(row)}
+                        okText="Supprimer"
+                        cancelText="Annuler"
+                        okButtonProps={{ danger: true }}
+                      >
+                        <Button block size="small" icon={<DeleteOutlined />}>
+                          Supprimer
+                        </Button>
+                      </Popconfirm>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop : table */}
+              <div
+                className="hidden md:block"
+                data-testid="phone-numbers-table"
+              >
+                <Table
+                  dataSource={state.rows}
+                  columns={columns}
+                  rowKey="id"
+                  pagination={false}
+                  size="small"
+                />
+              </div>
+            </>
+          )}
+
+          {editing && (
+            <PhoneNumberModal
+              workspaceId={workspaceId}
+              mode={editing.mode}
+              row={editing.row}
+              allowedSources={state.allowedSources}
+              onClose={() => setEditing(null)}
+              onSaved={() => {
+                setEditing(null)
+                load()
+              }}
+            />
+          )}
+        </>
+      )}
+    </section>
+  )
 }
 
-function EmptyTrackedNumbers({ onAdd }: { onAdd: () => void }) {
-  return (
-    <div
-      className="rounded-lg border border-dashed border-border/60 bg-background/20 p-6 text-center"
-      data-testid="phone-numbers-empty"
-    >
-      <p className="text-sm text-muted-foreground">
-        Aucun numéro tracké pour le moment. Tant qu'un numéro n'est pas
-        associé à une source, ses appels seront comptabilisés comme
-        «&nbsp;direct&nbsp;».
-      </p>
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        className="mt-3"
-        onClick={onAdd}
-      >
-        <Plus className="h-4 w-4" />
-        Ajouter votre premier numéro
-      </Button>
-    </div>
-  );
-}
-
-function TrackedNumbersTable({
-  rows,
-  onEdit,
-  onDelete,
-}: {
-  rows: TrackedPhoneNumber[];
-  onEdit: (row: TrackedPhoneNumber) => void;
-  onDelete: (row: TrackedPhoneNumber) => void;
-}) {
-  return (
-    <div
-      className="overflow-hidden rounded-lg border border-border/50"
-      data-testid="phone-numbers-table"
-    >
-      <table className="w-full text-sm">
-        <thead className="bg-background/40 text-[11px] uppercase tracking-wider text-muted-foreground/70">
-          <tr>
-            <th className="px-4 py-2 text-left">Numéro</th>
-            <th className="px-4 py-2 text-left">Source</th>
-            <th className="px-4 py-2 text-left">Libellé</th>
-            <th className="px-4 py-2 text-right">Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.id}
-              className="border-t border-border/40"
-              data-testid={`phone-numbers-row-${row.id}`}
-            >
-              <td className="px-4 py-2 font-mono text-sm tabular-nums">
-                {row.e164}
-              </td>
-              <td className="px-4 py-2">
-                <span
-                  className={cn(
-                    'inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium',
-                    SOURCE_BADGE_TONE[row.source] ??
-                      SOURCE_BADGE_TONE.other,
-                  )}
-                >
-                  {SOURCE_LABELS[row.source] ?? row.source}
-                </span>
-              </td>
-              <td className="px-4 py-2 text-muted-foreground">
-                {row.label ?? '—'}
-              </td>
-              <td className="px-4 py-2 text-right">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onEdit(row)}
-                  aria-label="Modifier"
-                  data-testid={`phone-numbers-edit-${row.id}`}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onDelete(row)}
-                  aria-label="Supprimer"
-                  data-testid={`phone-numbers-delete-${row.id}`}
-                >
-                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
-                </Button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+interface PhoneNumberFormValues {
+  e164: string
+  source: PhoneSource
+  label?: string
 }
 
 function PhoneNumberModal({
@@ -497,168 +586,126 @@ function PhoneNumberModal({
   onClose,
   onSaved,
 }: {
-  workspaceId: string;
-  mode: 'create' | 'edit';
-  row?: TrackedPhoneNumber;
-  allowedSources: PhoneSource[];
-  onClose: () => void;
-  onSaved: () => void;
+  workspaceId: string
+  mode: 'create' | 'edit'
+  row?: TrackedPhoneNumber
+  allowedSources: PhoneSource[]
+  onClose: () => void
+  onSaved: () => void
 }) {
-  const [e164, setE164] = useState(row?.e164 ?? '');
-  const [source, setSource] = useState<PhoneSource>(row?.source ?? 'seo');
-  const [label, setLabel] = useState(row?.label ?? '');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { message } = App.useApp()
+  const [form] = Form.useForm<PhoneNumberFormValues>()
+  const [saving, setSaving] = useState(false)
 
   const submit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setSaving(true);
-      setError(null);
+    async (values: PhoneNumberFormValues) => {
+      setSaving(true)
       try {
         if (mode === 'create') {
           await createPhoneNumber(workspaceId, {
-            e164: e164.trim(),
-            source,
-            label: label.trim() || null,
-          });
+            e164: values.e164.trim(),
+            source: values.source,
+            label: values.label?.trim() || null,
+          })
+          message.success('Numéro ajouté')
         } else if (row) {
           await updatePhoneNumber(workspaceId, row.id, {
-            source,
-            label: label.trim() || null,
-          });
+            source: values.source,
+            label: values.label?.trim() || null,
+          })
+          message.success('Numéro mis à jour')
         }
-        onSaved();
+        onSaved()
       } catch (err) {
         if (err instanceof VoipApiError) {
           if (err.code === 'invalid_e164') {
-            setError(
+            message.error(
               'Format de numéro invalide. Saisissez un numéro E.164, par exemple +33177123456.',
-            );
+            )
           } else if (err.code === 'already_exists') {
-            setError('Ce numéro est déjà enregistré pour ce workspace.');
+            message.error('Ce numéro est déjà enregistré pour ce workspace.')
           } else {
-            setError(err.message);
+            message.error(err.message)
           }
         } else {
-          setError('Enregistrement impossible.');
+          message.error('Enregistrement impossible.')
         }
       } finally {
-        setSaving(false);
+        setSaving(false)
       }
     },
-    [mode, row, workspaceId, e164, source, label, onSaved],
-  );
+    [mode, row, workspaceId, onSaved, message],
+  )
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    <Modal
+      open
+      title={mode === 'create' ? 'Ajouter un numéro' : 'Modifier le numéro'}
+      onCancel={onClose}
+      onOk={() => form.submit()}
+      confirmLoading={saving}
+      okText={mode === 'create' ? 'Ajouter' : 'Enregistrer'}
+      cancelText="Annuler"
       data-testid="phone-numbers-modal"
-      role="dialog"
-      aria-modal="true"
     >
-      <Card className="w-full max-w-md border-border/70 bg-card shadow-xl">
-        <CardContent className="space-y-4 p-6">
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="text-lg font-semibold">
-              {mode === 'create'
-                ? 'Ajouter un numéro'
-                : 'Modifier le numéro'}
-            </h3>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={onClose}
-              aria-label="Fermer"
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </div>
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={submit}
+        className="mt-4"
+        initialValues={{
+          e164: row?.e164 ?? '',
+          source: row?.source ?? 'seo',
+          label: row?.label ?? '',
+        }}
+      >
+        <Form.Item
+          name="e164"
+          label="Numéro (E.164)"
+          rules={[{ required: true, message: 'Le numéro est obligatoire' }]}
+          extra={
+            mode === 'edit'
+              ? 'Le numéro ne peut pas être modifié. Pour le changer, supprimez puis recréez l\'entrée.'
+              : undefined
+          }
+        >
+          <Input
+            type="tel"
+            placeholder="+33177123456"
+            disabled={mode === 'edit'}
+            className="font-mono"
+            data-testid="phone-numbers-field-e164"
+          />
+        </Form.Item>
 
-          <form onSubmit={submit} className="space-y-4">
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                Numéro (E.164)
-              </label>
-              <input
-                type="tel"
-                value={e164}
-                onChange={(e) => setE164(e.target.value)}
-                placeholder="+33177123456"
-                disabled={mode === 'edit'}
-                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 font-mono text-sm disabled:opacity-60"
-                data-testid="phone-numbers-field-e164"
-                required
-              />
-              {mode === 'edit' && (
-                <p className="mt-1 text-[11px] text-muted-foreground/70">
-                  Le numéro ne peut pas être modifié. Pour le changer,
-                  supprimez puis recréez l'entrée.
-                </p>
-              )}
-            </div>
+        <Form.Item
+          name="source"
+          label="Source"
+          rules={[{ required: true, message: 'La source est obligatoire' }]}
+        >
+          <Select
+            options={allowedSources.map((s) => ({
+              value: s,
+              label: SOURCE_LABELS[s] ?? s,
+            }))}
+            data-testid="phone-numbers-field-source"
+          />
+        </Form.Item>
 
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                Source
-              </label>
-              <select
-                value={source}
-                onChange={(e) => setSource(e.target.value as PhoneSource)}
-                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
-                data-testid="phone-numbers-field-source"
-              >
-                {allowedSources.map((s) => (
-                  <option key={s} value={s}>
-                    {SOURCE_LABELS[s] ?? s}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
-                Libellé (optionnel)
-              </label>
-              <input
-                type="text"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="Ligne SEO, campagne été…"
-                maxLength={120}
-                className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
-                data-testid="phone-numbers-field-label"
-              />
-            </div>
-
-            {error && <InlineError message={error} />}
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onClose}
-                disabled={saving}
-              >
-                Annuler
-              </Button>
-              <Button
-                type="submit"
-                size="sm"
-                disabled={saving || (mode === 'create' && !e164.trim())}
-                data-testid="phone-numbers-save-btn"
-              >
-                {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-                {mode === 'create' ? 'Ajouter' : 'Enregistrer'}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
+        <Form.Item
+          name="label"
+          label="Libellé (optionnel)"
+          rules={[{ max: 120, message: 'Le libellé doit faire 120 caractères maximum' }]}
+        >
+          <Input
+            placeholder="Ligne SEO, campagne été…"
+            maxLength={120}
+            data-testid="phone-numbers-field-label"
+          />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
 }
 
 // ─── Synchro manuelle + où voir les appels (vues natives, PAS de liste) ────
@@ -677,123 +724,84 @@ function CallsHint({
   workspaceId,
   onRefresh,
 }: {
-  workspaceId: string;
-  onRefresh: () => void;
+  workspaceId: string
+  onRefresh: () => void
 }) {
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{
-    ok: boolean;
-    message: string;
-  } | null>(null);
+  const { message } = App.useApp()
+  const [syncing, setSyncing] = useState(false)
 
   const runSync = useCallback(async () => {
-    setSyncing(true);
-    setSyncResult(null);
+    setSyncing(true)
     try {
-      const r = await syncNow(workspaceId);
-      const n = r.pushedEvents;
-      setSyncResult({
-        ok: true,
-        message:
-          n === 0
-            ? 'Synchro terminée : aucun nouvel appel à remonter.'
-            : `Synchro terminée : ${n} appel${n > 1 ? 's' : ''} remonté${
-                n > 1 ? 's' : ''
-              }.`,
-      });
+      const r = await syncNow(workspaceId)
+      const n = r.pushedEvents
+      message.success(
+        n === 0
+          ? 'Synchro terminée : aucun nouvel appel à remonter.'
+          : `Synchro terminée : ${n} appel${n > 1 ? 's' : ''} remonté${
+              n > 1 ? 's' : ''
+            }.`,
+      )
       // Rafraîchit le panel pour mettre à jour « Dernière synchro ».
-      onRefresh();
+      onRefresh()
     } catch (err) {
-      setSyncResult({
-        ok: false,
-        message:
-          err instanceof VoipApiError
-            ? err.message
-            : 'Synchro impossible. Réessayez dans un instant.',
-      });
+      message.error(
+        err instanceof VoipApiError
+          ? err.message
+          : 'Synchro impossible. Réessayez dans un instant.',
+      )
     } finally {
-      setSyncing(false);
+      setSyncing(false)
     }
-  }, [workspaceId, onRefresh]);
+  }, [workspaceId, onRefresh, message])
 
   return (
-    <Card
-      className="veridian-fade-in-delay-2 border-border/60 bg-card/60"
+    <section
+      className="bg-white p-6 rounded-lg shadow-sm space-y-4"
       data-testid="voip-calls-hint"
     >
-      <CardContent className="space-y-4 p-5">
-        <p className="text-sm text-muted-foreground">
-          Vos appels remontent automatiquement comme objectifs
-          «&nbsp;phone_call&nbsp;» et apparaissent dans vos vues d'analyse,
-          attribués à leur source.
-        </p>
+      <Text type="secondary">
+        Vos appels remontent automatiquement comme objectifs
+        «&nbsp;phone_call&nbsp;» et apparaissent dans vos vues d'analyse,
+        attribués à leur source.
+      </Text>
 
-        {/* Déclencheur de synchro manuelle + feedback */}
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            size="sm"
-            onClick={runSync}
-            disabled={syncing}
-            data-testid="voip-sync-now-btn"
-          >
-            {syncing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RotateCw className="h-3.5 w-3.5" />
-            )}
-            Synchroniser maintenant
-          </Button>
-          {syncResult && (
-            <span
-              className={cn(
-                'inline-flex items-center gap-1.5 text-xs',
-                syncResult.ok ? 'text-emerald-400' : 'text-destructive',
-              )}
-              data-testid="voip-sync-result"
-            >
-              {syncResult.ok ? (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              ) : (
-                <AlertTriangle className="h-3.5 w-3.5" />
-              )}
-              {syncResult.message}
-            </span>
-          )}
-        </div>
-
-        {/* État de la synchro automatique (cron natif, gated VOIP_SYNC_ENABLED) */}
-        <div
-          className="flex items-start gap-2 rounded-md border border-border/50 bg-background/30 px-3 py-2 text-[11px] text-muted-foreground"
-          data-testid="voip-autosync-hint"
+      {/* Déclencheur de synchro manuelle */}
+      <div>
+        <Button
+          type="primary"
+          icon={<SyncOutlined spin={syncing} />}
+          loading={syncing}
+          onClick={runSync}
+          data-testid="voip-sync-now-btn"
         >
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>
-            La synchro automatique remonte vos appels toutes les 15 minutes
-            (si elle est activée sur votre instance). En cas de doute juste
-            après une configuration, utilisez «&nbsp;Synchroniser
-            maintenant&nbsp;».
-          </span>
-        </div>
+          Synchroniser maintenant
+        </Button>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-3 pt-1">
-          <a
-            href={`/workspaces/${workspaceId}/live`}
-            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-            data-testid="voip-link-live"
-          >
-            Voir les appels dans En direct →
-          </a>
-          <a
-            href={`/workspaces/${workspaceId}/explore?filters=event_name%3Dphone_call`}
-            className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-          >
-            Filtrer dans Explorer →
-          </a>
-        </div>
-      </CardContent>
-    </Card>
-  );
+      {/* État de la synchro automatique (cron natif, gated VOIP_SYNC_ENABLED) */}
+      <Alert
+        type="info"
+        showIcon
+        data-testid="voip-autosync-hint"
+        message="La synchro automatique remonte vos appels toutes les 15 minutes (si elle est activée sur votre instance). En cas de doute juste après une configuration, utilisez « Synchroniser maintenant »."
+      />
+
+      <Space size="large" wrap>
+        <Typography.Link
+          href={`/workspaces/${workspaceId}/live`}
+          data-testid="voip-link-live"
+        >
+          Voir les appels dans En direct →
+        </Typography.Link>
+        <Typography.Link
+          href={`/workspaces/${workspaceId}/explore?filters=event_name%3Dphone_call`}
+        >
+          Filtrer dans Explorer →
+        </Typography.Link>
+      </Space>
+    </section>
+  )
 }
 
 // ─── Credential card ─────────────────────────────────────────────────────
@@ -803,87 +811,86 @@ function CredentialCard({
   cred,
   onChanged,
 }: {
-  workspaceId: string;
-  cred: CredentialView;
-  onChanged: () => void;
+  workspaceId: string
+  cred: CredentialView
+  onChanged: () => void
 }) {
-  const [testing, setTesting] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [testMsg, setTestMsg] = useState<{
-    ok: boolean;
-    message: string;
-  } | null>(null);
+  const { message } = App.useApp()
+  const [testing, setTesting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const runTest = useCallback(async () => {
-    setTesting(true);
-    setTestMsg(null);
+    setTesting(true)
     try {
-      const r = await testCredential(workspaceId, cred.kind);
-      setTestMsg({ ok: r.ok, message: r.message });
-      onChanged();
+      const r = await testCredential(workspaceId, cred.kind)
+      if (r.ok) message.success(r.message)
+      else message.error(r.message)
+      onChanged()
     } catch (err) {
-      setTestMsg({
-        ok: false,
-        message:
-          err instanceof VoipApiError
-            ? err.message
-            : 'Test impossible.',
-      });
+      message.error(
+        err instanceof VoipApiError ? err.message : 'Test impossible.',
+      )
     } finally {
-      setTesting(false);
+      setTesting(false)
     }
-  }, [workspaceId, cred.kind, onChanged]);
+  }, [workspaceId, cred.kind, onChanged, message])
 
   const runDelete = useCallback(async () => {
-    setDeleting(true);
+    setDeleting(true)
     try {
-      await deleteCredential(workspaceId, cred.kind);
-      onChanged();
-    } catch {
-      setDeleting(false);
+      await deleteCredential(workspaceId, cred.kind)
+      message.success('Identifiants supprimés')
+      onChanged()
+    } catch (err) {
+      message.error(
+        err instanceof VoipApiError ? err.message : 'Suppression impossible.',
+      )
+      setDeleting(false)
     }
-  }, [workspaceId, cred.kind, onChanged]);
+  }, [workspaceId, cred.kind, onChanged, message])
 
   return (
     <div
-      className="rounded-lg border border-border/50 bg-background/30 p-4"
+      className="rounded-lg border border-gray-200 p-4"
       data-testid={`voip-cred-${cred.kind}`}
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium">{cred.label}</span>
-          <StatusBadge status={cred.status} />
+          <span className="font-medium">{cred.label}</span>
+          <StatusTag status={cred.status} />
         </div>
-        <div className="flex items-center gap-2">
+        <Space>
           <Button
-            type="button"
-            variant="outline"
-            size="sm"
+            size="small"
+            icon={<ReloadOutlined />}
+            loading={testing}
+            disabled={deleting}
             onClick={runTest}
-            disabled={testing || deleting}
             data-testid={`voip-test-${cred.kind}`}
           >
-            {testing ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="h-3.5 w-3.5" />
-            )}
             Tester la connexion
           </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={runDelete}
-            disabled={testing || deleting}
-            data-testid={`voip-delete-${cred.kind}`}
-            aria-label="Supprimer"
+          <Popconfirm
+            title="Supprimer les identifiants"
+            description="Cette action est irréversible. La synchro des appels sera interrompue."
+            onConfirm={runDelete}
+            okText="Supprimer"
+            cancelText="Annuler"
+            okButtonProps={{ danger: true }}
           >
-            <Trash2 className="h-3.5 w-3.5 text-destructive" />
-          </Button>
-        </div>
+            <Button
+              type="text"
+              size="small"
+              icon={<DeleteOutlined />}
+              loading={deleting}
+              disabled={testing}
+              aria-label="Supprimer"
+              data-testid={`voip-delete-${cred.kind}`}
+            />
+          </Popconfirm>
+        </Space>
       </div>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
         {Object.entries(cred.masked).map(([k, v]) => (
           <span key={k}>
             {k}: <span className="tabular-nums">{v}</span>
@@ -891,26 +898,15 @@ function CredentialCard({
         ))}
       </div>
       {cred.lastSyncAt && (
-        <p className="mt-2 text-[11px] text-muted-foreground/70">
+        <p className="mt-2 text-xs text-gray-400">
           Dernière synchro : {formatDate(cred.lastSyncAt)}
         </p>
       )}
-      {cred.lastError && !testMsg && (
-        <p className="mt-2 text-xs text-destructive">{cred.lastError}</p>
-      )}
-      {testMsg && (
-        <p
-          className={cn(
-            'mt-2 text-xs',
-            testMsg.ok ? 'text-emerald-400' : 'text-destructive',
-          )}
-          data-testid={`voip-test-result-${cred.kind}`}
-        >
-          {testMsg.message}
-        </p>
+      {cred.lastError && (
+        <p className="mt-2 text-xs text-red-500">{cred.lastError}</p>
       )}
     </div>
-  );
+  )
 }
 
 function CredentialForm({
@@ -919,175 +915,79 @@ function CredentialForm({
   fields,
   onSaved,
 }: {
-  workspaceId: string;
-  kind: CredentialKind;
-  fields: Array<{ name: string; label: string; placeholder: string }>;
-  onSaved: () => void;
+  workspaceId: string
+  kind: CredentialKind
+  fields: Array<{ name: string; label: string; placeholder: string }>
+  onSaved: () => void
 }) {
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const allFilled = fields.every((f) => (values[f.name] ?? '').trim().length > 0);
+  const { message } = App.useApp()
+  const [form] = Form.useForm<Record<string, string>>()
+  const [saving, setSaving] = useState(false)
 
   const submit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setSaving(true);
-      setError(null);
+    async (values: Record<string, string>) => {
+      setSaving(true)
       try {
-        await saveCredential(workspaceId, kind, values);
-        setValues({});
-        onSaved();
+        await saveCredential(workspaceId, kind, values)
+        form.resetFields()
+        message.success('Identifiants enregistrés et chiffrés')
+        onSaved()
       } catch (err) {
-        setError(
+        message.error(
           err instanceof VoipApiError
             ? err.message
             : 'Enregistrement impossible.',
-        );
+        )
       } finally {
-        setSaving(false);
+        setSaving(false)
       }
     },
-    [workspaceId, kind, values, onSaved],
-  );
+    [workspaceId, kind, onSaved, form, message],
+  )
 
   return (
-    <form onSubmit={submit} className="mt-3 space-y-3" data-testid="voip-form">
+    <Form
+      form={form}
+      layout="vertical"
+      onFinish={submit}
+      data-testid="voip-form"
+    >
       {fields.map((f) => (
-        <div key={f.name}>
-          <label className="block text-[11px] uppercase tracking-wider text-muted-foreground/70">
-            {f.label}
-          </label>
-          <input
-            type="password"
+        <Form.Item
+          key={f.name}
+          name={f.name}
+          label={f.label}
+          rules={[{ required: true, message: `${f.label} est obligatoire` }]}
+        >
+          <Input.Password
             autoComplete="off"
             placeholder={f.placeholder}
-            value={values[f.name] ?? ''}
-            onChange={(e) =>
-              setValues((v) => ({ ...v, [f.name]: e.target.value }))
-            }
-            className="mt-1 w-full rounded-md border border-border/60 bg-background/60 px-3 py-2 text-sm"
             data-testid={`voip-field-${f.name}`}
           />
-        </div>
+        </Form.Item>
       ))}
-      {error && <InlineError message={error} />}
       <Button
-        type="submit"
-        size="sm"
-        disabled={saving || !allFilled}
+        type="primary"
+        htmlType="submit"
+        icon={<CheckCircleOutlined />}
+        loading={saving}
         data-testid="voip-save-btn"
       >
-        {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-        Enregistrer & chiffrer
+        Enregistrer &amp; chiffrer
       </Button>
-      <p className="text-[11px] text-muted-foreground/70">
-        Vos identifiants sont chiffrés (AES-256-GCM) avant stockage. Ils ne
-        sont jamais réaffichés en clair.
-      </p>
-    </form>
-  );
+      <Paragraph type="secondary" className="!mt-3 !mb-0 text-xs">
+        {SECRET_NOTICE}
+      </Paragraph>
+    </Form>
+  )
 }
 
 // ─── Primitives partagées ────────────────────────────────────────────────
 
-function Section({
-  icon: Icon,
-  title,
-  description,
-  children,
-  testId,
-}: {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-  testId: string;
-}) {
-  return (
-    <Card
-      className="veridian-fade-in-delay-1 border-border/60 bg-card/80"
-      data-testid={testId}
-    >
-      <CardContent className="space-y-5 p-6 sm:p-7">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-primary/30 bg-primary/10 text-primary">
-            <Icon className="h-5 w-5" />
-          </div>
-          <div className="space-y-0.5">
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-            {description && (
-              <p className="text-sm text-muted-foreground">{description}</p>
-            )}
-          </div>
-        </div>
-        <div className="space-y-4">{children}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === 'ok')
-    return <Badge variant="success">Connexion OK</Badge>;
-  if (status === 'failed')
-    return <Badge variant="destructive">Échec</Badge>;
-  return <Badge variant="warning">Non testé</Badge>;
-}
-
-function InlineError({ message }: { message: string }) {
-  return (
-    <p
-      className="flex items-center gap-1.5 text-xs text-destructive"
-      data-testid="settings-inline-error"
-    >
-      <AlertTriangle className="h-3.5 w-3.5" />
-      {message}
-    </p>
-  );
-}
-
-function PanelSkeleton() {
-  return (
-    <div className="space-y-6" data-testid="voip-panel-skeleton">
-      {[0, 1].map((i) => (
-        <div
-          key={i}
-          className="h-40 animate-pulse rounded-lg border border-border/50 bg-card/40"
-        />
-      ))}
-    </div>
-  );
-}
-
-function PanelError({
-  error,
-  onRetry,
-}: {
-  error: Error;
-  onRetry: () => void;
-}) {
-  return (
-    <Card className="border-destructive/40 bg-destructive/5">
-      <CardContent
-        className="flex flex-col items-start gap-3 p-6"
-        data-testid="voip-panel-error"
-      >
-        <div className="flex items-center gap-2 text-destructive">
-          <AlertTriangle className="h-5 w-5" />
-          <span className="font-medium">
-            Impossible de charger les paramètres VoIP
-          </span>
-        </div>
-        <p className="text-sm text-muted-foreground">{error.message}</p>
-        <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-          <RefreshCw className="h-4 w-4" />
-          Réessayer
-        </Button>
-      </CardContent>
-    </Card>
-  );
+function StatusTag({ status }: { status: string }) {
+  if (status === 'ok') return <Tag color="success">Connexion OK</Tag>
+  if (status === 'failed') return <Tag color="error">Échec</Tag>
+  return <Tag color="default">Non testé</Tag>
 }
 
 function formatDate(iso: string): string {
@@ -1095,8 +995,8 @@ function formatDate(iso: string): string {
     return new Intl.DateTimeFormat('fr-FR', {
       dateStyle: 'medium',
       timeStyle: 'short',
-    }).format(new Date(iso));
+    }).format(new Date(iso))
   } catch {
-    return iso;
+    return iso
   }
 }
