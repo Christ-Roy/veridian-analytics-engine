@@ -88,3 +88,6 @@ Faible en soi (c'est de l'hygiène de backlog), mais IMPORTANT pour ne pas qu'un
 futur agent code un émetteur PUSH redondant en lisant le ticket legacy → double
 ingestion = double comptage des `page.hit` = score prospect faussé. Fermer le
 ticket évite ce piège. Le vrai débloquage du tunnel cold↔web est côté Hub (ENV).
+## Réponse — 2026-06-18 (team-lead)
+
+Fait : ticket legacy `veridian-analytics/todo/2026-06-17-emettre-page-hit-vid-vers-hub-reconciliateur.md` annoté (design PULL, engine n'émet rien) + archivé dans le `done/` du legacy. Les tickets Hub (ENV ENGINE_ADMIN_* P0 + route webhook PUSH à annuler) restent à router à l'agent Hub.
