@@ -372,7 +372,7 @@ export function DashboardGrid({
   const tabKeyToDimension: Record<string, string> = useMemo(() => ({
     // Pages
     landing: 'landing_path',
-    exit: 'exit_path',
+    exits: 'exit_path',
     // Sources
     referrers: 'referrer_domain',
     channels: 'channel',
@@ -503,20 +503,6 @@ export function DashboardGrid({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          {/* Pas de onRowClick : un filtre `page_path` (dimension propre à la
-              table `pages`) propagé aux filtres globaux casserait tous les
-              widgets sur les tables `sessions`/`goals` (le backend rejette une
-              dimension absente de la table interrogée). Widget informatif. */}
-          <DimensionTableWidget
-            title="Pages les plus vues"
-            infoTooltip="Pages les plus consultées, avec le temps médian passé, la profondeur de scroll médiane et le taux de sortie"
-            tabs={pageViewsTabConfig}
-            columns={pageViewsColumns}
-            emptyText="Aucune donnée de page"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           <DimensionTableWidget
             title="Campagnes principales"
             tabs={campaignsTabConfig}
@@ -552,6 +538,19 @@ export function DashboardGrid({
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+          {/* Pas de onRowClick sur « Pages les plus vues » : un filtre
+              `page_path` (dimension propre à la table `pages`) propagé aux
+              filtres globaux casserait tous les widgets sur les tables
+              `sessions`/`goals` (le backend rejette une dimension absente de la
+              table interrogée). Widget informatif, apparié avec « Objectifs »
+              pour remplir la rangée. */}
+          <DimensionTableWidget
+            title="Pages les plus vues"
+            infoTooltip="Pages les plus consultées, avec le temps médian passé, la profondeur de scroll médiane et le taux de sortie"
+            tabs={pageViewsTabConfig}
+            columns={pageViewsColumns}
+            emptyText="Aucune donnée de page"
+          />
           <DimensionTableWidget
             title="Objectifs"
             infoTooltip="Suivez les conversions de vos objectifs et leur valeur totale"

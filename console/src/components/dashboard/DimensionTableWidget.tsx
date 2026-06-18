@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useCallback } from 'react'
 import { Tooltip, Empty, Spin, Drawer, Pagination } from 'antd'
 import { ChevronUp, ChevronDown, ArrowUp, ArrowDown, Info, Maximize2, TrendingUp } from 'lucide-react'
 import { formatValue, formatCurrency } from '../../lib/chart-utils'
-import { getHeatMapStyle } from '../../lib/explore-utils'
+import { getHeatMapStyle, EMPTY_VALUE_LABEL } from '../../lib/explore-utils'
 import { useDimensionQuery } from '../../hooks/useDimensionQuery'
 import { useDashboardContext } from '../../hooks/useDashboardContext'
 import { CountryMapView } from './CountryMapView'
@@ -244,7 +244,7 @@ export function DimensionTableWidget({
                     />
                     {iconPrefix?.(row.dimension_value, activeTabKey)}
                     <span className="relative whitespace-nowrap md:truncate text-xs text-gray-700 pr-2">
-                      {row.dimension_value || '(empty)'}
+                      {row.dimension_value || EMPTY_VALUE_LABEL}
                     </span>
                   </div>
                 )
@@ -491,7 +491,7 @@ function DimensionRow({
   getChange,
 }: DimensionRowProps) {
   const percent = ((row[sortBy] as number) / maxValue) * 100
-  const displayValue = row.dimension_value || '(empty)'
+  const displayValue = row.dimension_value || EMPTY_VALUE_LABEL
 
   return (
     <div

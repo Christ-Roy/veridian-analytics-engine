@@ -1,5 +1,4 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
-import { ConfigProvider } from 'antd'
 import type { RouterContext } from '../router'
 import { DemoBanner } from '../veridian/demo-banner'
 import { DemoFooter } from '../veridian/demo-footer'
@@ -8,22 +7,17 @@ import { NotFoundPage, AppErrorPage } from '../veridian/error-pages'
 function RootLayout() {
   // DemoBanner / DemoFooter render nothing unless IS_DEMO=true (gated on
   // publicConfig from AuthContext), so the internal console is unaffected.
+  // Le thème AntD (colorPrimary/colorLink + overrides Card/Table + locale fr)
+  // est défini une seule fois dans main.tsx ; pas de ConfigProvider imbriqué
+  // ici pour éviter d'écraser ces overrides.
   return (
-    <ConfigProvider
-      theme={{
-        token: {
-          colorPrimary: '#7763f1',
-        },
-      }}
-    >
-      <div className="flex min-h-screen flex-col">
-        <DemoBanner />
-        <div className="flex-1">
-          <Outlet />
-        </div>
-        <DemoFooter />
+    <div className="flex min-h-screen flex-col">
+      <DemoBanner />
+      <div className="flex-1">
+        <Outlet />
       </div>
-    </ConfigProvider>
+      <DemoFooter />
+    </div>
   )
 }
 

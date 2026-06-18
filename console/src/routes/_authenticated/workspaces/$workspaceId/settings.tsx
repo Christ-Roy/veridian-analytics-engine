@@ -3,7 +3,20 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery, useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
 import { App, Form, Input, InputNumber, Button, Select, Table, Tag, Modal, Avatar, Spin, Tooltip, Switch } from 'antd'
 import { SearchOutlined, EditOutlined, LoadingOutlined, PlusOutlined, InfoCircleOutlined } from '@ant-design/icons'
-import { PhoneCall, Search as SearchIcon, Plug } from 'lucide-react'
+import {
+  PhoneCall,
+  Search as SearchIcon,
+  Plug,
+  Building2,
+  Tags,
+  Users,
+  Puzzle,
+  Mail,
+  KeyRound,
+  ShieldCheck,
+  Code2,
+  TriangleAlert,
+} from 'lucide-react'
 import { api } from '../../../../lib/api'
 import { workspaceQueryOptions } from '../../../../lib/queries'
 import { IntegrationsSettings } from '../../../../components/settings/IntegrationsSettings'
@@ -74,19 +87,22 @@ type MenuItem = {
   icon?: React.ComponentType<{ size?: number; className?: string }>
 }
 
+// Icône lucide (taille 14) sur CHAQUE item pour un menu uniforme : les
+// features Veridian (voip/search-console/connectors) ne doivent pas ressortir
+// du reste du menu — elles se fondent dans le natif.
 const menuItems: MenuItem[] = [
-  { key: 'workspace', label: 'Espace de travail' },
-  { key: 'dimensions', label: 'Dimensions personnalisées' },
-  { key: 'team', label: 'Équipe' },
-  { key: 'integrations', label: 'Intégrations' },
-  { key: 'smtp', label: 'Email (SMTP)' },
-  { key: 'api-keys', label: 'Clés API' },
-  { key: 'privacy', label: 'Confidentialité' },
-  { key: 'sdk', label: 'Installer le SDK' },
+  { key: 'workspace', label: 'Espace de travail', icon: Building2 },
+  { key: 'dimensions', label: 'Dimensions personnalisées', icon: Tags },
+  { key: 'team', label: 'Équipe', icon: Users },
+  { key: 'integrations', label: 'Intégrations', icon: Puzzle },
+  { key: 'smtp', label: 'Email (SMTP)', icon: Mail },
+  { key: 'api-keys', label: 'Clés API', icon: KeyRound },
+  { key: 'privacy', label: 'Confidentialité', icon: ShieldCheck },
+  { key: 'sdk', label: 'Installer le SDK', icon: Code2 },
   { key: 'voip', label: 'Téléphonie / VoIP', icon: PhoneCall },
   { key: 'search-console', label: 'Search Console', icon: SearchIcon },
   { key: 'connectors', label: 'Connecteurs', icon: Plug },
-  { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
+  { key: 'danger', label: 'Zone dangereuse', ownerOnly: true, icon: TriangleAlert },
 ]
 
 function Settings() {

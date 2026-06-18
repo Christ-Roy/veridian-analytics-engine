@@ -3,7 +3,7 @@ import { ArrowUpOutlined, ArrowDownOutlined, MinusOutlined } from '@ant-design/i
 import type { ExploreTotals } from '../../types/explore'
 import type { CustomDimensionLabels, Annotation } from '../../types/workspace'
 import { formatNumber } from '../../lib/chart-utils'
-import { getHeatMapColor, getDimensionLabel } from '../../lib/explore-utils'
+import { getHeatMapColor, getDimensionLabel, EMPTY_VALUE_LABEL } from '../../lib/explore-utils'
 import { DaysOfWeek } from '../../lib/dictionaries'
 
 interface ExploreSummaryProps {
@@ -143,7 +143,7 @@ export function ExploreSummary({
                     <span className="text-gray-500">{getDimensionLabel(dim, customDimensionLabels)}:</span>
                     <span className="font-medium">
                       {value === null || value === ''
-                        ? '(non défini)'
+                        ? EMPTY_VALUE_LABEL
                         : dim === 'day_of_week' && typeof value === 'number'
                           ? DaysOfWeek[value] ?? String(value)
                           : String(value)}

@@ -20,7 +20,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { analyticsDimensionsQueryOptions } from '../../lib/queries'
-import { groupDimensionsByCategory, getDimensionLabel, getDimensionExamples } from '../../lib/explore-utils'
+import { groupDimensionsByCategory, getDimensionLabel, getDimensionExamples, getCategoryLabel, sortCategoriesByOrder } from '../../lib/explore-utils'
 import type { DimensionInfo } from '../../types/explore'
 import type { CustomDimensionLabels } from '../../types/workspace'
 
@@ -124,15 +124,7 @@ export function DimensionSelector({ value, onChange, customDimensionLabels }: Di
 
   // Filter dimensions by search term
   const filteredByCategory = useMemo(() => {
-    const categoryOrder = ['UTM', 'Traffic', 'Pages', 'Device', 'Time', 'Geo', 'Custom']
-    const sortedCategories = Object.keys(dimensionsByCategory).sort((a, b) => {
-      const aIndex = categoryOrder.indexOf(a)
-      const bIndex = categoryOrder.indexOf(b)
-      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)
-      if (aIndex === -1) return 1
-      if (bIndex === -1) return -1
-      return aIndex - bIndex
-    })
+    const sortedCategories = sortCategoriesByOrder(Object.keys(dimensionsByCategory))
 
     const result: Record<string, Array<{ name: string; type: string; category: string }>> = {}
     for (const category of sortedCategories) {
@@ -173,17 +165,17 @@ export function DimensionSelector({ value, onChange, customDimensionLabels }: Di
           Object.entries(filteredByCategory).map(([category, dims]) => (
             <div key={category}>
               <div className="text-[10px] font-semibold text-[var(--primary)] uppercase px-3 py-1">
-                {category === 'Custom' ? 'Custom Dimensions' : category}
+                {getCategoryLabel(category)}
               </div>
               {dims.map((dim) => {
                 const examples = getDimensionExamples(dim.name)
                 const tooltipContent = (
                   <div className="text-xs">
                     <div className="font-mono text-gray-300">{dim.name}</div>
-                    <div className="text-gray-400">Type: {dim.type}</div>
+                    <div className="text-gray-400">Type : {dim.type}</div>
                     {examples && (
                       <div className="mt-1 text-gray-400">
-                        e.g. {examples[0]}, {examples[1]}
+                        ex. {examples[0]}, {examples[1]}
                       </div>
                     )}
                   </div>
@@ -230,7 +222,7 @@ export function DimensionSelector({ value, onChange, customDimensionLabels }: Di
               icon={<PlusCircleOutlined />}
               disabled={allDimensionsSelected}
             >
-              Add dimension
+              Ajouter une dimension
             </Button>
           </Dropdown>
 

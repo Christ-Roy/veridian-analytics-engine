@@ -2,7 +2,7 @@ import { Drawer, Divider, Space, Tag } from 'antd'
 import { useQueries } from '@tanstack/react-query'
 import { api } from '../../lib/api'
 import { BreakdownTableView } from './BreakdownTable'
-import { getDimensionLabel } from '../../lib/explore-utils'
+import { getDimensionLabel, EMPTY_VALUE_LABEL } from '../../lib/explore-utils'
 import type { ExploreRow } from '../../types/explore'
 import type { Filter, DateRange } from '../../types/analytics'
 import type { CustomDimensionLabels } from '../../types/workspace'
@@ -40,11 +40,9 @@ export function BreakdownDrawer({
   const currentDimension = dimensions[selectedRow.parentDimensionIndex]
   const dimensionValue = selectedRow[currentDimension]
   const displayValue =
-    dimensionValue === null
-      ? '(not set)'
-      : dimensionValue === ''
-        ? '(empty)'
-        : String(dimensionValue)
+    dimensionValue === null || dimensionValue === ''
+      ? EMPTY_VALUE_LABEL
+      : String(dimensionValue)
 
   // Parallel queries for all breakdown dimensions
   const breakdownQueries = useQueries({

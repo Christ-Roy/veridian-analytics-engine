@@ -2,6 +2,155 @@ import type { Filter } from '../types/analytics'
 import type { ExploreRow, ChildrenQueryConfig, DimensionsByCategory, DimensionInfo } from '../types/explore'
 
 /**
+ * Libellé unique affiché pour une valeur de dimension vide/nulle. Source
+ * unique pour éviter le mélange « (empty) » / « (non défini) » entre écrans.
+ */
+export const EMPTY_VALUE_LABEL = '(vide)'
+
+/**
+ * Ordre d'affichage canonique des catégories de dimensions, partagé par les
+ * 3 sélecteurs (DimensionSelector, BreakdownModal, ExploreFilterBuilder) pour
+ * un tri identique partout. Les catégories absentes de cette liste tombent en
+ * fin via tri alphabétique (cf. sortCategoriesByOrder). Les noms correspondent
+ * aux `category` du backend (api/src/analytics/constants/dimensions.ts).
+ * « Téléphonie » (source d'événements métier Veridian) est placée juste après
+ * les pages pour ne pas tomber orpheline en fin de liste.
+ */
+export const CATEGORY_ORDER = [
+  'Traffic',
+  'UTM',
+  'Channel',
+  'Session Pages',
+  'Page',
+  'Téléphonie',
+  'Goal',
+  'Session',
+  'Device',
+  'Geo',
+  'Time',
+  'User',
+  'Custom',
+] as const
+
+/**
+ * Libellés FR des catégories de dimensions (en-têtes de groupe dans les
+ * sélecteurs). Source unique pour éviter le mélange EN/FR et les divergences
+ * entre écrans (ex. « Custom Dimensions » vs « Dimensions personnalisées »).
+ */
+export const CATEGORY_LABELS_FR: Record<string, string> = {
+  Traffic: 'Trafic',
+  UTM: 'UTM',
+  Channel: 'Canaux',
+  'Session Pages': 'Pages de session',
+  Page: 'Pages',
+  Téléphonie: 'Téléphonie',
+  Goal: 'Objectifs',
+  Session: 'Session',
+  Device: 'Appareils',
+  Geo: 'Géographie',
+  Time: 'Temps',
+  User: 'Utilisateur',
+  Custom: 'Dimensions personnalisées',
+}
+
+/**
+ * Libellé FR d'affichage d'une catégorie (fallback : le nom brut).
+ */
+export function getCategoryLabel(category: string): string {
+  return CATEGORY_LABELS_FR[category] ?? category
+}
+
+/**
+ * Trie une liste de catégories selon CATEGORY_ORDER. Les catégories hors liste
+ * sont placées en fin, triées alphabétiquement entre elles.
+ */
+export function sortCategoriesByOrder(categories: string[]): string[] {
+  const order = CATEGORY_ORDER as readonly string[]
+  return [...categories].sort((a, b) => {
+    const aIndex = order.indexOf(a)
+    const bIndex = order.indexOf(b)
+    if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)
+    if (aIndex === -1) return 1
+    if (bIndex === -1) return -1
+    return aIndex - bIndex
+  })
+}
+
+/**
+ * Libellés FR explicites des dimensions, consultés en priorité par
+ * getDimensionLabel avant le fallback Title Case. Couvre les dimensions
+ * exposées dans l'UI (trafic, UTM, pages, device, geo, time, goal + phone_*).
+ * Les dimensions custom `stm_*` gardent leur traitement dédié (libellé
+ * workspace ou numéro de slot).
+ */
+const DIMENSION_LABELS_FR: Record<string, string> = {
+  // Trafic
+  referrer: 'Référent',
+  referrer_domain: 'Domaine référent',
+  referrer_path: 'Chemin référent',
+  is_direct: 'Accès direct',
+  // UTM
+  utm_source: 'Source UTM',
+  utm_medium: 'Support UTM',
+  utm_campaign: 'Campagne UTM',
+  utm_term: 'Mot-clé UTM',
+  utm_content: 'Contenu UTM',
+  // Canaux
+  channel: 'Canal',
+  channel_group: 'Groupe de canaux',
+  // Pages de session
+  landing_page: "Page d'entrée",
+  landing_domain: "Domaine d'entrée",
+  landing_path: "Chemin d'entrée",
+  exit_path: 'Chemin de sortie',
+  // Pages
+  page_path: 'Chemin de page',
+  page_number: 'Numéro de page',
+  is_landing_page: "Page d'entrée",
+  is_exit_page: 'Page de sortie',
+  page_entry_type: "Type d'entrée de page",
+  // Téléphonie
+  phone_source: "Source d'appel",
+  phone_direction: "Sens d'appel",
+  phone_status: "Statut d'appel",
+  // Appareils
+  device: 'Appareil',
+  browser: 'Navigateur',
+  browser_type: 'Type de navigateur',
+  os: "Système d'exploitation",
+  screen_width: "Largeur d'écran",
+  screen_height: "Hauteur d'écran",
+  viewport_width: 'Largeur du viewport',
+  viewport_height: 'Hauteur du viewport',
+  connection_type: 'Type de connexion',
+  // Session
+  duration: 'Durée',
+  pageview_count: 'Nombre de pages vues',
+  sdk_version: 'Version du SDK',
+  // Temps
+  year: 'Année',
+  month: 'Mois',
+  day: 'Jour',
+  day_of_week: 'Jour de la semaine',
+  week_number: 'Numéro de semaine',
+  hour: 'Heure',
+  is_weekend: 'Week-end',
+  // Géographie
+  country: 'Pays',
+  region: 'Région',
+  city: 'Ville',
+  latitude: 'Latitude',
+  longitude: 'Longitude',
+  language: 'Langue',
+  timezone: 'Fuseau horaire',
+  // Objectifs
+  goal_name: "Nom de l'objectif",
+  goal_path: "Chemin de l'objectif",
+  // Utilisateur
+  user_id: 'Identifiant utilisateur',
+}
+
+/**
  * Example values for each dimension to show in tooltips
  */
 const DIMENSION_EXAMPLES: Record<string, [string, string]> = {
@@ -382,7 +531,12 @@ export function getDimensionLabel(
     return slotNumber
   }
 
-  // Convert snake_case to Title Case
+  // Libellé FR explicite si connu (app commercialisée en France)
+  if (DIMENSION_LABELS_FR[dimensionName]) {
+    return DIMENSION_LABELS_FR[dimensionName]
+  }
+
+  // Fallback : snake_case -> Title Case
   return dimensionName
     .split('_')
     .map((word) => word.charAt(0).toUpperCase() + word.slice(1))

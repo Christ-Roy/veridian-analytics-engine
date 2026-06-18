@@ -1,6 +1,6 @@
 import dayjs from 'dayjs'
 import { formatDuration } from './chart-utils'
-import { getDimensionLabel } from './explore-utils'
+import { getDimensionLabel, EMPTY_VALUE_LABEL } from './explore-utils'
 import type { CustomDimensionLabels } from '../types/workspace'
 
 /**
@@ -70,7 +70,7 @@ export function rowToCSVValues(
   const values = [
     ...dimensions.map(d => {
       const val = row[d]
-      return val === null || val === undefined || val === '' ? '(empty)' : String(val)
+      return val === null || val === undefined || val === '' ? EMPTY_VALUE_LABEL : String(val)
     }),
     String(sessions),
     sessionPercent,

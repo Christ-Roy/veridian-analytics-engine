@@ -3,7 +3,7 @@ import { App, Modal, Button, Tag, Empty, Checkbox, Row, Col } from 'antd'
 import { CloseOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { analyticsDimensionsQueryOptions } from '../../lib/queries'
-import { groupDimensionsByCategory, getDimensionLabel } from '../../lib/explore-utils'
+import { groupDimensionsByCategory, getDimensionLabel, sortCategoriesByOrder } from '../../lib/explore-utils'
 import type { DimensionInfo } from '../../types/explore'
 import type { CustomDimensionLabels } from '../../types/workspace'
 
@@ -38,15 +38,12 @@ export function BreakdownModal({
   }, [dimensionsData])
 
   const filteredByCategory = useMemo(() => {
-    const categoryOrder = ['UTM', 'Traffic', 'Channel', 'Geo', 'Pages', 'Device', 'Time', 'Custom']
-    const sortedCategories = Object.keys(dimensionsByCategory).sort((a, b) => {
-      const aIndex = categoryOrder.indexOf(a)
-      const bIndex = categoryOrder.indexOf(b)
-      if (aIndex === -1 && bIndex === -1) return a.localeCompare(b)
-      if (aIndex === -1) return 1
-      if (bIndex === -1) return -1
-      return aIndex - bIndex
-    })
+    // Ordre partagé (cohérent avec les 2 autres sélecteurs). NB : le rendu
+    // ci-dessous est un layout 4-colonnes manuel qui pioche des catégories
+    // précises (Channel/UTM/Traffic/Pages/Time/Geo/Device/Custom) ; ce tri
+    // n'influe donc pas directement sur la disposition mais reste la source
+    // unique pour éviter les divergences entre fichiers.
+    const sortedCategories = sortCategoriesByOrder(Object.keys(dimensionsByCategory))
 
     const result: Record<string, Array<{ name: string; type: string; category: string }>> = {}
     for (const category of sortedCategories) {
