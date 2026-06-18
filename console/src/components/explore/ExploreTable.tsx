@@ -4,7 +4,7 @@ import { SquarePlus, SquareMinus, Loader2, ChevronUp, ChevronDown, TriangleAlert
 import { EyeOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { HeatMapCell } from './HeatMapCell'
-import { getDimensionLabel, canExpandRow, getHeatMapColor } from '../../lib/explore-utils'
+import { getDimensionLabel, canExpandRow, getHeatMapColor, EMPTY_VALUE_LABEL } from '../../lib/explore-utils'
 import { DaysOfWeek } from '../../lib/dictionaries'
 import { formatNumber } from '../../lib/chart-utils'
 import type { ExploreRow, ExploreTotals } from '../../types/explore'
@@ -118,7 +118,7 @@ function MobileExploreCard({
   const currentDim = dimensions[record.parentDimensionIndex] || dimensions[0]
   const rawValue = record[currentDim]
   const displayValue = rawValue === null || rawValue === '' || rawValue === undefined
-    ? '(empty)'
+    ? EMPTY_VALUE_LABEL
     : currentDim === 'day_of_week' && typeof rawValue === 'number'
       ? DaysOfWeek[rawValue] ?? String(rawValue)
       : String(rawValue)
@@ -286,7 +286,7 @@ export function ExploreTable({
           const value = record[currentDim]
           let displayValue: string
           if (value === null || value === '' || value === undefined) {
-            displayValue = '(empty)'
+            displayValue = EMPTY_VALUE_LABEL
           } else if (currentDim === 'day_of_week' && typeof value === 'number') {
             displayValue = DaysOfWeek[value] ?? String(value)
           } else {

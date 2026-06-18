@@ -3,7 +3,7 @@ import { Popover, Form, Input, InputNumber, Button, Select, Tooltip, Tag, Space 
 import { LeftOutlined, SearchOutlined, PlusCircleOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { analyticsDimensionsQueryOptions } from '../../lib/queries'
-import { getDimensionLabel, getDimensionExamples } from '../../lib/explore-utils'
+import { getDimensionLabel, getDimensionExamples, getCategoryLabel, sortCategoriesByOrder } from '../../lib/explore-utils'
 import { DeviceType, BrowserType, OSType, DaysOfWeek } from '../../lib/dictionaries'
 import type { Filter, FilterOperator, MetricFilter, MetricFilterOperator } from '../../types/analytics'
 import type { DimensionInfo } from '../../types/explore'
@@ -11,9 +11,9 @@ import type { CustomDimensionLabels } from '../../types/workspace'
 
 // Hardcoded list of metrics that can be filtered
 const FILTERABLE_METRICS = [
-  { name: 'bounce_rate', label: 'Bounce Rate', unit: '%' },
-  { name: 'median_duration', label: 'Median Duration', unit: '' },
-  { name: 'median_scroll', label: 'Median Scroll', unit: '%' },
+  { name: 'bounce_rate', label: 'Taux de rebond', unit: '%' },
+  { name: 'median_duration', label: 'Durée médiane', unit: '' },
+  { name: 'median_scroll', label: 'Scroll médian', unit: '%' },
 ] as const
 
 type FilterableMetric = (typeof FILTERABLE_METRICS)[number]
@@ -77,21 +77,21 @@ const operatorOptions: Record<string, FilterOperator[]> = {
 const operatorsWithoutValue: FilterOperator[] = ['isEmpty', 'isNotEmpty', 'isNull', 'isNotNull']
 
 const operatorLabels: Record<string, string> = {
-  equals: 'equals',
-  notEquals: 'not equals',
-  contains: 'contains',
-  notContains: 'not contains',
-  isEmpty: 'is empty',
-  isNotEmpty: 'is not empty',
-  isNull: 'is null',
-  isNotNull: 'is not null',
-  in: 'in',
-  notIn: 'not in',
+  equals: 'égal à',
+  notEquals: 'différent de',
+  contains: 'contient',
+  notContains: 'ne contient pas',
+  isEmpty: 'est vide',
+  isNotEmpty: "n'est pas vide",
+  isNull: 'est nul',
+  isNotNull: "n'est pas nul",
+  in: 'parmi',
+  notIn: 'pas parmi',
   gt: '>',
   gte: '>=',
   lt: '<',
   lte: '<=',
-  between: 'between',
+  between: 'entre',
 }
 
 interface ExploreFilterBuilderProps {
@@ -508,21 +508,21 @@ export function ExploreFilterBuilder({ value, onChange, metricFilters = [], onMe
             className="mb-2"
           />
           <div className="max-h-80 overflow-y-auto">
-            {/* Dimensions grouped by category */}
-            {Object.entries(filteredByCategory).map(([category, dims]) => (
+            {/* Dimensions grouped by category, ordre partagé */}
+            {sortCategoriesByOrder(Object.keys(filteredByCategory)).map((category) => (
               <div key={category} className="mb-2">
                 <div className="text-[10px] font-semibold text-[var(--primary)] uppercase px-3 py-1">
-                  {category === 'Custom' ? 'Dimensions personnalisées' : category}
+                  {getCategoryLabel(category)}
                 </div>
-                {dims.map((dimension) => {
+                {filteredByCategory[category].map((dimension) => {
                   const examples = getDimensionExamples(dimension.name)
                   const tooltipContent = (
                     <div className="text-xs">
                       <div className="font-mono text-gray-300">{dimension.name}</div>
-                      <div className="text-gray-400">Type: {dimension.type}</div>
+                      <div className="text-gray-400">Type : {dimension.type}</div>
                       {examples && (
                         <div className="mt-1 text-gray-400">
-                          e.g. {examples[0]}, {examples[1]}
+                          ex. {examples[0]}, {examples[1]}
                         </div>
                       )}
                     </div>

@@ -1,7 +1,7 @@
 import { Table, Tooltip } from 'antd'
 import type { UseQueryResult } from '@tanstack/react-query'
 import { HeatMapCell } from './HeatMapCell'
-import { getDimensionLabel } from '../../lib/explore-utils'
+import { getDimensionLabel, EMPTY_VALUE_LABEL } from '../../lib/explore-utils'
 import { DaysOfWeek } from '../../lib/dictionaries'
 import { formatNumber } from '../../lib/chart-utils'
 import type { AnalyticsResponse } from '../../types/analytics'
@@ -39,8 +39,7 @@ export function BreakdownTableView({
       dataIndex: dimension,
       ellipsis: true,
       render: (value: unknown) => {
-        if (value === null) return <span className="text-gray-400">(non défini)</span>
-        if (value === '') return <span className="text-gray-400">(vide)</span>
+        if (value === null || value === '') return <span className="text-gray-400">{EMPTY_VALUE_LABEL}</span>
         if (dimension === 'day_of_week' && typeof value === 'number') {
           return DaysOfWeek[value] ?? String(value)
         }

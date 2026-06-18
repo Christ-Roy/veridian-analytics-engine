@@ -56,11 +56,11 @@ export function getAvailableGranularities(days: number): Granularity[] {
  * Labels for granularity options in the UI
  */
 export const GRANULARITY_LABELS: Record<Granularity, string> = {
-  hour: 'Hourly',
-  day: 'Daily',
-  week: 'Weekly',
-  month: 'Monthly',
-  year: 'Yearly',
+  hour: 'Horaire',
+  day: 'Journalier',
+  week: 'Hebdomadaire',
+  month: 'Mensuel',
+  year: 'Annuel',
 }
 
 /**
@@ -157,14 +157,15 @@ export function formatXAxisLabel(timestamp: string, granularity: Granularity): s
   const date = dayjs(timestamp)
   if (!date.isValid()) return timestamp
 
+  // dayjs.locale('fr') est chargé globalement (main.tsx) → MMM rend « déc. »
   switch (granularity) {
     case 'hour':
-      return date.format('ha') // "9am"
+      return date.format('H[h]') // "9h"
     case 'day':
     case 'week':
-      return date.format('MMM D') // "Dec 21"
+      return date.format('D MMM') // "21 déc."
     case 'month':
-      return date.format("MMM 'YY") // "Dec '25"
+      return date.format('MMM YY') // "déc. 25"
     case 'year':
       return date.format('YYYY')
     default:
@@ -235,15 +236,17 @@ export function formatDateRange(start: string, end: string): string {
 
   if (!startDate.isValid() || !endDate.isValid()) return ''
 
+  // Format FR : jour avant mois (« 21-28 déc. », « 21 déc. - 4 janv. »).
+  // dayjs.locale('fr') est chargé globalement (main.tsx) → MMM rend « déc. ».
   const startMonth = startDate.format('MMM')
   const endMonth = endDate.format('MMM')
   const startDay = startDate.date()
   const endDay = endDate.date()
 
   if (startMonth === endMonth) {
-    return `${startMonth} ${startDay}-${endDay}`
+    return `${startDay}-${endDay} ${endMonth}`
   }
-  return `${startMonth} ${startDay} - ${endMonth} ${endDay}`
+  return `${startDay} ${startMonth} - ${endDay} ${endMonth}`
 }
 
 /**
