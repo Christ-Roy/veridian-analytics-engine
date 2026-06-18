@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  CheckCircle2,
   ChevronDown,
   ChevronRight,
   Hash,
+  Info,
   Loader2,
   Pencil,
   Phone,
   Plus,
   RefreshCw,
+  RotateCw,
   Trash2,
   X,
 } from 'lucide-react';
@@ -25,6 +28,7 @@ import {
   createPhoneNumber,
   updatePhoneNumber,
   deletePhoneNumber,
+  syncNow,
   VoipApiError,
   type VoipSettingsResponse,
   type VoipCredentialKind as CredentialKind,
@@ -241,8 +245,10 @@ function VoipContent({
       {/* Sous-section "Numéros trackés" — 1 numéro = 1 source de trafic */}
       <TrackedNumbersSection workspaceId={workspaceId} />
 
-      {/* Rappel : où voir les appels — dans les vues natives, pas ici */}
-      {hasConnectedCred && <CallsHint workspaceId={workspaceId} />}
+      {/* Synchro manuelle + rappel : où voir les appels (vues natives) */}
+      {hasConnectedCred && (
+        <CallsHint workspaceId={workspaceId} onRefresh={onRefresh} />
+      )}
     </>
   );
 }
@@ -655,26 +661,122 @@ function PhoneNumberModal({
   );
 }
 
-// ─── Où voir les appels (vues natives, PAS de liste ici) ──────────────────
+// ─── Synchro manuelle + où voir les appels (vues natives, PAS de liste) ────
 //
 // Vision Robert 2026-05-23 : pas de page Calls, pas de liste d'appels dans
 // Settings. Les appels sont des events `phone_call` natifs → on pointe juste
 // l'opérateur vers Live / Explore où ils apparaissent comme n'importe quel
 // goal, filtrables par dimension `source`.
+//
+// Le bouton « Synchroniser maintenant » force une remontée immédiate (le cron
+// natif ne tourne que toutes les 15 min, et uniquement si `VOIP_SYNC_ENABLED`
+// est activé sur l'instance). C'est la boucle de validation « ça marche »
+// juste après avoir connecté un opérateur et mappé ses numéros.
 
-function CallsHint({ workspaceId }: { workspaceId: string }) {
+function CallsHint({
+  workspaceId,
+  onRefresh,
+}: {
+  workspaceId: string;
+  onRefresh: () => void;
+}) {
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
+  const runSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const r = await syncNow(workspaceId);
+      const n = r.pushedEvents;
+      setSyncResult({
+        ok: true,
+        message:
+          n === 0
+            ? 'Synchro terminée : aucun nouvel appel à remonter.'
+            : `Synchro terminée : ${n} appel${n > 1 ? 's' : ''} remonté${
+                n > 1 ? 's' : ''
+              }.`,
+      });
+      // Rafraîchit le panel pour mettre à jour « Dernière synchro ».
+      onRefresh();
+    } catch (err) {
+      setSyncResult({
+        ok: false,
+        message:
+          err instanceof VoipApiError
+            ? err.message
+            : 'Synchro impossible. Réessayez dans un instant.',
+      });
+    } finally {
+      setSyncing(false);
+    }
+  }, [workspaceId, onRefresh]);
+
   return (
     <Card
       className="veridian-fade-in-delay-2 border-border/60 bg-card/60"
       data-testid="voip-calls-hint"
     >
-      <CardContent className="space-y-3 p-5">
+      <CardContent className="space-y-4 p-5">
         <p className="text-sm text-muted-foreground">
           Vos appels remontent automatiquement comme objectifs
           «&nbsp;phone_call&nbsp;» et apparaissent dans vos vues d'analyse,
           attribués à leur source.
         </p>
+
+        {/* Déclencheur de synchro manuelle + feedback */}
         <div className="flex flex-wrap items-center gap-3">
+          <Button
+            type="button"
+            size="sm"
+            onClick={runSync}
+            disabled={syncing}
+            data-testid="voip-sync-now-btn"
+          >
+            {syncing ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <RotateCw className="h-3.5 w-3.5" />
+            )}
+            Synchroniser maintenant
+          </Button>
+          {syncResult && (
+            <span
+              className={cn(
+                'inline-flex items-center gap-1.5 text-xs',
+                syncResult.ok ? 'text-emerald-400' : 'text-destructive',
+              )}
+              data-testid="voip-sync-result"
+            >
+              {syncResult.ok ? (
+                <CheckCircle2 className="h-3.5 w-3.5" />
+              ) : (
+                <AlertTriangle className="h-3.5 w-3.5" />
+              )}
+              {syncResult.message}
+            </span>
+          )}
+        </div>
+
+        {/* État de la synchro automatique (cron natif, gated VOIP_SYNC_ENABLED) */}
+        <div
+          className="flex items-start gap-2 rounded-md border border-border/50 bg-background/30 px-3 py-2 text-[11px] text-muted-foreground"
+          data-testid="voip-autosync-hint"
+        >
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            La synchro automatique remonte vos appels toutes les 15 minutes
+            (si elle est activée sur votre instance). En cas de doute juste
+            après une configuration, utilisez «&nbsp;Synchroniser
+            maintenant&nbsp;».
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 pt-1">
           <a
             href={`/workspaces/${workspaceId}/live`}
             className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
