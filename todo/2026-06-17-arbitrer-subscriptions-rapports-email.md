@@ -76,16 +76,34 @@ ci-dessus. Cf `[[feedback_env_wire_compose_same_commit]]`.
 
 ---
 
-## Décision Robert — 2026-06-18 : Option A (garder + rebrander + poser SMTP)
+## Décision Robert — 2026-06-18 : garder, mais transactionnel géré par l'APP (zéro dépendance cross-app)
 
-Feature gardée. Travail à faire (transformé d'arbitrage en ticket actionnable) :
-1. **Rebrander l'email de rapport** : remplacer le branding Staminads en dur
-   (`report-generator.service.ts:700` → `staminads.com/favicon.svg`) par le
-   branding Veridian.
-2. **Poser `SMTP_HOST` réel en prod** (relai Veridian existe, cf skill postfix) —
-   ⚠️ trou opérationnel TRANSVERSE : SMTP vide neutralise aussi **invitations**
-   et **magic-link de provisioning M2M**. À poser dans l'ENV Dokploy du compose
-   engine (`RH8yiQGFLxTzVXtrvlNmB`). Vérifié par le team-lead : voir rapport.
+Feature gardée. ⚠️ CORRECTION de cap (le team-lead était parti sur une fausse
+piste SMTP-relai/Lark, puis Notifuse — les deux refusées par Robert) :
+
+Robert (2026-06-18) : *« je ne veux pas de dépendances entre les app ; les mails
+doivent être gérés par les app elles-mêmes pour le transactionnel. »*
+
+**Conséquences (le bon design)** :
+- Le transactionnel email de l'engine reste géré par **l'engine lui-même**
+  (module `api/src/mail/` + `api/src/smtp/` natifs). PAS d'appel à Notifuse,
+  PAS de canal email cross-app. Chaque app porte son propre transactionnel.
+- On NE pose PAS de SMTP « relai Veridian » ni Lark à la va-vite en prod. Le
+  canal d'envoi propre de l'app reste à câbler proprement (provider transactionnel
+  dédié à l'engine, FROM Veridian, SPF/DKIM du domaine d'envoi de l'app) — c'est
+  un **chantier à part**, hors de la vague différenciateurs P1.
+
+**Travail à faire (ticket re-scopé, NON urgent, hors vague P1)** :
+1. **Gater le cron** `processScheduledReports`
+   (`subscription-scheduler.service.ts:27`) sur une ENV (ex.
+   `SUBSCRIPTIONS_ENABLED`), comme VoIP l'est sur `VOIP_SYNC_ENABLED` — pour
+   qu'il ne tourne pas (et ne loggue/échoue) tant que le canal email n'est pas
+   câblé. NB : il ne pollue `audit_logs` que s'il existe des abonnements ACTIFS
+   (`findDue().length > 0`) ; sans abonnement, il loggue juste « Found 0 due ».
+2. **Câbler un canal transactionnel propre à l'engine** (provider dédié, pas de
+   dépendance cross-app) + **rebrander** l'email
+   (`report-generator.service.ts:700` → Staminads favicon ; `SMTP_FROM_NAME`
+   défaut `'Staminads'` dans `smtp.service.ts:230`) en Veridian.
 3. Ajouter à la cartographie modules.
 
-→ Conserver le ticket en pending (re-scopé "à faire"), retirer le statut ARBITRER.
+→ Conserver le ticket en pending (re-scopé), retirer le statut ARBITRER.
