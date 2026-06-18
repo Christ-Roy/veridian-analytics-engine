@@ -350,10 +350,11 @@ export function DashboardGrid({
       label: 'Pages les plus vues',
       dimensionLabel: 'Page',
       dimension: 'page_path',
-      // La dimension `page_path` est la seule dont la colonne ClickHouse
-      // (`path`) diffère du nom : le query-builder SELECT la colonne brute
-      // sans alias, donc la réponse renvoie `path`, pas `page_path`.
-      dimensionField: 'path',
+      // La dimension `page_path` a une colonne ClickHouse (`path`) qui diffère
+      // de son nom, mais le query-builder l'aliase désormais (`path as
+      // page_path`) dans le SELECT, donc la réponse est keyée par `page_path`.
+      // Pas de `dimensionField` override : le fallback `dimensionField ??
+      // dimension` lit donc `page_path`, qui correspond à la colonne renvoyée.
       table: 'pages',
       metrics: ['page_count', 'page_duration', 'page_scroll', 'exit_rate'],
       order: { page_count: 'desc' }
