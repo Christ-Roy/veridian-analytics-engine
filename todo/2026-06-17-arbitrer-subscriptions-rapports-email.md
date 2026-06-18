@@ -73,3 +73,19 @@ ci-dessus. Cf `[[feedback_env_wire_compose_same_commit]]`.
 ## Liens
 
 - Cartographie modules : `2026-06-17-doc-cartographie-modules-backend.md`
+
+---
+
+## Décision Robert — 2026-06-18 : Option A (garder + rebrander + poser SMTP)
+
+Feature gardée. Travail à faire (transformé d'arbitrage en ticket actionnable) :
+1. **Rebrander l'email de rapport** : remplacer le branding Staminads en dur
+   (`report-generator.service.ts:700` → `staminads.com/favicon.svg`) par le
+   branding Veridian.
+2. **Poser `SMTP_HOST` réel en prod** (relai Veridian existe, cf skill postfix) —
+   ⚠️ trou opérationnel TRANSVERSE : SMTP vide neutralise aussi **invitations**
+   et **magic-link de provisioning M2M**. À poser dans l'ENV Dokploy du compose
+   engine (`RH8yiQGFLxTzVXtrvlNmB`). Vérifié par le team-lead : voir rapport.
+3. Ajouter à la cartographie modules.
+
+→ Conserver le ticket en pending (re-scopé "à faire"), retirer le statut ARBITRER.

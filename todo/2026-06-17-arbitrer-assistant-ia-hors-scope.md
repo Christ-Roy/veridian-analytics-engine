@@ -92,3 +92,27 @@ arbitrage clair.
 
 - Cartographie modules : `2026-06-17-doc-cartographie-modules-backend.md`
 - Hygiène fichiers résiduels : `2026-06-17-hygiene-fichiers-residuels-console.md`
+
+---
+
+## Décision Robert — 2026-06-18
+
+**Laisser tel quel** (ni débrancher, ni assumer comme 4e feature formelle pour l'instant).
+
+Robert : *« je veux juste que l'app soit IA-first dans le sens où via les API on
+peut tout faire, tout configurer etc., et bien plus tard on mettra une couche
+MCP branchée à ces API. »*
+
+**Lecture stratégique** : l'assistant IA n'est pas l'enjeu — l'enjeu c'est que
+**toute capacité de l'app soit pilotable via l'API** (config, query, connecteurs,
+VoIP, GSC…), pour qu'une couche MCP puisse plus tard tout orchestrer. Donc :
+- On NE débranche PAS l'assistant (il reste monté, dormant tant que pas de clé).
+- On ne lance AUCUN sprint dessus maintenant.
+- **Axe directeur pour les prochaines vagues** : parité API ↔ capacité. Chaque
+  feature backend doit avoir son endpoint API propre et complet (c'est déjà la
+  logique des tickets configui : voip.sync, webhooks CRUD, etc.).
+- Quick-win résiduel safe (hors cette vague) : supprimer le doublon mort
+  `console/src/components/explore/Assistant{Button,Panel}.tsx` (orphelin +
+  libellés anglais). → reste en P3 hygiène, voir `hygiene-fichiers-residuels-console`.
+
+Ticket gardé en place (pas d'action de scope), réorienté en note de cap produit.
