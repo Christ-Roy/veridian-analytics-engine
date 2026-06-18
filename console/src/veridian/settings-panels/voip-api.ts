@@ -200,3 +200,25 @@ export function deletePhoneNumber(
     body: { workspace_id: workspaceId, id },
   });
 }
+
+// ─── Synchro manuelle (déclenchement à la demande, ex. après config) ──────
+
+/** Résultat d'une synchro VoIP (cf `VoipSyncService.syncAll`). */
+export interface VoipSyncResult {
+  ok: true;
+  syncedWorkspaces: number;
+  pushedEvents: number;
+}
+
+/**
+ * Force une synchro VoIP immédiate de tous les credentials actifs (le cron
+ * tourne aussi toutes les 15 min s'il est activé sur l'instance). Sert de
+ * boucle de validation « ça marche » juste après la config — le retour
+ * `pushedEvents` indique combien d'appels viennent de remonter.
+ */
+export function syncNow(workspaceId: string): Promise<VoipSyncResult> {
+  return request<VoipSyncResult>('voip.sync', {
+    method: 'POST',
+    body: { workspace_id: workspaceId },
+  });
+}
