@@ -9,8 +9,10 @@ type Series = Array<{ day: string; value: number }>;
  * normalisé sur sa propre plage pour que toutes les courbes tiennent dans
  * le même canvas. Hover → tooltip avec les valeurs de chaque série sur ce jour.
  *
- * Port direct depuis `veridian-analytics/components/gsc/time-series-chart.tsx`
- * (sans la directive `'use client'`).
+ * Rendu SVG maison (zéro dépendance de charting) recoloré sur la palette claire
+ * de la console : grille et axes en gris neutre, crosshair sur la primaire
+ * violet `#7763F1`, tooltip blanc AntD-like. Les courbes gardent les couleurs
+ * sémantiques des métriques (`METRIC_META`).
  */
 export function TimeSeriesChart({
   series,
@@ -31,7 +33,7 @@ export function TimeSeriesChart({
   if (dayLabels.length === 0) {
     return (
       <div
-        className="flex items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground"
+        className="flex items-center justify-center rounded-lg border border-gray-200 bg-white text-sm text-gray-500"
         style={{ height }}
       >
         Pas de données pour cette période
@@ -84,7 +86,7 @@ export function TimeSeriesChart({
   const tickEvery = Math.max(1, Math.ceil(dayLabels.length / 8));
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="relative">
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -108,8 +110,7 @@ export function TimeSeriesChart({
               x2={width - padRight}
               y1={padTop + r * innerH}
               y2={padTop + r * innerH}
-              stroke="currentColor"
-              strokeOpacity={0.08}
+              stroke="#e5e7eb"
               strokeWidth={1}
             />
           ))}
@@ -122,7 +123,7 @@ export function TimeSeriesChart({
                 x={padLeft + i * stepX}
                 y={height - padBottom + 16}
                 textAnchor="middle"
-                className="fill-muted-foreground"
+                fill="#9ca3af"
                 fontSize="10"
               >
                 {d.slice(5)}
@@ -167,8 +168,8 @@ export function TimeSeriesChart({
                 x2={padLeft + hoverIdx * stepX}
                 y1={padTop}
                 y2={height - padBottom}
-                stroke="currentColor"
-                strokeOpacity={0.3}
+                stroke="#7763F1"
+                strokeOpacity={0.4}
                 strokeDasharray="2 2"
               />
               {(Object.keys(normalized) as MetricKey[])
@@ -193,7 +194,7 @@ export function TimeSeriesChart({
         {/* Tooltip */}
         {hoverIdx !== null && (
           <div
-            className="pointer-events-none absolute rounded-md border border-border bg-popover p-2 text-xs shadow-lg"
+            className="pointer-events-none absolute rounded-md border border-gray-200 bg-white p-2 text-xs shadow-lg"
             style={{
               left: `${((padLeft + hoverIdx * stepX) / width) * 100}%`,
               top: 4,
@@ -201,7 +202,7 @@ export function TimeSeriesChart({
               minWidth: 150,
             }}
           >
-            <div className="mb-1 font-medium text-foreground">
+            <div className="mb-1 font-medium text-gray-900">
               {dayLabels[hoverIdx]}
             </div>
             {(Object.keys(normalized) as MetricKey[])
