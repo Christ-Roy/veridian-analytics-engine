@@ -80,3 +80,11 @@ Réécrire le skill pour que toute provision passe par le natif M2M :
 - [ ] Section GSC marquée "en migration" (pas de faux endpoint natif).
 - [ ] Testé : un provisioning de bout en bout via le skill recâblé (staging).
 - [ ] GIGA Lot A coché.
+
+## Réponse — 2026-06-20 : FAIT
+
+Skill `~/.claude/skills/analytics-provision/SKILL.md` entièrement réécrit sur
+l'API M2M native engine (Bearer PLATFORM_ADMIN_API_KEY lue depuis .all-creds.env,
+5 endpoints /api/admin/platform/*, modèle workspace). Clé legacy en clair retirée,
+legacy documenté comme mort. Contrats vérifiés contre la prod (workspace réel
+vrd_veridian_site_prod, auth OK). Cf mémoire feedback_skill_analytics_provision_legacy_key.
