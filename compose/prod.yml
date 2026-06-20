@@ -31,13 +31,27 @@
 # ============================================================================
 
 services:
+  # Réseau : on attache AUSSI clickhouse + postgres-bridge à dokploy-network.
+  # Pourquoi : le bridge `engine-internal` a un routage L3 cassé reproductible
+  # en prod (incident 2026-06-19/20, cf todo/2026-06-20-INCIDENT-reseau-engine-
+  # internal-routage-casse.md) — engine→clickhouse:8123 timeout alors que le
+  # DNS résout. dokploy-network (déjà partagé par engine/bridge/Traefik) route
+  # parfaitement. L'alias garde le hostname `clickhouse`/`postgres-bridge`
+  # résolvable. Non exposé à internet (aucun label Traefik ici). engine-internal
+  # reste déclaré comme filet, mais le trafic réel passe par dokploy-network.
   clickhouse:
     networks:
-      - engine-internal
+      engine-internal: {}
+      dokploy-network:
+        aliases:
+          - clickhouse
 
   postgres-bridge:
     networks:
-      - engine-internal
+      engine-internal: {}
+      dokploy-network:
+        aliases:
+          - postgres-bridge
 
   engine:
     networks:
