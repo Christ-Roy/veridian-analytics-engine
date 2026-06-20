@@ -533,7 +533,11 @@ export class AdminPlatformService {
     // tracker uses workspace_id only for event collection (CORS-permissive
     // /api/track* endpoints). The api_key returned in the response is for
     // server-to-server use by the Hub.
-    return `<script async src="${trackerOrigin}/tracker.js" data-workspace-id="${workspaceId}"></script>`;
+    // The browser tracker bundle is served by the SDK controller at
+    // /sdk/v1/tracker.js (UMD `Staminads`). The bare /tracker.js path falls
+    // through to the SPA console HTML and tracks nothing, so we MUST point the
+    // snippet at the SDK route.
+    return `<script async src="${trackerOrigin}/sdk/v1/tracker.js" data-workspace-id="${workspaceId}"></script>`;
   }
 
   private appUrl(): string {

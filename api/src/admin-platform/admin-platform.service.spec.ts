@@ -173,7 +173,11 @@ describe('AdminPlatformService.provisionTenant', () => {
     expect(result.api_key).toBe('stam_live_deadbeef');
     expect(result.owner_user_id).toBe('user-uuid-1');
     expect(result.workspace_id).toMatch(/^boulangerie_dupont/);
-    expect(result.snippet_html).toContain('tracker.js');
+    // Snippet must point at the SDK route that actually serves the tracker
+    // bundle (/sdk/v1/tracker.js), NOT the bare <origin>/tracker.js path which
+    // falls through to the SPA console HTML and tracks nothing.
+    expect(result.snippet_html).toContain('https://tracker.example/sdk/v1/tracker.js');
+    expect(result.snippet_html).not.toContain('src="https://tracker.example/tracker.js"');
     expect(result.snippet_html).toContain(result.workspace_id);
     // Snippet must NOT leak the api_key (separation of concerns).
     expect(result.snippet_html).not.toContain('stam_live_');
