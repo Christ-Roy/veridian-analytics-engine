@@ -8,6 +8,9 @@ import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
 import { MailModule } from '../mail/mail.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { VoipModule } from '../voip/voip.module';
+import { GscModule } from '../gsc/gsc.module';
+import { WebhooksModule } from '../webhooks/webhooks.module';
 
 /**
  * Module exposing platform-level (M2M) admin endpoints.
@@ -39,6 +42,9 @@ import { AnalyticsModule } from '../analytics/analytics.module';
     forwardRef(() => ApiKeysModule),
     forwardRef(() => MailModule),
     forwardRef(() => AnalyticsModule),
+    forwardRef(() => VoipModule),
+    forwardRef(() => GscModule),
+    forwardRef(() => WebhooksModule),
   ],
   controllers: [AdminPlatformController],
   providers: [AdminPlatformService, PlatformAdminGuard],
