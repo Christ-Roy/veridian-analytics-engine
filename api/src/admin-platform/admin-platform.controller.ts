@@ -17,6 +17,8 @@ import {
 } from './dto/voip-admin.dto';
 import { GscResyncDto, GscStatusDto } from './dto/gsc-admin.dto';
 import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
+import { AdsConversionsDto } from './dto/ads-conversions.dto';
+import { AdsConversionsResponseDto } from './dto/ads-conversions-response.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
@@ -272,5 +274,19 @@ export class AdminPlatformController {
   })
   updateWorkspaceSettings(@Body() dto: UpdateWorkspaceSettingsM2MDto) {
     return this.adminPlatformService.updateWorkspaceSettings(dto);
+  }
+
+  // ─── Lot F — ads.conversions (read-only Ads-attributed conversions) ───
+
+  @Post('ads.conversions')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Read a workspace’s Google Ads-attributed conversions (M2M, read-only) so an IA / the google-ads skill can upload them to the Ads API. No Ads credentials/OAuth/upload here. Bounded by date range (default 28d) + row cap (default 1000, max 10000).',
+  })
+  adsConversions(
+    @Body() dto: AdsConversionsDto,
+  ): Promise<AdsConversionsResponseDto> {
+    return this.adminPlatformService.getAdsConversions(dto);
   }
 }

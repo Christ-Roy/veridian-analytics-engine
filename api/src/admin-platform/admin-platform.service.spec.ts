@@ -47,6 +47,7 @@ describe('AdminPlatformService.provisionTenant', () => {
           useValue: {
             querySystem: jest.fn().mockResolvedValue([]),
             insertSystem: jest.fn().mockResolvedValue(undefined),
+            queryWorkspace: jest.fn().mockResolvedValue([]),
           },
         },
         {
@@ -172,6 +173,7 @@ describe('AdminPlatformService.provisionTenant', () => {
     // Re-stub after clearAllMocks
     clickhouse.querySystem.mockResolvedValue([]);
     clickhouse.insertSystem.mockResolvedValue(undefined);
+    clickhouse.queryWorkspace.mockResolvedValue([]);
     usersService.delete.mockResolvedValue(undefined);
     workspacesService.create.mockResolvedValue({} as never);
     mailService.sendPasswordReset.mockResolvedValue(undefined);
@@ -852,6 +854,121 @@ describe('AdminPlatformService.provisionTenant', () => {
         }),
       ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
       expect(workspacesService.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Lot F — ads.conversions ────────────────────────────────────────
+
+  describe('getAdsConversions (M2M, read-only)', () => {
+    it('404s on a missing workspace (no query)', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.getAdsConversions({ workspace_id: 'ws_ghost' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(clickhouse.queryWorkspace).not.toHaveBeenCalled();
+    });
+
+    it('maps click-id and phone rows into the typed conversion shape', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      clickhouse.queryWorkspace.mockResolvedValue([
+        {
+          click_id_source: 'gclid',
+          click_id: 'EAIaIQ-gclid-123',
+          conversion_type: 'form_submission',
+          timestamp: '2026-06-20 10:00:00.000',
+          value: 42,
+          user_id: 'user-1',
+          path: '/contact',
+          phone_number: '',
+        },
+        {
+          click_id_source: 'phone_source_ads',
+          click_id: '',
+          conversion_type: 'phone_call',
+          timestamp: '2026-06-20 11:00:00.000',
+          value: 120,
+          user_id: null,
+          path: '/voip',
+          phone_number: '+33177123456',
+        },
+      ] as never);
+
+      const result = await service.getAdsConversions({ workspace_id: 'ws1' });
+
+      expect(clickhouse.queryWorkspace).toHaveBeenCalledTimes(1);
+      // Query is scoped to the workspace + parameterized (no interpolation).
+      const [wsArg, sqlArg, paramsArg] = (
+        clickhouse.queryWorkspace as jest.Mock
+      ).mock.calls[0];
+      expect(wsArg).toBe('ws1');
+      expect(sqlArg).toContain('FROM events');
+      expect(paramsArg.clickTypes).toEqual(['gclid', 'gbraid', 'wbraid']);
+
+      expect(result.workspace_id).toBe('ws1');
+      expect(result.count).toBe(2);
+      expect(result.truncated).toBe(false);
+      // Web click-id conversion keeps its raw click id; phone has none.
+      expect(result.conversions[0]).toEqual({
+        click_id_source: 'gclid',
+        click_id: 'EAIaIQ-gclid-123',
+        conversion_type: 'form_submission',
+        timestamp: '2026-06-20 10:00:00.000',
+        value: 42,
+        user_id: 'user-1',
+        path: '/contact',
+        phone_number: null,
+      });
+      expect(result.conversions[1]).toMatchObject({
+        click_id_source: 'phone_source_ads',
+        click_id: null,
+        conversion_type: 'phone_call',
+        user_id: null,
+        phone_number: '+33177123456',
+      });
+    });
+
+    it('defaults to a 28-day window when no range is supplied', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      clickhouse.queryWorkspace.mockResolvedValue([] as never);
+
+      const result = await service.getAdsConversions({ workspace_id: 'ws1' });
+
+      const fromMs = new Date(result.from).getTime();
+      const toMs = new Date(result.to).getTime();
+      const days = (toMs - fromMs) / 86_400_000;
+      expect(Math.round(days)).toBe(28);
+      expect(result.limit).toBe(1000);
+      expect(result.count).toBe(0);
+    });
+
+    it('caps the limit at 10000 and flags truncation when the cap is hit', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      // Request a 2-row cap; return 3 (cap+1) → truncated, only 2 kept.
+      clickhouse.queryWorkspace.mockResolvedValue(
+        Array.from({ length: 3 }, (_, i) => ({
+          click_id_source: 'gclid',
+          click_id: `id-${i}`,
+          conversion_type: 'goal',
+          timestamp: '2026-06-20 10:00:00.000',
+          value: 0,
+          user_id: null,
+          path: '/x',
+          phone_number: '',
+        })) as never,
+      );
+
+      const result = await service.getAdsConversions({
+        workspace_id: 'ws1',
+        limit: 2,
+      });
+
+      expect(result.limit).toBe(2);
+      expect(result.count).toBe(2);
+      expect(result.truncated).toBe(true);
+      // queryWorkspace is asked for limit+1 to detect truncation.
+      const paramsArg = (clickhouse.queryWorkspace as jest.Mock).mock
+        .calls[0][2];
+      expect(paramsArg.lim).toBe(3);
     });
   });
 });

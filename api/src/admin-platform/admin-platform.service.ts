@@ -43,9 +43,22 @@ import {
 } from './dto/voip-admin.dto';
 import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
 import { WorkspaceStatusResponseDto } from './dto/workspace-status-response.dto';
+import { AdsConversionsDto } from './dto/ads-conversions.dto';
+import {
+  AdsClickIdSource,
+  AdsConversionsResponseDto,
+} from './dto/ads-conversions-response.dto';
 
 const PASSWORD_RESET_EXPIRY_HOURS = 24;
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
+
+/** Google Ads click-id types carried in `utm_id_from`. */
+const ADS_CLICK_ID_TYPES = ['gclid', 'gbraid', 'wbraid'] as const;
+/** Default look-back window for ads.conversions when no range is supplied. */
+const ADS_DEFAULT_LOOKBACK_DAYS = 28;
+/** Default / hard cap on returned conversion rows. */
+const ADS_DEFAULT_LIMIT = 1000;
+const ADS_MAX_LIMIT = 10000;
 
 @Injectable()
 export class AdminPlatformService {
@@ -707,6 +720,112 @@ export class AdminPlatformService {
       logo_url: dto.logo_url,
       settings: dto.settings,
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot F — ads.conversions (READ-only Ads-attributed conversions)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return a workspace's conversions attributed to Google Ads, so an IA / the
+   * platform google-ads skill can read them and upload them to the Ads API.
+   *
+   * READ-only — no Ads credentials, no OAuth, no upload here (that stays in the
+   * skill). Pure analytics read over ClickHouse `events`.
+   *
+   * A conversion is a goal event (`name='goal'`, `goal_name != ''`) that is
+   * either:
+   *   - web-attributed: its session carries a Google Ads click id
+   *     (`utm_id_from IN ('gclid','gbraid','wbraid')`) → `click_id = utm_id`;
+   *   - phone-attributed: a `phone_call` goal whose tracked number maps to the
+   *     `ads` source (`properties['source']='ads'`) → no click id.
+   *
+   * Bounded by a date range (default last 28 days) and a row cap (default 1000,
+   * hard cap 10000) so we never dump millions of rows. `truncated` signals the
+   * cap was hit. Parameterized query (no string interpolation) — injection-safe.
+   */
+  async getAdsConversions(
+    dto: AdsConversionsDto,
+  ): Promise<AdsConversionsResponseDto> {
+    await this.assertWorkspaceExists(dto.workspace_id);
+
+    const now = new Date();
+    const to = dto.to ? new Date(dto.to) : now;
+    const from = dto.from
+      ? new Date(dto.from)
+      : new Date(to.getTime() - ADS_DEFAULT_LOOKBACK_DAYS * 86_400_000);
+    const limit = Math.min(dto.limit ?? ADS_DEFAULT_LIMIT, ADS_MAX_LIMIT);
+
+    const fromCh = toClickHouseDateTime(from);
+    const toCh = toClickHouseDateTime(to);
+
+    // One row cap covers both branches; +1 to detect truncation.
+    const rows = await this.clickhouse.queryWorkspace<{
+      click_id_source: string;
+      click_id: string;
+      conversion_type: string;
+      timestamp: string;
+      value: number;
+      user_id: string | null;
+      path: string;
+      phone_number: string;
+    }>(
+      dto.workspace_id,
+      `SELECT
+         multiIf(
+           goal_name = 'phone_call' AND properties['source'] = 'ads', 'phone_source_ads',
+           utm_id_from
+         ) AS click_id_source,
+         if(utm_id_from IN ({clickTypes:Array(String)}), utm_id, '') AS click_id,
+         goal_name AS conversion_type,
+         toString(coalesce(goal_timestamp, received_at)) AS timestamp,
+         toFloat64(goal_value) AS value,
+         user_id,
+         path,
+         properties['to_number'] AS phone_number
+       FROM events
+       WHERE name = 'goal'
+         AND goal_name != ''
+         AND received_at >= {from:DateTime64(3)}
+         AND received_at <= {to:DateTime64(3)}
+         AND (
+           utm_id_from IN ({clickTypes:Array(String)})
+           OR (goal_name = 'phone_call' AND properties['source'] = 'ads')
+         )
+       ORDER BY received_at DESC
+       LIMIT {lim:UInt32}`,
+      {
+        clickTypes: [...ADS_CLICK_ID_TYPES],
+        from: fromCh,
+        to: toCh,
+        lim: limit + 1,
+      },
+    );
+
+    const truncated = rows.length > limit;
+    const conversions = rows.slice(0, limit).map((r) => ({
+      click_id_source: r.click_id_source as AdsClickIdSource,
+      click_id: r.click_id ? r.click_id : null,
+      conversion_type: r.conversion_type,
+      timestamp: r.timestamp,
+      value: typeof r.value === 'number' ? r.value : Number(r.value ?? 0),
+      user_id: r.user_id ?? null,
+      path: r.path,
+      phone_number:
+        r.click_id_source === 'phone_source_ads'
+          ? r.phone_number || null
+          : null,
+    }));
+
+    return {
+      workspace_id: dto.workspace_id,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      limit,
+      count: conversions.length,
+      truncated,
+      conversions,
+    };
   }
 
   // ---------------------------------------------------------------------------
