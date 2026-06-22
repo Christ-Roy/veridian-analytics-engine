@@ -14,6 +14,18 @@ import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
+import { VoipService } from '../voip/voip.service';
+import { VoipSyncService } from '../voip/voip-sync.service';
+import type { PhoneSource } from '../voip/voip.types';
+import { GscService } from '../gsc/gsc.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
+import {
+  CreateWebhookDto,
+  DeleteWebhookDto,
+  ListWebhooksDto,
+  TestWebhookDto,
+} from '../webhooks/dto/create-webhook.dto';
 import { generateId, generateToken } from '../common/crypto';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 import {
@@ -24,9 +36,29 @@ import {
   PhoneNumberProvisionStatus,
   ProvisionTenantResponseDto,
 } from './dto/provision-tenant-response.dto';
+import {
+  VoipAddPhoneNumberDto,
+  VoipCredentialKindDto,
+  VoipSaveCredentialDto,
+} from './dto/voip-admin.dto';
+import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
+import { WorkspaceStatusResponseDto } from './dto/workspace-status-response.dto';
+import { AdsConversionsDto } from './dto/ads-conversions.dto';
+import {
+  AdsClickIdSource,
+  AdsConversionsResponseDto,
+} from './dto/ads-conversions-response.dto';
 
 const PASSWORD_RESET_EXPIRY_HOURS = 24;
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
+
+/** Google Ads click-id types carried in `utm_id_from`. */
+const ADS_CLICK_ID_TYPES = ['gclid', 'gbraid', 'wbraid'] as const;
+/** Default look-back window for ads.conversions when no range is supplied. */
+const ADS_DEFAULT_LOOKBACK_DAYS = 28;
+/** Default / hard cap on returned conversion rows. */
+const ADS_DEFAULT_LIMIT = 1000;
+const ADS_MAX_LIMIT = 10000;
 
 @Injectable()
 export class AdminPlatformService {
@@ -40,6 +72,11 @@ export class AdminPlatformService {
     private readonly mailService: MailService,
     private readonly configService: ConfigService,
     private readonly analyticsService: AnalyticsService,
+    private readonly voipService: VoipService,
+    private readonly voipSyncService: VoipSyncService,
+    private readonly gscService: GscService,
+    private readonly webhooksService: WebhooksService,
+    private readonly webhookDeliveryWorker: WebhookDeliveryWorker,
   ) {}
 
   /**
@@ -289,8 +326,521 @@ export class AdminPlatformService {
   }
 
   // ---------------------------------------------------------------------------
+  // Lot A — Consolidated workspace status (M2M)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * One-call, IA-readable snapshot of a workspace: existence, tracking
+   * liveness, and every connector's state (GSC / VoIP / webhooks) + the
+   * ready-to-paste tracker snippet.
+   *
+   * Pure composition over existing services — no new query/persistence logic.
+   * Each connector probe is best-effort: a failing sub-probe degrades to a
+   * safe default (e.g. tracking.active=false) rather than failing the whole
+   * status call, so an IA always gets an actionable answer.
+   */
+  async getConsolidatedStatus(
+    workspaceId: string,
+  ): Promise<WorkspaceStatusResponseDto> {
+    if (!(await this.workspaceExists(workspaceId))) {
+      return {
+        workspace_id: workspaceId,
+        exists: false,
+        name: null,
+        status: null,
+        tracking: null,
+        gsc: null,
+        voip: null,
+        webhooks: null,
+        snippet_html: null,
+      };
+    }
+
+    const [workspace, tracking, gsc, voip, webhooks] = await Promise.all([
+      this.workspacesService.get(workspaceId).catch(() => null),
+      this.probeTracking(workspaceId),
+      this.probeGsc(workspaceId),
+      this.probeVoip(workspaceId),
+      this.probeWebhooks(workspaceId),
+    ]);
+
+    return {
+      workspace_id: workspaceId,
+      exists: true,
+      name: workspace?.name ?? null,
+      status: workspace?.status ?? null,
+      tracking,
+      gsc,
+      voip,
+      webhooks,
+      snippet_html: this.buildTrackerSnippet(workspaceId),
+    };
+  }
+
+  /**
+   * Tracking liveness via two analytics session counts (30d window + 30min
+   * live). We use the `sessions` metric (`count()`) on the `sessions` table —
+   * the most robust signal, immune to the pageviews `countIf(name=…)` quirk.
+   */
+  private async probeTracking(workspaceId: string): Promise<{
+    active: boolean;
+    sessions_30d: number;
+    live: boolean;
+  }> {
+    const safe = { active: false, sessions_30d: 0, live: false };
+    try {
+      const [last30d, last30min] = await Promise.all([
+        this.countSessions(workspaceId, 'previous_30_days'),
+        this.countSessions(workspaceId, 'previous_30_minutes'),
+      ]);
+      return {
+        active: last30d > 0,
+        sessions_30d: last30d,
+        live: last30min > 0,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `[status] tracking probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return safe;
+    }
+  }
+
+  private async countSessions(
+    workspaceId: string,
+    preset: 'previous_30_days' | 'previous_30_minutes',
+  ): Promise<number> {
+    const res = await this.analyticsService.query({
+      workspace_id: workspaceId,
+      metrics: ['sessions'],
+      table: 'sessions',
+      dateRange: { preset },
+    } as AnalyticsQueryDto);
+    const rows = Array.isArray(res.data) ? res.data : [];
+    const first = rows[0] as Record<string, unknown> | undefined;
+    const raw = first?.sessions;
+    const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  private async probeGsc(workspaceId: string): Promise<{
+    connected: boolean;
+    site_url: string | null;
+    ownership_state: string | null;
+    last_sync_at: string | null;
+  }> {
+    try {
+      const s = await this.gscService.status(workspaceId);
+      return {
+        connected: s.connected,
+        site_url: s.site_url ?? null,
+        ownership_state: s.ownership_state ?? null,
+        last_sync_at: s.last_sync_at ?? null,
+      };
+    } catch (err) {
+      this.logger.warn(
+        `[status] gsc probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return {
+        connected: false,
+        site_url: null,
+        ownership_state: null,
+        last_sync_at: null,
+      };
+    }
+  }
+
+  private async probeVoip(workspaceId: string): Promise<{
+    configured: boolean;
+    phone_number_count: number;
+    phone_numbers: Array<{
+      e164: string;
+      source: PhoneSource;
+      label: string | null;
+    }>;
+    last_sync_at: string | null;
+    credential_kinds: string[];
+  }> {
+    try {
+      const [creds, numbers] = await Promise.all([
+        this.voipService.listCredentials(workspaceId),
+        this.voipService.listPhoneNumbers(workspaceId),
+      ]);
+      // Most recent successful sync across configured credentials.
+      const lastSync = creds
+        .map((c) => c.lastSyncAt)
+        .filter((d): d is string => !!d)
+        .sort()
+        .pop();
+      return {
+        configured: creds.length > 0,
+        phone_number_count: numbers.phoneNumbers.length,
+        phone_numbers: numbers.phoneNumbers.map((n) => ({
+          e164: n.e164,
+          source: n.source,
+          label: n.label,
+        })),
+        last_sync_at: lastSync ?? null,
+        credential_kinds: creds.map((c) => c.kind),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `[status] voip probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return {
+        configured: false,
+        phone_number_count: 0,
+        phone_numbers: [],
+        last_sync_at: null,
+        credential_kinds: [],
+      };
+    }
+  }
+
+  private async probeWebhooks(workspaceId: string): Promise<{
+    active_count: number;
+    webhooks: Array<{ id: string; name: string; url: string; active: boolean }>;
+  }> {
+    try {
+      const list = await this.webhooksService.list({
+        workspace_id: workspaceId,
+        active: true,
+      });
+      return {
+        active_count: list.length,
+        webhooks: list.map((w) => ({
+          id: w.id,
+          name: w.name,
+          url: w.url,
+          active: w.active,
+        })),
+      };
+    } catch (err) {
+      this.logger.warn(
+        `[status] webhooks probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return { active_count: 0, webhooks: [] };
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot B — VoIP M2M (delegates to VoipService / VoipSyncService)
+  // ---------------------------------------------------------------------------
+
+  /** List a workspace's tracked phone numbers + allowed sources (M2M). */
+  async voipListPhoneNumbers(workspaceId: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    return this.voipService.listPhoneNumbers(workspaceId);
+  }
+
+  /** Map a phone number to a traffic source for a workspace (M2M). */
+  async voipAddPhoneNumber(dto: VoipAddPhoneNumberDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const phoneNumber = await this.voipService.createPhoneNumber(
+      dto.workspace_id,
+      dto.e164,
+      dto.source,
+      dto.label ?? null,
+    );
+    return { ok: true as const, phoneNumber };
+  }
+
+  /** Soft-delete a tracked phone number by id (M2M). */
+  async voipRemovePhoneNumber(workspaceId: string, id: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    return this.voipService.deletePhoneNumber(workspaceId, id);
+  }
+
+  /**
+   * List a workspace's VoIP credentials (masked — secrets never returned).
+   */
+  async voipListCredentials(workspaceId: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    return { credentials: await this.voipService.listCredentials(workspaceId) };
+  }
+
+  /**
+   * Register/replace a VoIP credential (M2M). `creds` is write-only: it is
+   * encrypted at rest by VoipService and the masked credential is returned —
+   * the raw secret is never echoed back.
+   */
+  async voipSaveCredential(dto: VoipSaveCredentialDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const credential = await this.voipService.saveCredential(
+      dto.workspace_id,
+      dto.kind,
+      dto.creds,
+    );
+    return { ok: true as const, credential };
+  }
+
+  /** Test a VoIP credential against the provider API (M2M). */
+  async voipTestCredential(dto: VoipCredentialKindDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const result = await this.voipService.testCredential(
+      dto.workspace_id,
+      dto.kind,
+    );
+    return { ok: result.ok, message: result.message, status: result.status };
+  }
+
+  /** Soft-delete a VoIP credential (M2M). */
+  async voipDeleteCredential(dto: VoipCredentialKindDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    return this.voipService.deleteCredential(dto.workspace_id, dto.kind);
+  }
+
+  /**
+   * Trigger an immediate VoIP sync (M2M).
+   *
+   * NOTE: like the workspace-scoped voip.sync, the underlying syncAll() runs
+   * across ALL active credentials (the cron is global). We still require a
+   * valid `workspace_id` so the M2M contract is scoped/auditable and an IA
+   * cannot fire a global sync without naming a tenant it manages.
+   */
+  async voipSync(workspaceId: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    const result = await this.voipSyncService.syncAll();
+    return { ok: true as const, ...result };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot C — GSC M2M (status + resync only; OAuth stays human/browser)
+  // ---------------------------------------------------------------------------
+
+  /** Read the GSC connection state of a workspace (M2M). No tokens exposed. */
+  async gscStatus(workspaceId: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    return this.gscService.status(workspaceId);
+  }
+
+  /** Trigger an immediate GSC sync for a connected workspace (M2M). */
+  async gscResync(workspaceId: string, days?: number) {
+    await this.assertWorkspaceExists(workspaceId);
+    return this.gscService.resync(workspaceId, days ?? 30);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot D — Webhooks / Twenty connectors M2M (delegates to WebhooksService)
+  // ---------------------------------------------------------------------------
+
+  /** List webhook destinations for a workspace (M2M). Secrets never returned. */
+  async webhooksList(dto: ListWebhooksDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    return this.webhooksService.list(dto);
+  }
+
+  /**
+   * Create a webhook destination (M2M). SSRF protection is enforced by
+   * WebhooksService.create (it calls SsrfGuard.assertSafeUrl) — we do NOT
+   * re-implement it here. The auth secret is write-only (toPublic drops it).
+   */
+  async webhooksCreate(dto: CreateWebhookDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    return this.webhooksService.create(dto);
+  }
+
+  /** Soft-delete a webhook destination (M2M). */
+  async webhooksDelete(dto: DeleteWebhookDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    return this.webhooksService.softDelete(dto);
+  }
+
+  /**
+   * Synchronous test delivery to a webhook destination (M2M).
+   *
+   * Mirrors WebhooksController.test: enqueue a (synthetic or supplied) event,
+   * send it once via the delivery worker, persist the outcome, return it
+   * inline. The destination URL was SSRF-checked at create/update time.
+   */
+  async webhooksTest(dto: TestWebhookDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const webhook = await this.webhooksService.findById(
+      dto.workspace_id,
+      dto.id,
+    );
+    if (!webhook) {
+      throw new NotFoundException({
+        code: 'WEBHOOK_NOT_FOUND',
+        message: `Webhook ${dto.id} not found.`,
+      });
+    }
+    const synthetic =
+      dto.event ?? {
+        event_type: 'webhook.test',
+        event_id: `test_${Date.now()}`,
+        workspace_id: dto.workspace_id,
+        path: '/__test__',
+        utm: { source: 'webhook-test' },
+      };
+    const delivery = await this.webhooksService.enqueueDelivery(webhook, {
+      event_id: String(synthetic.event_id ?? `test_${Date.now()}`),
+      event_type: String(synthetic.event_type ?? 'webhook.test'),
+      payload: synthetic,
+    });
+    const result = await this.webhookDeliveryWorker.sendOne(webhook, delivery);
+    await this.webhooksService.updateDelivery({
+      ...delivery,
+      status: result.success ? 'success' : 'failed',
+      sent_at: toClickHouseDateTime(),
+      http_status: result.http_status,
+      latency_ms: result.latency_ms,
+      response_body: result.response_body,
+      error_message: result.error_message,
+    });
+    return {
+      delivery_id: delivery.id,
+      success: result.success,
+      http_status: result.http_status,
+      latency_ms: result.latency_ms,
+      response_body: result.response_body,
+      error_message: result.error_message,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot E — Workspace settings M2M
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Update a workspace's settings (M2M). Keyed on `workspace_id` per the M2M
+   * convention, mapped onto WorkspacesService.update's `id`-keyed DTO. Deep
+   * settings validation (annotations, smtp, geo, filters) is the canonical
+   * UpdateWorkspaceSettingsDto — identical to the console path.
+   */
+  async updateWorkspaceSettings(dto: UpdateWorkspaceSettingsM2MDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    return this.workspacesService.update({
+      id: dto.workspace_id,
+      status: dto.status,
+      name: dto.name,
+      website: dto.website,
+      timezone: dto.timezone,
+      currency: dto.currency,
+      logo_url: dto.logo_url,
+      settings: dto.settings,
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot F — ads.conversions (READ-only Ads-attributed conversions)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Return a workspace's conversions attributed to Google Ads, so an IA / the
+   * platform google-ads skill can read them and upload them to the Ads API.
+   *
+   * READ-only — no Ads credentials, no OAuth, no upload here (that stays in the
+   * skill). Pure analytics read over ClickHouse `events`.
+   *
+   * A conversion is a goal event (`name='goal'`, `goal_name != ''`) that is
+   * either:
+   *   - web-attributed: its session carries a Google Ads click id
+   *     (`utm_id_from IN ('gclid','gbraid','wbraid')`) → `click_id = utm_id`;
+   *   - phone-attributed: a `phone_call` goal whose tracked number maps to the
+   *     `ads` source (`properties['source']='ads'`) → no click id.
+   *
+   * Bounded by a date range (default last 28 days) and a row cap (default 1000,
+   * hard cap 10000) so we never dump millions of rows. `truncated` signals the
+   * cap was hit. Parameterized query (no string interpolation) — injection-safe.
+   */
+  async getAdsConversions(
+    dto: AdsConversionsDto,
+  ): Promise<AdsConversionsResponseDto> {
+    await this.assertWorkspaceExists(dto.workspace_id);
+
+    const now = new Date();
+    const to = dto.to ? new Date(dto.to) : now;
+    const from = dto.from
+      ? new Date(dto.from)
+      : new Date(to.getTime() - ADS_DEFAULT_LOOKBACK_DAYS * 86_400_000);
+    const limit = Math.min(dto.limit ?? ADS_DEFAULT_LIMIT, ADS_MAX_LIMIT);
+
+    const fromCh = toClickHouseDateTime(from);
+    const toCh = toClickHouseDateTime(to);
+
+    // One row cap covers both branches; +1 to detect truncation.
+    const rows = await this.clickhouse.queryWorkspace<{
+      click_id_source: string;
+      click_id: string;
+      conversion_type: string;
+      timestamp: string;
+      value: number;
+      user_id: string | null;
+      path: string;
+      phone_number: string;
+    }>(
+      dto.workspace_id,
+      `SELECT
+         multiIf(
+           goal_name = 'phone_call' AND properties['source'] = 'ads', 'phone_source_ads',
+           utm_id_from
+         ) AS click_id_source,
+         if(utm_id_from IN ({clickTypes:Array(String)}), utm_id, '') AS click_id,
+         goal_name AS conversion_type,
+         toString(coalesce(goal_timestamp, received_at)) AS timestamp,
+         toFloat64(goal_value) AS value,
+         user_id,
+         path,
+         properties['to_number'] AS phone_number
+       FROM events
+       WHERE name = 'goal'
+         AND goal_name != ''
+         AND received_at >= {from:DateTime64(3)}
+         AND received_at <= {to:DateTime64(3)}
+         AND (
+           utm_id_from IN ({clickTypes:Array(String)})
+           OR (goal_name = 'phone_call' AND properties['source'] = 'ads')
+         )
+       ORDER BY received_at DESC
+       LIMIT {lim:UInt32}`,
+      {
+        clickTypes: [...ADS_CLICK_ID_TYPES],
+        from: fromCh,
+        to: toCh,
+        lim: limit + 1,
+      },
+    );
+
+    const truncated = rows.length > limit;
+    const conversions = rows.slice(0, limit).map((r) => ({
+      click_id_source: r.click_id_source as AdsClickIdSource,
+      click_id: r.click_id ? r.click_id : null,
+      conversion_type: r.conversion_type,
+      timestamp: r.timestamp,
+      value: typeof r.value === 'number' ? r.value : Number(r.value ?? 0),
+      user_id: r.user_id ?? null,
+      path: r.path,
+      phone_number:
+        r.click_id_source === 'phone_source_ads'
+          ? r.phone_number || null
+          : null,
+    }));
+
+    return {
+      workspace_id: dto.workspace_id,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      limit,
+      count: conversions.length,
+      truncated,
+      conversions,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  /** Throw a structured 404 if the workspace does not exist. */
+  private async assertWorkspaceExists(workspaceId: string): Promise<void> {
+    if (!(await this.workspaceExists(workspaceId))) {
+      throw new NotFoundException({
+        error: 'workspace_not_found',
+        message: `Workspace ${workspaceId} does not exist.`,
+      });
+    }
+  }
 
   /**
    * Slugify a workspace name to match

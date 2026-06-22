@@ -17,6 +17,11 @@ import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { VoipService } from '../voip/voip.service';
+import { VoipSyncService } from '../voip/voip-sync.service';
+import { GscService } from '../gsc/gsc.service';
+import { WebhooksService } from '../webhooks/webhooks.service';
+import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
 
 describe('AdminPlatformService.provisionTenant', () => {
   let service: AdminPlatformService;
@@ -26,6 +31,12 @@ describe('AdminPlatformService.provisionTenant', () => {
   let apiKeysService: jest.Mocked<ApiKeysService>;
   let mailService: jest.Mocked<MailService>;
   let configService: jest.Mocked<ConfigService>;
+  let analyticsService: jest.Mocked<AnalyticsService>;
+  let voipService: jest.Mocked<VoipService>;
+  let voipSyncService: jest.Mocked<VoipSyncService>;
+  let gscService: jest.Mocked<GscService>;
+  let webhooksService: jest.Mocked<WebhooksService>;
+  let webhookDeliveryWorker: jest.Mocked<WebhookDeliveryWorker>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -36,6 +47,7 @@ describe('AdminPlatformService.provisionTenant', () => {
           useValue: {
             querySystem: jest.fn().mockResolvedValue([]),
             insertSystem: jest.fn().mockResolvedValue(undefined),
+            queryWorkspace: jest.fn().mockResolvedValue([]),
           },
         },
         {
@@ -50,6 +62,8 @@ describe('AdminPlatformService.provisionTenant', () => {
           provide: WorkspacesService,
           useValue: {
             create: jest.fn().mockResolvedValue({}),
+            get: jest.fn().mockResolvedValue({}),
+            update: jest.fn().mockResolvedValue({}),
           },
         },
         {
@@ -87,6 +101,57 @@ describe('AdminPlatformService.provisionTenant', () => {
             query: jest.fn().mockResolvedValue({ data: [], meta: {} }),
           },
         },
+        {
+          provide: VoipService,
+          useValue: {
+            listCredentials: jest.fn().mockResolvedValue([]),
+            listPhoneNumbers: jest
+              .fn()
+              .mockResolvedValue({ phoneNumbers: [], allowedSources: [] }),
+            createPhoneNumber: jest.fn(),
+            deletePhoneNumber: jest.fn(),
+            saveCredential: jest.fn(),
+            testCredential: jest.fn(),
+            deleteCredential: jest.fn(),
+          },
+        },
+        {
+          provide: VoipSyncService,
+          useValue: {
+            syncAll: jest
+              .fn()
+              .mockResolvedValue({ syncedWorkspaces: 0, pushedEvents: 0 }),
+          },
+        },
+        {
+          provide: GscService,
+          useValue: {
+            status: jest.fn().mockResolvedValue({
+              connected: false,
+              site_url: null,
+              ownership_state: null,
+              last_sync_at: null,
+            }),
+            resync: jest.fn().mockResolvedValue({ skipped: 'not_connected' }),
+          },
+        },
+        {
+          provide: WebhooksService,
+          useValue: {
+            list: jest.fn().mockResolvedValue([]),
+            create: jest.fn(),
+            softDelete: jest.fn(),
+            findById: jest.fn(),
+            enqueueDelivery: jest.fn(),
+            updateDelivery: jest.fn().mockResolvedValue(undefined),
+          },
+        },
+        {
+          provide: WebhookDeliveryWorker,
+          useValue: {
+            sendOne: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -97,14 +162,41 @@ describe('AdminPlatformService.provisionTenant', () => {
     apiKeysService = module.get(ApiKeysService);
     mailService = module.get(MailService);
     configService = module.get(ConfigService);
+    analyticsService = module.get(AnalyticsService);
+    voipService = module.get(VoipService);
+    voipSyncService = module.get(VoipSyncService);
+    gscService = module.get(GscService);
+    webhooksService = module.get(WebhooksService);
+    webhookDeliveryWorker = module.get(WebhookDeliveryWorker);
 
     jest.clearAllMocks();
     // Re-stub after clearAllMocks
     clickhouse.querySystem.mockResolvedValue([]);
     clickhouse.insertSystem.mockResolvedValue(undefined);
+    clickhouse.queryWorkspace.mockResolvedValue([]);
     usersService.delete.mockResolvedValue(undefined);
     workspacesService.create.mockResolvedValue({} as never);
     mailService.sendPasswordReset.mockResolvedValue(undefined);
+    // Re-stub connector defaults (cleared above) so probes have safe values.
+    analyticsService.query.mockResolvedValue({ data: [], meta: {} } as never);
+    voipService.listCredentials.mockResolvedValue([]);
+    voipService.listPhoneNumbers.mockResolvedValue({
+      phoneNumbers: [],
+      allowedSources: [] as never,
+    });
+    voipSyncService.syncAll.mockResolvedValue({
+      syncedWorkspaces: 0,
+      pushedEvents: 0,
+    });
+    gscService.status.mockResolvedValue({
+      connected: false,
+      site_url: null,
+      ownership_state: null,
+      last_sync_at: null,
+    });
+    gscService.resync.mockResolvedValue({ skipped: 'not_connected' });
+    webhooksService.list.mockResolvedValue([]);
+    webhooksService.updateDelivery.mockResolvedValue(undefined);
     configService.get.mockImplementation((key: string, def?: unknown) => {
       const env: Record<string, string | undefined> = {
         APP_URL: 'http://localhost:5173',
@@ -405,6 +497,478 @@ describe('AdminPlatformService.provisionTenant', () => {
           { id: 'apikey-1', key_prefix: 'stam_live_aaa', status: 'active' },
         ],
       });
+    });
+  });
+
+  // ─── Lot A — workspaces.status ──────────────────────────────────────
+
+  describe('getConsolidatedStatus (M2M)', () => {
+    it('returns exists=false with null fields when workspace is unknown', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // workspaceExists → false
+
+      const result = await service.getConsolidatedStatus('ws_ghost');
+
+      expect(result).toEqual({
+        workspace_id: 'ws_ghost',
+        exists: false,
+        name: null,
+        status: null,
+        tracking: null,
+        gsc: null,
+        voip: null,
+        webhooks: null,
+        snippet_html: null,
+      });
+      // No connector probe should run for a missing workspace.
+      expect(analyticsService.query).not.toHaveBeenCalled();
+      expect(gscService.status).not.toHaveBeenCalled();
+      expect(voipService.listCredentials).not.toHaveBeenCalled();
+      expect(webhooksService.list).not.toHaveBeenCalled();
+    });
+
+    it('composes the consolidated shape from every connector service', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'vrd_site_prod' }]); // exists
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'vrd_site_prod',
+        name: 'Boulangerie Dupont',
+        status: 'active',
+        timezone: 'Europe/Paris',
+      });
+      // 30d window → 42 sessions, 30min live → 3 sessions.
+      analyticsService.query
+        .mockResolvedValueOnce({ data: [{ sessions: 42 }], meta: {} } as never)
+        .mockResolvedValueOnce({ data: [{ sessions: 3 }], meta: {} } as never);
+      gscService.status.mockResolvedValue({
+        connected: true,
+        site_url: 'sc-domain:example.com',
+        ownership_state: 'verified',
+        last_sync_at: '2026-06-20 09:00:00',
+      });
+      voipService.listCredentials.mockResolvedValue([
+        {
+          kind: 'voip_ovh',
+          label: 'OVH',
+          status: 'ok',
+          masked: {},
+          lastSyncAt: '2026-06-20 08:00:00',
+          lastTestedAt: null,
+          lastError: null,
+          createdAt: '2026-06-01 00:00:00',
+          updatedAt: '2026-06-20 08:00:00',
+        },
+      ]);
+      voipService.listPhoneNumbers.mockResolvedValue({
+        phoneNumbers: [
+          {
+            id: 'phn_1',
+            e164: '+33123456789',
+            source: 'seo',
+            label: 'Accueil',
+            createdAt: '2026-06-01 00:00:00',
+            updatedAt: '2026-06-01 00:00:00',
+          },
+        ],
+        allowedSources: ['seo'] as never,
+      });
+      webhooksService.list.mockResolvedValue([
+        {
+          id: 'wh_1',
+          name: 'Twenty',
+          url: 'https://example.com/hook',
+          active: true,
+        } as never,
+      ]);
+
+      const result = await service.getConsolidatedStatus('vrd_site_prod');
+
+      expect(result.exists).toBe(true);
+      expect(result.name).toBe('Boulangerie Dupont');
+      expect(result.status).toBe('active');
+      expect(result.tracking).toEqual({
+        active: true,
+        sessions_30d: 42,
+        live: true,
+      });
+      expect(result.gsc).toEqual({
+        connected: true,
+        site_url: 'sc-domain:example.com',
+        ownership_state: 'verified',
+        last_sync_at: '2026-06-20 09:00:00',
+      });
+      expect(result.voip).toMatchObject({
+        configured: true,
+        phone_number_count: 1,
+        last_sync_at: '2026-06-20 08:00:00',
+        credential_kinds: ['voip_ovh'],
+      });
+      expect(result.voip?.phone_numbers).toEqual([
+        { e164: '+33123456789', source: 'seo', label: 'Accueil' },
+      ]);
+      expect(result.webhooks).toEqual({
+        active_count: 1,
+        webhooks: [
+          {
+            id: 'wh_1',
+            name: 'Twenty',
+            url: 'https://example.com/hook',
+            active: true,
+          },
+        ],
+      });
+      expect(result.snippet_html).toContain('vrd_site_prod');
+    });
+
+    it('degrades a failing tracking probe to active=false instead of throwing', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'vrd_site_prod' }]); // exists
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'vrd_site_prod',
+        name: 'X',
+        status: 'active',
+      });
+      analyticsService.query.mockRejectedValue(new Error('CH down'));
+
+      const result = await service.getConsolidatedStatus('vrd_site_prod');
+
+      expect(result.exists).toBe(true);
+      expect(result.tracking).toEqual({
+        active: false,
+        sessions_30d: 0,
+        live: false,
+      });
+    });
+  });
+
+  // ─── Lot B — VoIP M2M ───────────────────────────────────────────────
+
+  describe('VoIP M2M', () => {
+    it('voipAddPhoneNumber delegates to VoipService.createPhoneNumber', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      voipService.createPhoneNumber.mockResolvedValue({
+        id: 'phn_1',
+        e164: '+33123456789',
+        source: 'ads',
+        label: null,
+        createdAt: 'x',
+        updatedAt: 'x',
+      });
+
+      const result = await service.voipAddPhoneNumber({
+        workspace_id: 'ws1',
+        e164: '+33123456789',
+        source: 'ads',
+      });
+
+      expect(voipService.createPhoneNumber).toHaveBeenCalledWith(
+        'ws1',
+        '+33123456789',
+        'ads',
+        null,
+      );
+      expect(result).toEqual({
+        ok: true,
+        phoneNumber: expect.objectContaining({ id: 'phn_1' }),
+      });
+    });
+
+    it('voipAddPhoneNumber 404s on a missing workspace (no delegation)', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.voipAddPhoneNumber({
+          workspace_id: 'ws_ghost',
+          e164: '+33123456789',
+          source: 'seo',
+        }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(voipService.createPhoneNumber).not.toHaveBeenCalled();
+    });
+
+    it('voipSaveCredential delegates (creds write-only) and never returns the secret', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      voipService.saveCredential.mockResolvedValue({
+        kind: 'voip_ovh',
+        label: 'OVH',
+        status: 'untested',
+        masked: { appKey: '****' },
+        lastSyncAt: null,
+        lastTestedAt: null,
+        lastError: null,
+        createdAt: 'x',
+        updatedAt: 'x',
+      });
+
+      const result = await service.voipSaveCredential({
+        workspace_id: 'ws1',
+        kind: 'voip_ovh',
+        creds: { appKey: 'secret', appSecret: 'secret' },
+      });
+
+      expect(voipService.saveCredential).toHaveBeenCalledWith(
+        'ws1',
+        'voip_ovh',
+        { appKey: 'secret', appSecret: 'secret' },
+      );
+      // Response carries only the masked view — never the raw creds.
+      expect(JSON.stringify(result)).not.toContain('"secret"');
+      expect(result.credential.masked).toEqual({ appKey: '****' });
+    });
+
+    it('voipSync 404s on missing workspace and otherwise delegates to syncAll', async () => {
+      clickhouse.querySystem.mockResolvedValueOnce([]); // not exists
+      await expect(service.voipSync('ws_ghost')).rejects.toMatchObject({
+        response: { error: 'workspace_not_found' },
+      });
+      expect(voipSyncService.syncAll).not.toHaveBeenCalled();
+
+      clickhouse.querySystem.mockResolvedValueOnce([{ id: 'ws1' }]); // exists
+      voipSyncService.syncAll.mockResolvedValue({
+        syncedWorkspaces: 2,
+        pushedEvents: 5,
+      });
+      const result = await service.voipSync('ws1');
+      expect(result).toEqual({
+        ok: true,
+        syncedWorkspaces: 2,
+        pushedEvents: 5,
+      });
+    });
+  });
+
+  // ─── Lot C — GSC M2M ────────────────────────────────────────────────
+
+  describe('GSC M2M', () => {
+    it('gscResync 404s on missing workspace and otherwise delegates with days', async () => {
+      clickhouse.querySystem.mockResolvedValueOnce([]); // not exists
+      await expect(service.gscResync('ws_ghost', 7)).rejects.toMatchObject({
+        response: { error: 'workspace_not_found' },
+      });
+      expect(gscService.resync).not.toHaveBeenCalled();
+
+      clickhouse.querySystem.mockResolvedValueOnce([{ id: 'ws1' }]); // exists
+      await service.gscResync('ws1', 7);
+      expect(gscService.resync).toHaveBeenCalledWith('ws1', 7);
+    });
+
+    it('gscResync defaults days to 30', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      await service.gscResync('ws1');
+      expect(gscService.resync).toHaveBeenCalledWith('ws1', 30);
+    });
+  });
+
+  // ─── Lot D — Webhooks M2M ───────────────────────────────────────────
+
+  describe('Webhooks M2M', () => {
+    it('webhooksCreate delegates to WebhooksService.create (SSRF enforced there)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      webhooksService.create.mockResolvedValue({ id: 'wh_1' } as never);
+      const dto = {
+        workspace_id: 'ws1',
+        name: 'Twenty',
+        url: 'https://example.com/hook',
+        events: ['goal'],
+      };
+      const result = await service.webhooksCreate(dto as never);
+      expect(webhooksService.create).toHaveBeenCalledWith(dto);
+      expect(result).toEqual({ id: 'wh_1' });
+    });
+
+    it('webhooksTest sends one delivery via the worker and persists the outcome', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      webhooksService.findById.mockResolvedValue({
+        id: 'wh_1',
+        workspace_id: 'ws1',
+        url: 'https://example.com/hook',
+      } as never);
+      webhooksService.enqueueDelivery.mockResolvedValue({
+        id: 'del_1',
+      } as never);
+      webhookDeliveryWorker.sendOne.mockResolvedValue({
+        success: true,
+        http_status: 200,
+        latency_ms: 12,
+        response_body: 'ok',
+        error_message: '',
+      });
+
+      const result = await service.webhooksTest({
+        workspace_id: 'ws1',
+        id: 'wh_1',
+      } as never);
+
+      expect(webhookDeliveryWorker.sendOne).toHaveBeenCalled();
+      expect(webhooksService.updateDelivery).toHaveBeenCalledWith(
+        expect.objectContaining({ status: 'success', http_status: 200 }),
+      );
+      expect(result).toEqual({
+        delivery_id: 'del_1',
+        success: true,
+        http_status: 200,
+        latency_ms: 12,
+        response_body: 'ok',
+        error_message: '',
+      });
+    });
+
+    it('webhooksTest 404s when the webhook does not exist', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      webhooksService.findById.mockResolvedValue(null);
+      await expect(
+        service.webhooksTest({ workspace_id: 'ws1', id: 'nope' } as never),
+      ).rejects.toMatchObject({ response: { code: 'WEBHOOK_NOT_FOUND' } });
+      expect(webhookDeliveryWorker.sendOne).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Lot E — workspaces.updateSettings M2M ──────────────────────────
+
+  describe('updateWorkspaceSettings (M2M)', () => {
+    it('maps workspace_id → id and delegates to WorkspacesService.update', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      (workspacesService.update as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        timezone: 'Europe/Paris',
+      });
+
+      const result = await service.updateWorkspaceSettings({
+        workspace_id: 'ws1',
+        timezone: 'Europe/Paris',
+        currency: 'EUR',
+      });
+
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'ws1',
+          timezone: 'Europe/Paris',
+          currency: 'EUR',
+        }),
+      );
+      expect(result).toMatchObject({ id: 'ws1' });
+    });
+
+    it('404s on a missing workspace (no delegation)', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.updateWorkspaceSettings({
+          workspace_id: 'ws_ghost',
+          timezone: 'Europe/Paris',
+        }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(workspacesService.update).not.toHaveBeenCalled();
+    });
+  });
+
+  // ─── Lot F — ads.conversions ────────────────────────────────────────
+
+  describe('getAdsConversions (M2M, read-only)', () => {
+    it('404s on a missing workspace (no query)', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.getAdsConversions({ workspace_id: 'ws_ghost' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(clickhouse.queryWorkspace).not.toHaveBeenCalled();
+    });
+
+    it('maps click-id and phone rows into the typed conversion shape', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      clickhouse.queryWorkspace.mockResolvedValue([
+        {
+          click_id_source: 'gclid',
+          click_id: 'EAIaIQ-gclid-123',
+          conversion_type: 'form_submission',
+          timestamp: '2026-06-20 10:00:00.000',
+          value: 42,
+          user_id: 'user-1',
+          path: '/contact',
+          phone_number: '',
+        },
+        {
+          click_id_source: 'phone_source_ads',
+          click_id: '',
+          conversion_type: 'phone_call',
+          timestamp: '2026-06-20 11:00:00.000',
+          value: 120,
+          user_id: null,
+          path: '/voip',
+          phone_number: '+33177123456',
+        },
+      ] as never);
+
+      const result = await service.getAdsConversions({ workspace_id: 'ws1' });
+
+      expect(clickhouse.queryWorkspace).toHaveBeenCalledTimes(1);
+      // Query is scoped to the workspace + parameterized (no interpolation).
+      const [wsArg, sqlArg, paramsArg] = (
+        clickhouse.queryWorkspace as jest.Mock
+      ).mock.calls[0];
+      expect(wsArg).toBe('ws1');
+      expect(sqlArg).toContain('FROM events');
+      expect(paramsArg.clickTypes).toEqual(['gclid', 'gbraid', 'wbraid']);
+
+      expect(result.workspace_id).toBe('ws1');
+      expect(result.count).toBe(2);
+      expect(result.truncated).toBe(false);
+      // Web click-id conversion keeps its raw click id; phone has none.
+      expect(result.conversions[0]).toEqual({
+        click_id_source: 'gclid',
+        click_id: 'EAIaIQ-gclid-123',
+        conversion_type: 'form_submission',
+        timestamp: '2026-06-20 10:00:00.000',
+        value: 42,
+        user_id: 'user-1',
+        path: '/contact',
+        phone_number: null,
+      });
+      expect(result.conversions[1]).toMatchObject({
+        click_id_source: 'phone_source_ads',
+        click_id: null,
+        conversion_type: 'phone_call',
+        user_id: null,
+        phone_number: '+33177123456',
+      });
+    });
+
+    it('defaults to a 28-day window when no range is supplied', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      clickhouse.queryWorkspace.mockResolvedValue([] as never);
+
+      const result = await service.getAdsConversions({ workspace_id: 'ws1' });
+
+      const fromMs = new Date(result.from).getTime();
+      const toMs = new Date(result.to).getTime();
+      const days = (toMs - fromMs) / 86_400_000;
+      expect(Math.round(days)).toBe(28);
+      expect(result.limit).toBe(1000);
+      expect(result.count).toBe(0);
+    });
+
+    it('caps the limit at 10000 and flags truncation when the cap is hit', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      // Request a 2-row cap; return 3 (cap+1) → truncated, only 2 kept.
+      clickhouse.queryWorkspace.mockResolvedValue(
+        Array.from({ length: 3 }, (_, i) => ({
+          click_id_source: 'gclid',
+          click_id: `id-${i}`,
+          conversion_type: 'goal',
+          timestamp: '2026-06-20 10:00:00.000',
+          value: 0,
+          user_id: null,
+          path: '/x',
+          phone_number: '',
+        })) as never,
+      );
+
+      const result = await service.getAdsConversions({
+        workspace_id: 'ws1',
+        limit: 2,
+      });
+
+      expect(result.limit).toBe(2);
+      expect(result.count).toBe(2);
+      expect(result.truncated).toBe(true);
+      // queryWorkspace is asked for limit+1 to detect truncation.
+      const paramsArg = (clickhouse.queryWorkspace as jest.Mock).mock
+        .calls[0][2];
+      expect(paramsArg.lim).toBe(3);
     });
   });
 });

@@ -26,6 +26,6 @@ import { TwentyConnectorService } from './connectors/twenty-connector.service';
     TwentyEventMapper,
     TwentyConnectorService,
   ],
-  exports: [WebhooksService, WebhookDispatcherService],
+  exports: [WebhooksService, WebhookDispatcherService, WebhookDeliveryWorker],
 })
 export class WebhooksModule {}
