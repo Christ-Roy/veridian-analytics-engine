@@ -540,3 +540,74 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     });
   });
 });
+
+// Surface M2M IA-first (workspaces.status, voip.*, gsc.*, webhooks.*,
+// workspaces.updateSettings, ads.conversions) — garantie de sécurité : AUCUN
+// de ces endpoints ne doit être atteignable sans la clé plateforme. La logique
+// métier est testée en unitaire (admin-platform.service.spec.ts) + au niveau des
+// services workspace délégués ; ici on verrouille le contrat d'auth de la surface.
+describe('Admin Platform — surface M2M IA-first : auth gate', () => {
+  let ctx: TestAppContext;
+
+  beforeAll(async () => {
+    ctx = await createAdminPlatformTestApp();
+  });
+
+  afterAll(async () => {
+    await closeTestApp(ctx);
+  });
+
+  const M2M_ENDPOINTS = [
+    'workspaces.status',
+    'workspaces.updateSettings',
+    'voip.listPhoneNumbers',
+    'voip.addPhoneNumber',
+    'voip.removePhoneNumber',
+    'voip.listCredentials',
+    'voip.saveCredential',
+    'voip.testCredential',
+    'voip.deleteCredential',
+    'voip.sync',
+    'gsc.status',
+    'gsc.resync',
+    'webhooks.list',
+    'webhooks.create',
+    'webhooks.delete',
+    'webhooks.test',
+    'ads.conversions',
+  ];
+
+  it.each(M2M_ENDPOINTS)(
+    'POST %s returns 401 without Authorization header',
+    async (endpoint) => {
+      await request(ctx.app.getHttpServer())
+        .post(`/api/admin/platform/${endpoint}`)
+        .send({ workspace_id: 'whatever' })
+        .expect(401);
+    },
+  );
+
+  it.each(M2M_ENDPOINTS)(
+    'POST %s returns 401 with a wrong Bearer token',
+    async (endpoint) => {
+      await request(ctx.app.getHttpServer())
+        .post(`/api/admin/platform/${endpoint}`)
+        .set('Authorization', 'Bearer not-the-real-key')
+        .send({ workspace_id: 'whatever' })
+        .expect(401);
+    },
+  );
+
+  it.each(M2M_ENDPOINTS)(
+    'POST %s with a VALID key does NOT return 401 (auth passes the guard)',
+    async (endpoint) => {
+      // On ne valide pas le métier ici (404/400/200 selon l'état) — seulement
+      // que le guard M2M laisse passer la clé plateforme (donc PAS 401).
+      const res = await request(ctx.app.getHttpServer())
+        .post(`/api/admin/platform/${endpoint}`)
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: 'nonexistent_ws' });
+      expect(res.status).not.toBe(401);
+    },
+  );
+});
