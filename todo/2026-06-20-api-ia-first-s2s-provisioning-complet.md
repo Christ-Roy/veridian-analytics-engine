@@ -104,3 +104,29 @@ active régénérée (`stam_live_b8e0e3c…`, role admin, name `s2s-veridian-sit
 <script async src="https://analytics-engine.app.veridian.site/sdk/v1/tracker.js"
         data-workspace-id="vrd_veridian_site_prod"></script>
 ```
+
+---
+
+## ✅ VAGUE 1 LIVRÉE — 2026-06-22 (staging, commit c4ae45b)
+
+22 endpoints M2M `/api/admin/platform/*` (Bearer PLATFORM_ADMIN_API_KEY) :
+- **workspaces.status** — état consolidé (tracking/gsc/voip/webhooks/settings + snippet)
+- **VoIP M2M** : listPhoneNumbers, addPhoneNumber, removePhoneNumber, listCredentials,
+  saveCredential, testCredential, deleteCredential, sync
+  (saveCredential write-only GARDÉ — décision Robert 2026-06-22, full-S2S)
+- **GSC M2M** : gsc.status, gsc.resync (OAuth reste humain)
+- **Webhooks/Twenty M2M** : webhooks.list/create/delete/test (branche le tunnel CRM en S2S)
+- **workspaces.updateSettings** (timezone/currency/dimensions/filters)
+- **ads.conversions** (lecture des conversions attribuées Google Ads via utm_id_from
+  ∈ gclid/gbraid/wbraid OU phone_source='ads' — pour upload par le skill google-ads)
+
+Sécurité : secrets jamais renvoyés (vues Public*), workspace_id requis, SSRF délégué
+au WebhooksService, slug validé. Test E2E auth-gate sur les 17 nouveaux endpoints.
+Pattern : délégation aux services workspace (zéro duplication).
+
+### Reste à faire (vagues ultérieures)
+- **F2 Google Ads — upload offline conversions** (vrai chantier, arbitrages : mapping
+  workspace→customer_id, OAuth multi-compte, où vit le pipeline). Reco : skill google-ads
+  lit l'engine via ads.conversions puis upload via Google Ads API.
+- **SSO autologin Hub** : ticket séparé `2026-06-22-sso-autologin-hub-issue-token.md`
+  (+ miroir Hub `2026-06-22-brancher-analytics-au-broker-sso-autologin.md`).
