@@ -57,3 +57,22 @@ ce qui doit l'être** (ex : poser les creds = sur-mesure, fait via l'API M2M).
   données. `ads.conversions` M2M expose les conversions attribuées (livré).
 - Forms : `form_submission` = un goal staminads natif (pas de pipeline form dédié
   visible) → à confirmer dans le ticket review.
+
+---
+
+## Ajout 2026-06-22 — Funnel & attribution par canal (audité)
+
+Nouveaux sous-tickets (après audit du terrain) :
+- 🔴 `2026-06-22-channel-jamais-calcule-attribution-borgne.md` — **PRÉREQUIS** : la
+  dimension `channel` existe (schéma+dict+UI) mais est **toujours vide** (hardcodée
+  `''` à l'ingestion, aucune dérivation). Sans ce calcul, tout filtre/funnel par
+  canal est borgne. **À faire en premier.**
+- 🟡 `2026-06-22-funnel-tunnel-de-vente-par-canal.md` — funnel analytique (étapes +
+  taux de passage) filtrable par canal. Aucun funnel n'existe aujourd'hui. Backend
+  `windowFunnel()` CH + vue UI native.
+- 🟡 `2026-06-22-taux-creation-conversion-par-app-et-canal.md` — taux de création de
+  compte par app × canal. Briques : goals signup/app_started avec `properties.app`
+  existent ; volet Hub à coordonner (cross-domain vitrine→signup).
+
+Ordre : **channel (prérequis) → funnel → taux par app**. Le channel débloque les
+deux autres ET le ticket CRM Ads/SEO.
