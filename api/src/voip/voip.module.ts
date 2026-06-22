@@ -24,6 +24,9 @@ import { VoipSyncService } from './voip-sync.service';
   ],
   controllers: [VoipController],
   providers: [VoipService, VoipCrypto, VoipSyncService],
-  exports: [VoipService],
+  // VoipSyncService exporté pour que AdminPlatformModule (voip.sync M2M) puisse
+  // l'injecter via VoipModule sans le re-déclarer (sinon Nest échoue à résoudre
+  // la dépendance au boot → cascade E2E, cf incident 2026-06-22).
+  exports: [VoipService, VoipSyncService],
 })
 export class VoipModule {}
