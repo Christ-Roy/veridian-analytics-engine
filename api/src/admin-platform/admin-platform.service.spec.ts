@@ -1123,6 +1123,87 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(res.verdict).toBe('snippet_missing');
     });
 
+    it('verdict=ok (NOT snippet_missing) when static HTML has no snippet but real traffic is live (SPA install)', async () => {
+      // Yoga Sculpt case: tracker injected client-side via a React effect, so
+      // it's absent from the server-fetched HTML, yet ingestion is live.
+      workspaceExists();
+      ingestionVisible(true);
+      // real_tracking: live traffic right now (30d>0, 30min>0).
+      analyticsService.query
+        .mockResolvedValueOnce({ data: [{ sessions: 120 }], meta: {} } as never) // 30d
+        .mockResolvedValueOnce({ data: [{ sessions: 3 }], meta: {} } as never); // 30min
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          '<html><head><title>SPA, no static tracker tag</title></head></html>',
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://spa-client.example',
+      });
+
+      expect(res.ingestion.ok).toBe(true);
+      expect(res.snippet).not.toBeNull();
+      // Static probe still reports present:false (informative, not a verdict).
+      expect(res.snippet!.present).toBe(false);
+      // Detail annotated to explain the false negative.
+      expect(res.snippet!.detail).toContain('real live traffic is flowing');
+      expect(res.real_tracking.live).toBe(true);
+      // Live traffic proves the install — must NOT be snippet_missing.
+      expect(res.verdict).toBe('ok');
+    });
+
+    it('verdict=snippet_missing when no static snippet AND no real live traffic', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      // No real traffic at all.
+      analyticsService.query
+        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never) // 30d
+        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never); // 30min
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => '<html><head><title>nothing here</title></head></html>',
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://dead-client.example',
+      });
+
+      expect(res.snippet!.present).toBe(false);
+      expect(res.real_tracking.live).toBe(false);
+      // No tag, no traffic → genuinely not installed.
+      expect(res.verdict).toBe('snippet_missing');
+    });
+
+    it('verdict=snippet_misconfigured even when traffic is live (actionable install bug is always reported)', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      analyticsService.query
+        .mockResolvedValueOnce({ data: [{ sessions: 50 }], meta: {} } as never)
+        .mockResolvedValueOnce({ data: [{ sessions: 2 }], meta: {} } as never);
+      // Tag present but wrong workspace id — a real mistake worth surfacing
+      // regardless of (possibly unrelated) live traffic.
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          `<html><head><script async src="https://t.example/sdk/v1/tracker.js" data-workspace-id="wrong_ws"></script></head></html>`,
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://misconfigured.example',
+      });
+
+      expect(res.snippet!.present).toBe(true);
+      expect(res.snippet!.workspace_id_match).toBe(false);
+      expect(res.verdict).toBe('snippet_misconfigured');
+    });
+
     it('verdict=snippet_misconfigured when src points at the bare /tracker.js SPA trap', async () => {
       workspaceExists();
       ingestionVisible(true);

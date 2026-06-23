@@ -1141,6 +1141,34 @@
     goal phone_call. Testée en unitaire (pas de réseau). Le masquage et le
     parse sont aussi exercés via voip.service.spec (save → list masqué).
 
+# ─── SDK TRACKER (sdk/) ─────────────────────────────────────────────────
+#
+# Le SDK est un sous-projet Vitest autonome (jsdom). Convention canonique =
+# test colocalisé `sdk/src/<x>.test.ts` (cf. en-tête de ce fichier + vitest
+# include 'src/**/*.test.ts'). check-test-mapping.sh mappe `sdk/src/*.ts` sur
+# le dossier `sdk/tests/` uniquement ; on déclare donc ici les sources dont le
+# test canonique est COLOCALISÉ dans sdk/src/, pour que le hook les accepte.
+
+- sources:
+    - sdk/src/auto-init.ts
+  covered_by:
+    - sdk/src/auto-init.test.ts
+  reason: |
+    Résolution de la config tracker depuis le DOM (data-* du <script>), pierre
+    angulaire du snippet auto-init. Tests colocalisés Vitest/jsdom : piège
+    `<script async>` currentScript=null (recherche par src /sdk/v1/tracker.js),
+    parsing data-cross-domains / data-ad-click-ids, précédence StaminadsConfig.
+
+- sources:
+    - sdk/src/index.ts
+  covered_by:
+    - sdk/src/index.test.ts
+    - sdk/src/auto-init.test.ts
+  reason: |
+    Point d'entrée du bundle : auto-init depuis window.StaminadsConfig OU les
+    data-* du tag (le snippet officiel). Test colocalisé index.test.ts couvre
+    l'auto-init DOM bout-en-bout (tag async, currentScript=null).
+
 # ─── NOTES MAINTENANCE ─────────────────────────────────────────────────
 #
 # - Quand on ajoute un patch Veridian (cf PATCHES.md), il DOIT venir avec :

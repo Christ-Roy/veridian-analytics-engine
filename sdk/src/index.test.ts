@@ -62,6 +62,37 @@ describe('Staminads SDK - Global Config Pattern', () => {
       expect(typeof Staminads.init).toBe('function');
     });
 
+    it('should auto-initialize from a data-workspace-id <script> tag (no global config)', async () => {
+      // Reproduce the nominal install snippet: an async tracker script tag with
+      // data-* attributes and NO window.StaminadsConfig. This is the exact case
+      // that used to track nothing (the bundle ignored data-workspace-id).
+      delete window.StaminadsConfig;
+
+      const tag = document.createElement('script');
+      tag.setAttribute(
+        'src',
+        'https://analytics-engine.app.veridian.site/sdk/v1/tracker.js',
+      );
+      tag.setAttribute('async', '');
+      tag.setAttribute('data-workspace-id', 'ws_snippet');
+      document.head.appendChild(tag);
+
+      // currentScript is null for injected/async scripts — the bug condition.
+      expect(document.currentScript).toBeNull();
+
+      const { default: Staminads } = await import('./index');
+
+      // The SDK must have picked up the workspace from the DOM and initialised.
+      expect(Staminads.getConfig()).not.toBeNull();
+      expect(Staminads.getConfig()?.workspace_id).toBe('ws_snippet');
+      // Endpoint defaulted to the origin serving the bundle.
+      expect(Staminads.getConfig()?.endpoint).toBe(
+        'https://analytics-engine.app.veridian.site',
+      );
+
+      document.head.removeChild(tag);
+    });
+
     it('init should be idempotent (calling twice returns same promise)', async () => {
       delete window.StaminadsConfig;
 

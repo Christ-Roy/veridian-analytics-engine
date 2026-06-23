@@ -3,6 +3,15 @@
  * Ultra-reliable web analytics for tracking TimeScore metrics
  *
  * @example
+ * Recommended — single self-initialising snippet (reads its own data-* attrs):
+ * ```html
+ * <script async
+ *   src="https://analytics-engine.app.veridian.site/sdk/v1/tracker.js"
+ *   data-workspace-id="ws_abc123"
+ *   data-cross-domains="app.example.com"></script>
+ * ```
+ *
+ * Alternative — explicit global config (also supported, takes precedence):
  * ```html
  * <script>
  * window.StaminadsConfig = {
@@ -35,6 +44,7 @@
  */
 
 import { StaminadsSDK } from './sdk';
+import { resolveAutoInitConfig } from './auto-init';
 import type {
   StaminadsConfig,
   StaminadsAPI,
@@ -75,9 +85,22 @@ export type {
   SessionDebugInfo,
 };
 
-// Auto-initialize from global config
-if (typeof window !== 'undefined' && window.StaminadsConfig) {
-  sdk.init(window.StaminadsConfig);
+// Auto-initialize.
+//
+// Two supported sources, in precedence order (see auto-init.ts):
+//   1. window.StaminadsConfig — explicit programmatic config (backward compat).
+//   2. The tracker <script> tag's data-* attributes — the nominal install
+//      snippet `<script async src=".../sdk/v1/tracker.js" data-workspace-id=…>`.
+//
+// The data-* path is essential: with `async` the bundle runs after the parser
+// has moved on, so `document.currentScript` is null — resolveAutoInitConfig
+// locates the tag by its /sdk/v1/tracker.js src instead. Without this, the
+// official snippet loads the bundle but never calls init() → zero events.
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const autoConfig = resolveAutoInitConfig(window, document);
+  if (autoConfig) {
+    sdk.init(autoConfig);
+  }
 }
 
 // Default export for UMD/ESM/CJS

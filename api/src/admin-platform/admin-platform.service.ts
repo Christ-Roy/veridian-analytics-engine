@@ -925,7 +925,7 @@ export class AdminPlatformService {
     }
 
     // Run the three probes concurrently — each is independently fail-soft.
-    const [ingestion, snippet, real] = await Promise.all([
+    const [ingestion, rawSnippet, real] = await Promise.all([
       this.probeIngestionRoundTrip(workspaceId),
       dto.site_url
         ? this.probeSnippet(workspaceId, dto.site_url)
@@ -933,35 +933,78 @@ export class AdminPlatformService {
       this.probeTracking(workspaceId),
     ]);
 
+    // The static-HTML snippet probe is informative, never the sole truth: SPA
+    // installs (Next.js/React/GTM) inject the tag client-side, so it's absent
+    // from the server-fetched HTML even though tracking works. When real live
+    // traffic confirms the install, annotate the snippet detail so the IA does
+    // not mistake the false negative for a real problem.
+    const snippet =
+      rawSnippet &&
+      !rawSnippet.present &&
+      real.live &&
+      !rawSnippet.detail.startsWith('could not fetch')
+        ? {
+            ...rawSnippet,
+            detail:
+              rawSnippet.detail +
+              ' — but real live traffic is flowing, so the install works ' +
+              '(tracker likely injected client-side; static HTML probe is ' +
+              'a false negative for SPA/Next.js sites)',
+          }
+        : rawSnippet;
+
     return {
       workspace_id: workspaceId,
       workspace_exists: true,
       ingestion,
       snippet,
       real_tracking: { sessions_30d: real.sessions_30d, live: real.live },
-      verdict: this.computeVerifyVerdict(ingestion.ok, snippet),
+      verdict: this.computeVerifyVerdict(ingestion.ok, snippet, real.live),
     };
   }
 
-  /** Verdict precedence: ingestion failure first, then snippet problems. */
+  /**
+   * Compute the single-word verdict.
+   *
+   * Precedence:
+   *   1. Ingestion failure dominates everything (the pipeline itself is broken).
+   *   2. A snippet that IS present but misconfigured (wrong src / wrong ws id)
+   *      is always reported — that's an actionable install mistake regardless
+   *      of traffic.
+   *   3. A snippet that is ABSENT from the static HTML is only `snippet_missing`
+   *      when there is NO real live traffic. The clients are Next.js/SPA: the
+   *      tracker is frequently injected client-side (React effect, GTM, …), so
+   *      it is invisible to a server-side `fetch` of the HTML. If real sessions
+   *      are flowing right now (`real.live`), the install demonstrably works —
+   *      the static probe is a false negative and we MUST NOT cry wolf. The
+   *      `snippet.present:false` field stays in the response as an informative
+   *      signal; it just no longer overrides a proven-live install.
+   *   4. An unreachable site (fetch failed) is an availability issue, not a
+   *      confirmed missing tag → never down-rank to snippet_missing.
+   */
   private computeVerifyVerdict(
     ingestionOk: boolean,
     snippet: TrackingVerifySnippet | null,
+    realLive: boolean,
   ): TrackingVerifyVerdict {
     if (!ingestionOk) return 'ingestion_failed';
     if (snippet) {
-      // `checked && !present` after a successful fetch ⇒ snippet absent.
-      // A failed fetch leaves present=false but detail says "could not fetch":
-      // we do NOT down-rank to snippet_missing on an unreachable site, since
-      // that's an availability issue, not a confirmed missing tag.
-      if (!snippet.present) {
-        return snippet.detail.startsWith('could not fetch')
-          ? 'ok'
-          : 'snippet_missing';
+      if (snippet.present) {
+        // A tag is present: grade it. Misconfiguration is always actionable.
+        if (!snippet.src_correct || !snippet.workspace_id_match) {
+          return 'snippet_misconfigured';
+        }
+        return 'ok';
       }
-      if (!snippet.src_correct || !snippet.workspace_id_match) {
-        return 'snippet_misconfigured';
+      // Snippet absent from the static HTML.
+      if (snippet.detail.startsWith('could not fetch')) {
+        // Site unreachable — availability issue, not a confirmed missing tag.
+        return 'ok';
       }
+      // Confirmed absent from static HTML. Only flag it when there is no real
+      // live traffic — a live SPA install proves tracking works regardless of
+      // how/when the script is injected.
+      return realLive ? 'ok' : 'snippet_missing';
     }
     return 'ok';
   }
@@ -1518,10 +1561,21 @@ export class AdminPlatformService {
     // tracker uses workspace_id only for event collection (CORS-permissive
     // /api/track* endpoints). The api_key returned in the response is for
     // server-to-server use by the Hub.
+    //
     // The browser tracker bundle is served by the SDK controller at
     // /sdk/v1/tracker.js (UMD `Staminads`). The bare /tracker.js path falls
     // through to the SPA console HTML and tracks nothing, so we MUST point the
     // snippet at the SDK route.
+    //
+    // This single tag is self-initialising: the bundle reads its own
+    // `data-workspace-id` (and `data-endpoint` defaults to this origin), so no
+    // companion `window.StaminadsConfig` <script> is needed. See sdk/auto-init.ts.
+    //
+    // Cross-domain tunnels (e.g. vitrine ↔ app on different domains) add a
+    // `data-cross-domains="app.example.com,www.example.com"` attribute to this
+    // same tag — it maps to the SDK `crossDomains` option. Not emitted here
+    // because provisioning doesn't know the client's domain topology; the
+    // integrator adds it. Documented in the analytics-provision skill.
     return `<script async src="${trackerOrigin}/sdk/v1/tracker.js" data-workspace-id="${workspaceId}"></script>`;
   }
 
