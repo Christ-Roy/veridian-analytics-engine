@@ -33,6 +33,7 @@ jest.mock('../src/migrations/migrations.registry', () => ({
 import { MigrationsRunner } from '../src/migrations/migrations.service';
 import { V8VoipMigration } from '../src/migrations/v8-voip-migration';
 import { V10VisitorIdMigration } from '../src/migrations/v10-visitor-id-migration';
+import { WORKSPACE_SCHEMAS } from '../src/database/schemas';
 
 describe('Migrations E2E', () => {
   let systemClient: ClickHouseClient;
@@ -338,92 +339,35 @@ describe('Migrations E2E', () => {
       });
     });
 
-    /** Build events + sessions (+ sessions_mv) WITHOUT visitor_id/fingerprint/ip. */
+    /**
+     * Strip the 3 B2B columns + their bloom-filter index from a real schema DDL
+     * so the table looks like a pre-v10 install. We build the BASE tables from
+     * the canonical WORKSPACE_SCHEMAS (so they carry EVERY column the MVs read)
+     * minus visitor_id/fingerprint/ip — exactly the upgrade path V10 covers.
+     */
+    function stripB2bColumns(ddl: string): string {
+      return ddl
+        .replace(/^\s*(?:visitor_id|fingerprint|ip)\s+String\s+DEFAULT\s+''\s*,?\s*$/gim, '')
+        .replace(/^\s*INDEX\s+idx_visitor_id[^\n]*,?\s*$/gim, '')
+        // Tidy any trailing comma left dangling before the closing paren.
+        .replace(/,(\s*)\)/g, '$1)');
+    }
+
+    /**
+     * Build the events + sessions + pages + goals BASE tables (no MVs — the
+     * migration recreates those) from the real schemas, stripped of the B2B
+     * columns. Simulates a v9 install ready for the V10 upgrade.
+     */
     async function buildPreV10Schema(): Promise<void> {
-      await systemClient.command({
-        query: `DROP DATABASE IF EXISTS ${V10_DB}`,
-      });
-      await systemClient.command({
-        query: `CREATE DATABASE ${V10_DB}`,
-      });
-      // Minimal events table: the columns sessions_mv reads, MINUS the 3 new ones.
-      await systemClient.command({
-        query: `
-          CREATE TABLE ${V10_DB}.events (
-            id UUID DEFAULT generateUUIDv4(),
-            session_id String,
-            workspace_id String,
-            received_at DateTime64(3),
-            created_at DateTime64(3),
-            updated_at DateTime64(3),
-            name LowCardinality(String),
-            path String,
-            duration UInt64 DEFAULT 0,
-            page_duration UInt32 DEFAULT 0,
-            max_scroll UInt8 DEFAULT 0,
-            page_number UInt16 DEFAULT 0,
-            _version UInt64 DEFAULT 0,
-            goal_value Float32 DEFAULT 0,
-            user_id Nullable(String),
-            dedup_token String DEFAULT ''
-          ) ENGINE = ReplacingMergeTree(_version)
-          ORDER BY (session_id, dedup_token)
-        `,
-      });
-      await systemClient.command({
-        query: `
-          CREATE TABLE ${V10_DB}.sessions (
-            id String,
-            workspace_id String,
-            created_at DateTime64(3),
-            updated_at DateTime64(3),
-            user_id Nullable(String),
-            visitor_id String DEFAULT '',
-            fingerprint String DEFAULT '',
-            ip String DEFAULT ''
-          ) ENGINE = ReplacingMergeTree(updated_at)
-          ORDER BY (created_at, id)
-        `,
-      });
-      // pages + goals minimal targets so migrateWorkspace's ALTER+MV recreation
-      // has tables to operate on.
-      await systemClient.command({
-        query: `
-          CREATE TABLE ${V10_DB}.pages (
-            id UUID DEFAULT generateUUIDv4(),
-            session_id String,
-            workspace_id String,
-            path String,
-            entered_at DateTime64(3) DEFAULT now64(3),
-            exited_at DateTime64(3) DEFAULT now64(3),
-            page_number UInt16 DEFAULT 1,
-            user_id Nullable(String),
-            visitor_id String DEFAULT '',
-            fingerprint String DEFAULT '',
-            ip String DEFAULT '',
-            received_at DateTime64(3) DEFAULT now64(3),
-            _version UInt64 DEFAULT 0
-          ) ENGINE = ReplacingMergeTree(_version)
-          ORDER BY (session_id, page_number)
-        `,
-      });
-      await systemClient.command({
-        query: `
-          CREATE TABLE ${V10_DB}.goals (
-            id UUID DEFAULT generateUUIDv4(),
-            session_id String,
-            workspace_id String,
-            goal_name String,
-            goal_timestamp DateTime64(3),
-            user_id Nullable(String),
-            visitor_id String DEFAULT '',
-            fingerprint String DEFAULT '',
-            ip String DEFAULT '',
-            _version UInt64 DEFAULT 0
-          ) ENGINE = ReplacingMergeTree(_version)
-          ORDER BY (goal_timestamp, session_id, goal_name)
-        `,
-      });
+      await systemClient.command({ query: `DROP DATABASE IF EXISTS ${V10_DB}` });
+      await systemClient.command({ query: `CREATE DATABASE ${V10_DB}` });
+
+      for (const table of ['events', 'sessions', 'pages', 'goals'] as const) {
+        const ddl = stripB2bColumns(
+          WORKSPACE_SCHEMAS[table].replace(/{database}/g, V10_DB),
+        );
+        await systemClient.command({ query: ddl });
+      }
       await waitForClickHouse();
     }
 
