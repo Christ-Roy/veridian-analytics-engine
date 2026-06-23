@@ -84,38 +84,54 @@ describe('fetchOvhCdr — cap after date sort (recent calls kept)', () => {
 
 describe('fetchOvhCdr — periodic re-signature on long pulls', () => {
   it('re-fetches /auth/time when the signing timestamp goes stale', async () => {
-    jest.useFakeTimers();
+    // Drive Date.now() deterministically (no fake timers — robust to jest
+    // timer config). The signer re-signs once Date.now() advances past
+    // OVH_RESIGN_INTERVAL_MS (20s) since the last /auth/time fetch.
+    const base = 1_750_000_000_000; // fixed epoch ms
+    // Sequence consumed by the signer's Date.now() reads. We hold the clock
+    // steady for discovery + the first detail, then jump so the next detail
+    // GET triggers a re-fetch of /auth/time.
+    const clock = [
+      base, // signer create → fetchedAtMonotonic
+      base + 1000, // /telephony  timestamp()
+      base + 2000, // /service    timestamp()
+      base + 3000, // /voiceConsumption list  timestamp()
+      base + 4000, // detail/10   timestamp()  (elapsed 4s < 20s, no re-sign)
+      base + 30_000, // detail/20 timestamp() (elapsed 30s ≥ 20s → re-sign)
+    ];
+    let i = 0;
+    const nowSpy = jest
+      .spyOn(Date, 'now')
+      .mockImplementation(() =>
+        i < clock.length ? clock[i++] : clock[clock.length - 1],
+      );
+
     try {
       let authTimeCalls = 0;
-      // Two consumption ids; on the detail call for the first one, jump the
-      // fake clock past the re-sign interval so the 2nd GET re-signs.
       const fetchImpl = makeFetch({
         consumptionIds: [10, 20],
         onAuthTime: () => {
           authTimeCalls++;
         },
-        detailFor: (id) => {
-          if (id === 10) {
-            // advance 25s > OVH_RESIGN_INTERVAL_MS (20s)
-            jest.setSystemTime(Date.now() + 25_000);
-          }
-          return {
-            consumptionId: id,
-            wayType: 'incoming',
-            called: '+33177123456',
-            duration: 10,
-            creationDatetime: new Date().toISOString(),
-          };
-        },
+        detailFor: (id) => ({
+          consumptionId: id,
+          wayType: 'incoming',
+          called: '+33177123456',
+          duration: 10,
+          // fixed date inside the wide window below
+          creationDatetime: '2026-06-01T10:00:00.000Z',
+        }),
       });
 
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      await fetchOvhCdr(creds, { since, fetchImpl });
+      // Very wide window so the date filter never drops our two calls.
+      const since = new Date('2020-01-01T00:00:00.000Z');
+      const until = new Date('2030-01-01T00:00:00.000Z');
+      await fetchOvhCdr(creds, { since, until, fetchImpl });
 
-      // Initial /auth/time + at least one re-fetch after the clock jump.
-      expect(authTimeCalls).toBeGreaterThanOrEqual(2);
+      // Initial /auth/time + exactly one re-fetch after the +25s jump.
+      expect(authTimeCalls).toBe(2);
     } finally {
-      jest.useRealTimers();
+      nowSpy.mockRestore();
     }
   });
 });
