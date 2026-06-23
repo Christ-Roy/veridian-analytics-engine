@@ -37,3 +37,33 @@ aussi pourquoi all-time renvoie None (borne 2020-2030).
 Status M2M trompeur (un workspace actif paraît mort). Les dashboards clients ne sont
 PAS affectés (ils lisent les vraies queries). Mais l'IA/Hub qui appelle status pour
 juger l'état d'un tenant aura un faux négatif. À corriger vite (P1).
+
+## Résolution — 2026-06-23 (commit 9f1d707)
+**Cause RÉELLE** (≠ hypothèse fenêtre de date du ticket) : collision working-tree
+entre `fd91e83` (ajoute la métrique `unique_visitors`) et `3fe98f8`
+(`fix(analytics): pageviews metric sums pageview_count`). `3fe98f8` a réécrit le
+bloc `pageviews` de `api/src/analytics/constants/metrics.ts` à partir d'un arbre
+périmé d'AVANT `fd91e83` → a **silencieusement supprimé `unique_visitors`** du
+registre `METRICS`.
+
+`probeTracking` (admin-platform.service.ts:472) interroge toujours
+`unique_visitors` via `countMetric` → `AnalyticsService.query()` lève
+`BadRequestException: Unknown metric: unique_visitors` → le `Promise.all` rejette
+→ le `try/catch` dégrade vers `safe` (tout à zéro). D'où `sessions_30d=0`,
+`visitors_30d=0`, `active=false` alors que les données sont intactes (332/338).
+
+La **résolution de date (preset `previous_30_days`) marche parfaitement** : un
+appel direct `analytics.query {preset:previous_30_days}` renvoie 332. Le bug
+n'était PAS dans `date-utils.ts`/`query-builder.ts`/`analytics.service.ts`.
+
+Le **all-time `data: None`** du ticket = MÊME cause : interroger `unique_visitors`
+sur n'importe quelle plage renvoie `400 Unknown metric` (vérifié prod). `sessions`
+seul sur {2020..2030} renvoie 338 sans souci. Un seul bug, pas deux.
+
+**Pourquoi les tests unitaires ne l'ont pas vu** : le spec status mocke
+`AnalyticsService.query` → il ne touche jamais le vrai registre `METRICS`.
+
+**Fix** : restauration de `unique_visitors` (`uniqExact(visitor_id)`) +
+`metrics.spec.ts` qui épingle le contrat des métriques du status-probe (échoue en
+CI si une future collision en supprime une). Vérifié prod (332 sessions réelles),
+testé sur dev-pub (54 tests verts + tsc OK).
