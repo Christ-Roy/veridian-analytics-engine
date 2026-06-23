@@ -9,6 +9,8 @@ import { DateRangePicker } from '../../../../components/dashboard/DateRangePicke
 import { ComparisonPicker } from '../../../../components/dashboard/ComparisonPicker'
 import { GoalDashboardDrawer } from '../../../../components/goals/GoalDashboardDrawer'
 import { GoalCard } from '../../../../components/goals/GoalCard'
+import { FunnelPanel } from '../../../../components/goals/FunnelPanel'
+import { ConversionsByChannelPanel } from '../../../../components/goals/ConversionsByChannelPanel'
 import { determineGranularity } from '../../../../lib/chart-utils'
 import { determineGranularityForRange, computeDateRange } from '../../../../lib/date-utils'
 import { toMetricNumber } from '../../../../lib/dimension-utils'
@@ -372,6 +374,20 @@ function Goals() {
           ))}
         </div>
       )}
+
+      {/* Entonnoir de conversion + conversions par canal (natif Objectifs) */}
+      <div className="mt-8 space-y-6">
+        <FunnelPanel
+          workspaceId={workspaceId}
+          dateRange={dateRange}
+          timezone={workspace.timezone}
+        />
+        <ConversionsByChannelPanel
+          workspaceId={workspaceId}
+          dateRange={dateRange}
+          timezone={workspace.timezone}
+        />
+      </div>
 
       {/* Goal Dashboard Drawer */}
       {selectedGoal && (

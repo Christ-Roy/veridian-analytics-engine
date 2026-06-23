@@ -168,8 +168,8 @@ const DIMENSION_EXAMPLES: Record<string, [string, string]> = {
   utm_content: ['banner_top', 'sidebar_cta'],
 
   // Channel
-  channel: ['Organic Search', 'Paid Social'],
-  channel_group: ['Search', 'Social'],
+  channel: ['organic_search', 'paid_search'],
+  channel_group: ['seo', 'ads'],
 
   // Pages
   landing_page: ['https://example.com/products', 'https://example.com/blog'],

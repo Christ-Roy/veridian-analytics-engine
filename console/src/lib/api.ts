@@ -6,6 +6,10 @@ import type {
   DimensionDefinition,
   ExtremesQuery,
   ExtremesResponse,
+  FunnelQuery,
+  FunnelResponse,
+  ConversionsByChannelQuery,
+  ConversionsByChannelResponse,
 } from '../types/analytics'
 import type {
   FilterDefinition,
@@ -115,6 +119,16 @@ export const api = {
       }),
     metrics: () => request<Record<string, MetricDefinition>>('analytics.metrics'),
     dimensions: () => request<Record<string, DimensionDefinition>>('analytics.dimensions'),
+    funnel: (data: FunnelQuery) =>
+      request<FunnelResponse>('analytics.funnel', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    conversionsByChannel: (data: ConversionsByChannelQuery) =>
+      request<ConversionsByChannelResponse>('analytics.conversionsByChannel', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
   },
   tools: {
     websiteMeta: (url: string) =>

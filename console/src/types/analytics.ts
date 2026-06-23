@@ -114,6 +114,62 @@ export interface DimensionDefinition {
   category: string
 }
 
+export interface FunnelStep {
+  goal_name: string
+  label?: string
+}
+
+export interface FunnelQuery {
+  workspace_id: string
+  steps: FunnelStep[]
+  dateRange: DateRange
+  filters?: Filter[]
+  timezone?: string
+  unit?: 'session' | 'visitor'
+  window_seconds?: number
+}
+
+export interface FunnelStepResult {
+  step: number
+  goal_name: string
+  label: string
+  count: number
+  conversion_from_previous: number | null
+  conversion_from_start: number
+  dropoff_from_previous: number
+}
+
+export interface FunnelResponse {
+  workspace_id: string
+  unit: 'session' | 'visitor'
+  dateRange: { start: string; end: string }
+  entered: number
+  overall_conversion: number
+  steps: FunnelStepResult[]
+}
+
+export interface ConversionsByChannelQuery {
+  workspace_id: string
+  dateRange: DateRange
+  conversion_goals?: string[]
+  timezone?: string
+}
+
+export interface ConversionsByChannelRow {
+  channel_group: string
+  app: string
+  conversions: number
+  sessions: number
+  conversion_rate: number
+}
+
+export interface ConversionsByChannelResponse {
+  workspace_id: string
+  dateRange: { start: string; end: string }
+  conversion_goals: string[]
+  rows: ConversionsByChannelRow[]
+}
+
 export interface ExtremesQuery {
   workspace_id: string
   metric: string
