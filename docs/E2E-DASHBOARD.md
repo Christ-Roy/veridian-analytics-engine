@@ -50,8 +50,7 @@ Cette doc agrège l'état de la batterie E2E. Référencée dans
 | `05-gsc-oauth` | 1 | 🟡 Partiel (endpoints + CSRF + sync gate) | NON | full-staging nightly |
 | `06-hub-contract` | 1 | 🟢 OK (HMAC rejection — sécurité) | OUI prod | smoke-staging / smoke-prod |
 | `07-settings-credentials` | 1 | 🟡 Partiel (page + voip credentials shape) | NON | full-staging nightly |
-| `08-voip-calls` | 1 | 🟡 Partiel (endpoints shape + UI smoke) | NON | full-staging nightly |
-| `09-dashboard-ui` | 5 | 🟢 OK (sections + mobile + responsive + tabs + empty) | OUI staging | full-staging |
+| `09-dashboard-ui` | 2 | 🟢 OK (empty/error states + responsive breakpoints) | NON | full-staging nightly |
 | `10-onboarding-wizard` | 1 | 🟡 Partiel (welcome route + tracker.detect) | OUI staging | full-staging |
 | `11-demo-public` | 6 | 🟢 OK (existant + extensions) | OUI prod | smoke-staging / smoke-prod |
 | `12-auth-flow` | 5 | 🟢 OK (login/error pages/logout/JWT/setup) | OUI prod | security-audit nightly |
@@ -67,8 +66,13 @@ Cette doc agrège l'état de la batterie E2E. Référencée dans
 `03-forms-leads` (forms supprimés), `04-push-pwa` (push archivé),
 `13-cross-app-inbound` (tapait le bridge mort), `20-business-flows`
 (bridge + `/api/ingest/form` périmé), 3 specs de `06-hub-contract`
-(`hmac-valid-provision`/`idempotency-key`/`paywall-states` — écriture bridge).
-Le parcours métier réel est repris, en mieux, par `00-gate-onpremise` (M2M natif).
+(`hmac-valid-provision`/`idempotency-key`/`paywall-states` — écriture bridge),
+tout `08-voip-calls` (endpoints REST `/api/voip/sync` périmés → VoIP couvert par
+le gate en M2M), et 3 specs `09-dashboard-ui` chargeant la route `/veridian`
+supprimée (`dashboard-sections-render` score/shadow, `mobile-responsive`,
+`tabs-navigation` deep-links veridian/leads — ces specs faisaient timeout
+`e2e-full-staging`). Le parcours métier réel est repris, en mieux, par
+`00-gate-onpremise` (M2M natif).
 
 **Légende statut** :
 - 🟢 OK : couverture suffisante pour la commercialisation

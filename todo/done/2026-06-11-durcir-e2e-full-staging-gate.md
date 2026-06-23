@@ -70,3 +70,16 @@ Constats additionnels :
 Contournement utilisé pour la promo de la vague revoke+voip+gsc (2026-06-17) :
 CI staging Test&Coverage (E2E API contre ClickHouse RÉEL) + deploy+smoke verts +
 smoke manuel des 3 modules. Le gate Playwright UI full n'a PAS pu servir.
+
+---
+
+## ✅ RÉSOLU 2026-06-23 — voir ticket mega-battery
+
+Résolu par le même chantier que
+`2026-06-18-mega-battery-e2e-full-staging-perimee-gate-mort.md` (archivé en
+done). Le gate de référence n'est plus `e2e-full-staging` (Playwright UI, que le
+runner public ne peut pas faire tourner contre le staging tailnet) mais le
+nouveau **`e2e-gate-onpremise.yml`** : il SSH dans dev-pub, exécute le scénario
+M2M contre staging réel, **peut rouge et bloque** la promo, et tourne RÉELLEMENT
+VERT en CI. `e2e-full-staging` devient un nightly informatif best-effort (le
+`|| true` reste volontairement — ce n'est plus le gate). Specs mortes purgées.
