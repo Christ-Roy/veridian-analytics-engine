@@ -1077,13 +1077,25 @@ describe('AdminPlatformService.provisionTenant', () => {
         meta: {},
       } as never);
 
-      const res = await service.verifyTracking({ workspace_id: WS });
+      // The probe polls for up to 8s (VERIFY_INGEST_TIMEOUT_MS) when the event
+      // never becomes visible. Fake timers advance that wait virtually so the
+      // test stays fast (no real 8s wait → no jest 5s timeout).
+      jest.useFakeTimers();
+      try {
+        const promise = service.verifyTracking({ workspace_id: WS });
+        // Advance past the full ingest poll window, flushing microtasks so the
+        // awaited query mock + sleep() resolve between ticks.
+        await jest.advanceTimersByTimeAsync(9000);
+        const res = await promise;
 
-      expect(res.ingestion.ok).toBe(false);
-      expect(res.ingestion.round_trip_ms).toBeNull();
-      expect(res.verdict).toBe('ingestion_failed');
-      // Even on failure we still purge (no orphan synthetic row).
-      expect(clickhouse.commandWorkspaceWithParams).toHaveBeenCalled();
+        expect(res.ingestion.ok).toBe(false);
+        expect(res.ingestion.round_trip_ms).toBeNull();
+        expect(res.verdict).toBe('ingestion_failed');
+        // Even on failure we still purge (no orphan synthetic row).
+        expect(clickhouse.commandWorkspaceWithParams).toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('verdict=snippet_missing when site_url HTML has no tracker script', async () => {
