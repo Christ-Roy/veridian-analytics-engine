@@ -146,34 +146,3 @@ ROI immédiat ; Niveau 3 (layout) est à arbitrer selon ce que staminads permet.
   (mapping/identité hardcodés) → impossible de vendre l'enrichissement CRM à une autre
   industrie sans recoder le connecteur. C'est le blocage le plus structurant pour le
   « service précis pour n'importe quelle industrie » (Robert 2026-06-23).
-
----
-
-## ✅ Résolu — 2026-06-23 (agent customization)
-
-Les 4 niveaux livrés, pilotables M2M (6 nouvelles routes `/api/admin/platform`).
-
-- **N1 branding** : `console/src/veridian/branding.tsx` défige le shell (logo header,
-  accent `--primary`, titre doc, favicon, antd `colorPrimary`) selon le workspace
-  courant. Défaut Veridian si rien. Jamais sur la démo. Route `workspaces.setBranding`.
-- **N2 features** : `console/src/veridian/features.ts` + filtrage sidebar Settings
-  (`settings.tsx`) et menu mobile (`$workspaceId.tsx`). Onglets voip/gsc/connectors
-  **masqués** (jamais grisés) si feature=false. Flag absent = visible (back-compat).
-  Route `workspaces.setFeatures` (deep-merge).
-- **N3 layout** : `console/src/components/dashboard/dashboard-layout.ts` réordonne/
-  masque les 8 widgets natifs du dashboard (pages, sources, campaigns, countries,
-  heatmap, devices, page_views, goals). Pas de composant custom (vision respectée).
-  Route `workspaces.setLayout`.
-- **N4 + S4** : `twenty-event-mapper.ts` devenu MOTEUR GÉNÉRIQUE config-driven.
-  Catalogue goals→timeline par workspace (`crm_mapping.goals`), résolution
-  d'identité configurable (`auto`/`email`/`field` — UUID Supabase → champ Twenty
-  custom, fini les orphans Yoga Sculpt), phone_call mappé (S4) + `acquisitionSource`
-  normalisée (gclid>phone_source>referrer>utm) sur chaque milestone. Sans config →
-  mapping prospection built-in (back-compat total). Routes `crm.setMapping`/`crm.getMapping`.
-  Le connecteur (`twenty-connector.service.ts`) charge la config workspace (cache 60s)
-  et résout la Person sur le bon champ (`twenty-client.resolveByField`).
-
-Config workspace : nouveaux champs `branding`/`features`/`dashboard_layout`/`crm_mapping`
-dans `WorkspaceSettings` (`workspace.entity.ts`) + DTOs validés. Skill
-`analytics-provision` + CLI `analytics` (`ui:get/branding/features/layout`, `crm:map/get`)
-à jour. Cible Hub : surface M2M générique, prête à être appelée pour le white-label centralisé.
