@@ -2,11 +2,14 @@ import { Body, Controller, Headers, HttpCode, Post } from '@nestjs/common';
 import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { ClientIp } from '../common/decorators/client-ip.decorator';
 import { Public } from '../common/decorators/public.decorator';
-import { SkipRateLimit } from '../common/decorators/throttle.decorator';
+import { IngestThrottle } from '../common/decorators/throttle.decorator';
 import { SessionPayloadDto } from './dto/session-payload.dto';
 import { SessionPayloadHandler } from './session-payload.handler';
 
-@SkipRateLimit() // High-volume endpoints - millions of devices may share same IP
+// Rate-limit ADAPTÉ à l'ingestion haut-volume : throttler `ingest` bucketé
+// par (workspace_id + IP), PAS par IP brute (qui casserait un gros site NAT).
+// Cf throttle.decorator.ts IngestThrottle + CustomThrottlerGuard.getTracker.
+@IngestThrottle()
 @ApiTags('events')
 @Controller('api')
 export class EventsController {

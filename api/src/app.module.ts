@@ -81,14 +81,32 @@ import { AdminPlatformModule } from './admin-platform/admin-platform.module';
               { name: 'auth', ttl: 1, limit: 1000000 },
               { name: 'default', ttl: 1, limit: 1000000 },
               { name: 'analytics', ttl: 1, limit: 1000000 },
+              { name: 'ingest', ttl: 1, limit: 1000000 },
             ],
           };
         }
+        // `ingest` : throttler dédié à /api/track (ticket ratelimit-dos
+        // 2026-06-23). Volontairement GÉNÉREUX et bucketé par (workspace_id+IP)
+        // dans CustomThrottlerGuard.getTracker — PAS par IP brute. Un gros site
+        // légitime répartit son trafic sur des milliers de couples (ws, IP)
+        // distincts → jamais throttlé. Un flood depuis une IP sur un workspace
+        // sature un unique bucket → bloqué. Surchargeable via INGEST_THROTTLE_*.
+        const ingestLimit = Number(
+          config.get<string>('INGEST_THROTTLE_LIMIT') ?? '600',
+        );
+        const ingestTtl = Number(
+          config.get<string>('INGEST_THROTTLE_TTL') ?? '60000',
+        );
         return {
           throttlers: [
             { name: 'auth', ttl: 60000, limit: 10 },
             { name: 'default', ttl: 60000, limit: 100 },
             { name: 'analytics', ttl: 60000, limit: 1000 },
+            {
+              name: 'ingest',
+              ttl: Number.isFinite(ingestTtl) ? ingestTtl : 60000,
+              limit: Number.isFinite(ingestLimit) ? ingestLimit : 600,
+            },
           ],
         };
       },

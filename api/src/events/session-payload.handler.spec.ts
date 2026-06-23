@@ -1443,4 +1443,46 @@ describe('SessionPayloadHandler', () => {
       expect(bufferService.addBatch).not.toHaveBeenCalled();
     });
   });
+
+  describe('workspace kill-switch (inactive/suspended)', () => {
+    const inactiveStatuses = ['inactive', 'error', 'initializing'] as const;
+
+    for (const status of inactiveStatuses) {
+      it(`silently drops ingestion for status="${status}"`, async () => {
+        workspacesService.get.mockResolvedValue({
+          ...mockWorkspace,
+          status,
+        } as never);
+
+        const payload = createPayload({
+          actions: [createPageviewAction({ page_number: 1 })],
+          attributes: { landing_page: 'https://example.com/' },
+        });
+
+        const result = await handler.handle(payload, '8.8.8.8');
+
+        // 200 muet : on ne leak pas l'état du tenant, mais zéro écriture.
+        expect(result.success).toBe(true);
+        expect(bufferService.addBatch).not.toHaveBeenCalled();
+        expect(eventEmitter.emit).not.toHaveBeenCalled();
+      });
+    }
+
+    it('ingests normally for status="active"', async () => {
+      workspacesService.get.mockResolvedValue({
+        ...mockWorkspace,
+        status: 'active',
+      } as never);
+
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+
+      const result = await handler.handle(payload, '8.8.8.8');
+
+      expect(result.success).toBe(true);
+      expect(bufferService.addBatch).toHaveBeenCalledTimes(1);
+    });
+  });
 });

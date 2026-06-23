@@ -53,6 +53,19 @@ export class SessionPayloadHandler {
     // 1. Validate workspace
     const workspace = await this.getWorkspace(payload.workspace_id);
 
+    // 1b. Kill-switch : ne PAS ingérer pour un workspace non-actif
+    //     (suspendu/résilié/initializing/error). Réponse 200 muette — comme le
+    //     domain-reject plus bas — pour ne pas leaker l'état du tenant à un
+    //     client externe. Le statut vient du cache workspace (TTL 60s) donc
+    //     zéro coût DB additionnel à fort volume.
+    //     Ticket ingest-no-killswitch-workspace-inactif 2026-06-23.
+    if (workspace.status !== 'active') {
+      this.logger.debug(
+        `Ingestion skipped: workspace ${workspace.id} status=${workspace.status}`,
+      );
+      return { success: true };
+    }
+
     // 2. Check domain restriction using browser headers (not spoofable)
     const requestDomain = this.extractRequestDomain(origin, referer);
     if (

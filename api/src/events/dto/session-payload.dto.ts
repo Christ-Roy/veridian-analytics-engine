@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { IsWithinTimeBounds } from '../../common/validators/time-bounds.validator';
 import { IsGreaterThanOrEqual } from '../../common/validators/compare.validator';
+import { IsBoundedStringMap } from '../../common/validators/bounded-string-map.validator';
 
 // Constants
 export const MAX_ACTIONS = 1000;
@@ -82,6 +83,7 @@ export class GoalActionDto {
 
   @IsOptional()
   @IsObject()
+  @IsBoundedStringMap()
   properties?: Record<string, string>;
 }
 
@@ -226,6 +228,7 @@ export class SessionPayloadDto {
 
   @IsOptional()
   @IsObject()
+  @IsBoundedStringMap()
   dimensions?: Record<string, string>;
 }
 

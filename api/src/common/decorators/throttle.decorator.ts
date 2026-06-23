@@ -26,6 +26,29 @@ export function AnalyticsThrottle() {
  * Use this on track endpoints that may receive millions of requests from same IP.
  */
 export function SkipRateLimit() {
+  return SkipThrottle({
+    auth: true,
+    default: true,
+    analytics: true,
+    ingest: true,
+  });
+}
+
+/**
+ * Rate limit for the public high-volume ingestion endpoint (/api/track).
+ *
+ * Ne JAMAIS appliquer un throttle par IP brute ici : des millions d'appareils
+ * derrière un même NAT partagent l'IP → ça casserait le tracking légitime
+ * (c'est pourquoi l'endpoint était historiquement @SkipRateLimit). À la place :
+ *   - on n'active QUE le throttler `ingest` (généreux), les autres sont skip ;
+ *   - CustomThrottlerGuard.getTracker bucket par (workspace_id + IP) pour
+ *     /api/track, pas par IP seule → un gros site n'est jamais throttlé,
+ *     seul un flood concentré (même ws + même IP) saute le plafond.
+ *
+ * Filet anti-DoS/flood SANS casser l'ingestion normale d'un gros site
+ * (ticket ingest-track-aucun-ratelimit-dos 2026-06-23).
+ */
+export function IngestThrottle() {
   return SkipThrottle({ auth: true, default: true, analytics: true });
 }
 

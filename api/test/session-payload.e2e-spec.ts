@@ -275,6 +275,117 @@ describe('V3 Session Payload E2E', () => {
     });
   });
 
+  // Kill-switch d'ingestion par statut workspace (ticket
+  // ingest-no-killswitch-workspace-inactif 2026-06-23).
+  describe('POST /api/track — kill-switch workspace inactif', () => {
+    const inactiveWsId = 'test_ws_inactive';
+
+    it('drops ingestion silently (200, no events) for an inactive workspace', async () => {
+      await createTestWorkspace(systemClient, inactiveWsId, {
+        status: 'inactive',
+      });
+
+      const payload = createSessionPayload({
+        workspace_id: inactiveWsId,
+        session_id: `sess-killswitch-${Date.now()}`,
+        actions: [createPageviewAction()],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      const response = await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        // 200 muet : on ne leak pas l'état du tenant à un client externe.
+        .expect(200);
+
+      expect(response.body.success).toBe(true);
+
+      // Aucune écriture : le buffer ne doit rien avoir flushé.
+      await eventBuffer.flushAll();
+      const result = await workspaceClient.query({
+        query: `SELECT count() AS c FROM events WHERE workspace_id = {ws:String}`,
+        query_params: { ws: inactiveWsId },
+        format: 'JSONEachRow',
+      });
+      const rows = (await result.json()) as Array<{ c: string }>;
+      expect(Number(rows[0]?.c ?? 0)).toBe(0);
+    });
+  });
+
+  // Bornes payload : properties (goal) + dimensions (ticket
+  // ingest-properties-dimensions-non-bornees 2026-06-23).
+  describe('POST /api/track — bornes properties / dimensions', () => {
+    it('accepts a small flat properties map on a goal', async () => {
+      const props = { plan: 'pro', source: 'ads' };
+      const payload = createSessionPayload({
+        actions: [createGoalAction({ properties: props })],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(200);
+    });
+
+    it('rejects a goal with too many properties keys', async () => {
+      const huge: Record<string, string> = {};
+      for (let i = 0; i < 100; i++) huge[`k${i}`] = 'v';
+
+      const payload = createSessionPayload({
+        actions: [createGoalAction({ properties: huge })],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(400);
+    });
+
+    it('rejects a goal with an over-long property value', async () => {
+      const bigValue = 'x'.repeat(5000);
+      const payload = createSessionPayload({
+        actions: [createGoalAction({ properties: { big: bigValue } })],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(400);
+    });
+
+    it('rejects a goal with nested properties (depth)', async () => {
+      const nested = { nested: { deep: 'value' } } as never;
+      const payload = createSessionPayload({
+        actions: [createGoalAction({ properties: nested })],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(400);
+    });
+
+    it('rejects a payload with too many dimensions keys', async () => {
+      const huge: Record<string, string> = {};
+      for (let i = 0; i < 100; i++) huge[`stm_${i}`] = 'v';
+
+      const payload = createSessionPayload({
+        dimensions: huge,
+        actions: [createPageviewAction()],
+        attributes: { landing_page: 'https://example.com/home' },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(400);
+    });
+  });
+
   describe('Pages Materialized View', () => {
     it('creates page rows from pageview actions', async () => {
       const sessionId = `sess-pages-mv-${Date.now()}`;

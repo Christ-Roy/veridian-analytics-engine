@@ -21,6 +21,29 @@ async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // ---------------------------------------------------------------------------
+  // Trust proxy (anti-spoofing IP/géo — ticket ingest-spoofing-ip-xff 2026-06-23)
+  // ---------------------------------------------------------------------------
+  // L'app tourne TOUJOURS derrière exactement UN reverse-proxy de confiance :
+  //   - prod    : Traefik Dokploy sur dokploy-network (compose/prod.yml)
+  //   - staging : Traefik standalone sur staging-edge  (compose/staging.yml)
+  //   - demo    : Traefik Dokploy                       (compose/demo.yml)
+  // Aucun CDN supplémentaire (pas de Cloudflare proxy orange devant l'app —
+  // Traefik tape directement l'IP OVH). Donc 1 seul hop de confiance.
+  //
+  // Avec `trust proxy = 1`, Express ne fait confiance qu'au DERNIER proxy
+  // (Traefik) et calcule `req.ip` = avant-dernière entrée de X-Forwarded-For,
+  // celle posée PAR Traefik = l'IP réelle du client. Un client en direct qui
+  // forge `X-Forwarded-For: 1.2.3.4` ne peut plus se faire passer pour cette
+  // IP : Express ignore les hops non-fiables. `getClientIp` s'appuie sur ce
+  // `req.ip` (cf ip.util.ts) — l'IP devient fiable pour la géo ET le bucketing
+  // du rate-limit d'ingestion (ticket ratelimit-dos).
+  //
+  // Surchargeable via TRUST_PROXY_HOPS si la topologie évolue (ex. Cloudflare
+  // ajouté devant Traefik → 2). Défaut sûr = 1 (notre topologie actuelle).
+  const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? '1');
+  app.set('trust proxy', Number.isFinite(trustProxyHops) ? trustProxyHops : 1);
+
+  // ---------------------------------------------------------------------------
   // Security headers (BUG-17 + BUG-18 audit commercial 2026-05-25)
   // ---------------------------------------------------------------------------
   // 1. Désactive `X-Powered-By: Express` (fingerprinting techno).
