@@ -20,10 +20,19 @@ staging RÉEL (ClickHouse réel, via l'API M2M `POST /api/admin/platform/*`) :
 Self-contained + idempotent : crée son workspace jetable (`e2e_gate_*`), le
 purge en fin de run (super-admin `workspaces.delete`), zéro pollution.
 
+> **Où tourne le gate** : staging est derrière Tailscale (`*.staging.veridian.site`
+> → IP Tailnet `100.64.0.0/10`), donc un runner GitHub public ne peut pas
+> l'atteindre (c'est la raison de fond pour laquelle tous les ex-E2E staging
+> cancellaient/skippaient). Le gate s'exécute via le script bash
+> `tests/e2e/00-gate-onpremise/gate-scenario.sh`, lancé **sur dev-pub** par le
+> workflow (SSH, pattern éprouvé de `staging-deploy.yml`). dev-pub est sur le
+> tailnet et atteint l'engine en local. La spec Playwright `.ts` jumelle reste
+> le reflet typé, utilisable à la main depuis le tailnet.
+
 > **Comment l'utiliser comme gate** : `gh run watch` sur `e2e-gate-onpremise.yml`
 > après push staging. Vert → promote `main`. Rouge → freeze, on ne promote pas.
-> Relance manuelle : `gh workflow run e2e-gate-onpremise.yml` ou
-> `cd tests/e2e && PLATFORM_ADMIN_API_KEY=… TARGET=staging npm run test:gate`.
+> Relance manuelle : `gh workflow run e2e-gate-onpremise.yml`. À la main depuis
+> le tailnet : `cd tests/e2e && PLATFORM_ADMIN_API_KEY=… TARGET=staging npm run test:gate`.
 
 ## Vue d'ensemble
 

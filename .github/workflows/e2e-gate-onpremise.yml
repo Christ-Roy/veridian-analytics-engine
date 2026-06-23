@@ -3,40 +3,41 @@
 # CE WORKFLOW EST LE GATE E2E ON-PREMISE. C'est le rempart que Robert exige
 # avant tout passage en prod : un E2E lourd qui tourne RÉELLEMENT (pas
 # cancel/skip), teste le VRAI scope commercialisé (les 3 features de la vision
-# 2026-05-23) contre le staging RÉEL (ClickHouse réel, Postgres réel), via
-# l'API M2M native `POST /api/admin/platform/*`.
+# 2026-05-23) contre le staging RÉEL (ClickHouse réel, API M2M native).
 #
-# Spec exécutée : tests/e2e/00-gate-onpremise/onpremise-gate.spec.ts
-#   1. Tracking : provision → snippet → ingestion round-trip ClickHouse
-#      (tracking.verify dry-run+purge) → /api/track public → analytics.query
-#   2. Calls / VoIP : add + list phone number par source
-#   3. Search Console : gsc.status (connecteur câblé)
-#   + cleanup self-contained (workspace jetable purgé, zéro pollution)
+# ─── POURQUOI VIA SSH SUR dev-pub (et pas un curl depuis le runner) ? ──────
+# `analytics-engine.staging.veridian.site` résout sur une IP Tailnet
+# (100.64.0.0/10) — staging est derrière Tailscale PAR DESIGN. Un runner GitHub
+# public NE PEUT PAS l'atteindre (curl → 000). C'est la raison de fond pour
+# laquelle TOUS les E2E staging "publics" cancellaient/skippaient depuis
+# toujours (le rempart n'existait pas — la cible était injoignable).
+# La voie propre, déjà éprouvée par staging-deploy.yml (étage smoke), est
+# d'exécuter le check DANS dev-pub (sur le tailnet, atteint l'engine en local).
+# Le scénario gate étant 100% des appels HTTP M2M, un script bash autonome
+# (tests/e2e/00-gate-onpremise/gate-scenario.sh) le couvre sans Playwright ni
+# build local (dev-pub a 7.6Gi RAM → no-build-local).
+#
+# Spec couverte : provision → snippet → ingestion round-trip ClickHouse
+# (tracking.verify dry-run+purge) → /api/track public → analytics.query →
+# VoIP add/list → gsc.status. Self-contained : workspace jetable purgé (trap).
 #
 # Déclenchement :
-#   - AUTO sur push `staging` (le gate tourne à chaque livraison staging)
+#   - AUTO sur push `staging` (le gate tourne à chaque livraison testable)
 #   - workflow_dispatch (relance manuelle avant une promo prod)
 #
 # BLOQUANT : un fail = le gate est rouge → on NE promote PAS staging → main.
-# Durée cible : < 15 min (une seule spec ciblée, ClickHouse round-trip réel).
-#
-# Historique : ce fichier portait l'ancien "E2E business flows" jamais exécuté
-# (trigger release/** inexistant) qui testait le micro-service bridge
-# décommissionné + des features mortes (forms). Réécrit 2026-06-23 en gate réel.
+# Durée cible : < 5 min (appels HTTP M2M, pas de browser).
 
 name: E2E gate on-premise
 
 on:
   push:
     branches: [staging]
-    # On ne déclenche le gate que si quelque chose de testable a bougé :
-    # code applicatif, SDK, ou la batterie E2E elle-même. Un changement
-    # purement doc/todo ne nécessite pas de re-rouler le round-trip ClickHouse.
     paths:
       - "api/**"
       - "sdk/**"
       - "console/**"
-      - "tests/e2e/**"
+      - "tests/e2e/00-gate-onpremise/**"
       - ".github/workflows/e2e-gate-onpremise.yml"
   workflow_dispatch:
 
@@ -44,7 +45,7 @@ on:
 # cours (c'était le bug de l'ancien e2e-full-staging — cancel-in-progress:true
 # → "cancelled" systématique). On laisse chaque gate finir, on sérialise.
 concurrency:
-  group: e2e-gate-onpremise-${{ github.ref }}
+  group: e2e-gate-onpremise
   cancel-in-progress: false
 
 permissions:
@@ -53,67 +54,51 @@ permissions:
 
 jobs:
   gate:
-    name: E2E gate on-premise (vrai scope — staging réel)
+    name: E2E gate on-premise (vrai scope — staging réel via dev-pub)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      CI: "true"
-      TARGET: staging
-    defaults:
-      run:
-        working-directory: tests/e2e
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Install Playwright + deps
-        run: |
-          npm install --no-audit --no-fund
-          npx playwright install --with-deps chromium
-
-      - name: Wait for staging to be healthy
-        run: |
-          echo "Attente de analytics-engine.staging.veridian.site/api/health…"
-          for i in $(seq 1 30); do
-            code=$(curl -s -m 10 -o /dev/null -w "%{http_code}" \
-              https://analytics-engine.staging.veridian.site/api/health || echo 000)
-            if [ "$code" = "200" ]; then
-              echo "Staging healthy (200)."
-              exit 0
-            fi
-            echo "  tentative $i/30 → HTTP $code, retry dans 10s"
-            sleep 10
-          done
-          echo "::error::Staging jamais healthy après 5 min — gate ne peut pas tourner."
-          exit 1
-
-      - name: Run the on-premise gate (00-gate-onpremise)
+      - name: Préflight — secrets requis
         env:
-          # Clé M2M staging (déjà câblée pour le déploiement staging).
           PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
-          # Super-admin staging pour le cleanup self-contained (best-effort).
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          missing=0
+          [ -z "$PLATFORM_ADMIN_API_KEY" ] && { echo "::error::secret PLATFORM_ADMIN_API_KEY_STAGING absent — le gate ne peut pas valider l'API M2M."; missing=1; }
+          [ -z "$DEPLOY_SSH_KEY" ] && { echo "::error::secret DEPLOY_SSH_KEY absent — le gate ne peut pas SSH dans dev-pub."; missing=1; }
+          [ "$missing" = "1" ] && exit 1 || echo "Secrets OK."
+
+      - name: Setup SSH vers dev-pub
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Run the on-premise gate (sur dev-pub, contre staging réel)
+        env:
+          PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
           E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL_STAGING }}
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
         run: |
-          if [ -z "$PLATFORM_ADMIN_API_KEY" ]; then
-            echo "::error::PLATFORM_ADMIN_API_KEY_STAGING secret absent — le gate ne peut pas valider l'API M2M. Configure le secret repo."
-            exit 1
-          fi
-          npx playwright test 00-gate-onpremise/ --project=chromium-desktop
-
-      - name: Upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report-gate-onpremise
-          path: |
-            tests/e2e/playwright-report/
-            tests/e2e/test-results/
-          retention-days: 30
+          set -euo pipefail
+          SCRIPT=tests/e2e/00-gate-onpremise/gate-scenario.sh
+          REMOTE=/tmp/gate-scenario-${{ github.run_id }}.sh
+          # Copie le script du repo (la version testée, versionnée) sur dev-pub.
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            "$SCRIPT" staging-deploy@37.187.199.185:"$REMOTE"
+          # Exécute le gate sur dev-pub (qui atteint le tailnet/staging en local).
+          # Secrets injectés par env (jamais écrits sur disque dev-pub).
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
+            staging-deploy@37.187.199.185 \
+            "PLATFORM_ADMIN_API_KEY='$PLATFORM_ADMIN_API_KEY' \
+             E2E_ADMIN_EMAIL='$E2E_ADMIN_EMAIL' \
+             E2E_ADMIN_PASSWORD='$E2E_ADMIN_PASSWORD' \
+             bash $REMOTE; code=\$?; rm -f $REMOTE; exit \$code"
 
       - name: Open umbrella issue if the gate fails
         if: failure() && github.event_name == 'push'
@@ -137,8 +122,7 @@ jobs:
                       `Run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n` +
                       `SHA: ${context.sha}\n\n` +
                       `Le gate teste le vrai scope commercialisé (tracking/ClickHouse, VoIP, GSC) ` +
-                      `via l'API M2M contre staging réel. Un rouge ici = une régression sur le ` +
-                      `parcours métier réel. Investiguer l'artifact \`playwright-report-gate-onpremise\` ` +
-                      `avant toute promotion prod.`,
+                      `via l'API M2M contre staging réel (exécuté sur dev-pub). Un rouge ici = une ` +
+                      `régression sur le parcours métier réel. Voir le log du run pour le check ✘.`,
               });
             }
