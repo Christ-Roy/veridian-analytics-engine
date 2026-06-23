@@ -173,6 +173,17 @@ if [ "$SDK_ONLY" != "1" ] && [ -f "$REPO_ROOT/veridian-bridge/package.json" ]; t
   cd "$REPO_ROOT"
 fi
 
+# ─── 9. Engine api (tsc/imports) ──────────────────────────────────
+# Le bridge ci-dessus ne couvre PAS l'engine NestJS (api/). Ce check vérifie
+# que les fichiers api/src touchés ne référencent pas un package absent de
+# api/package.json (bug zod 2026-06-17) et — si api/node_modules existe —
+# lance un tsc --noEmit incrémental. No-op si le diff ne touche pas api/src.
+# Skip en mode SDK-only (le diff ne touche que sdk/, donc rien sous api/).
+if [ "$SDK_ONLY" != "1" ] && [ -x "$REPO_ROOT/scripts/ci/check-engine-api.sh" ]; then
+  echo "─── Pre-push : engine api (imports + tsc incrémental) ───"
+  "$REPO_ROOT/scripts/ci/check-engine-api.sh"
+fi
+
 # ─── 7-SDK / 8-SDK. SDK type-check + vitest + audit (mode SDK-only) ──
 # Mirroir des étapes 7/8 mais scopé sur le sous-projet sdk/ qui a son
 # propre package.json / package-lock.json / rollup / vitest.
