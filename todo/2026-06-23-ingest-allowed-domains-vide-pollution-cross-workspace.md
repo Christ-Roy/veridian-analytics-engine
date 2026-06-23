@@ -42,6 +42,32 @@ Un endpoint public sans token ne peut pas être "parfaitement" protégé, mais
 aujourd'hui il est grand ouvert quand `allowed_domains` est vide — ce qui est le
 défaut.
 
+## ✅ Résolu 2026-06-23
+
+Politique retenue (équilibre fermeture / non-régression) :
+
+1. **Nouveaux workspaces fermés par défaut** : `WorkspacesService.create()` seede
+   `allowed_domains` depuis le `website` du client (déjà connu au provisioning)
+   via `deriveAllowedDomains()` → `['*.<apex>']` (wildcard couvrant apex + www +
+   sous-domaines, vérifié contre `isDomainAllowed`). Si le caller fournit un
+   `allowed_domains` explicite (y compris `[]`) on le respecte — opt-in allow-all
+   conscient. La démo (`demo.service.ts`) construit son workspace hors `create()`
+   et garde son propre `['*.apple.com']` — non affectée.
+2. **Workspaces existants (allowed_domains vide = 332 sessions réelles) non
+   cassés** : "vide ⇒ accepte" est CONSERVÉ mais passe désormais un
+   `logger.warn` ("allowed_domains empty") au lieu d'accepter silencieusement →
+   l'exposition est visible en logs sans bloquer l'ingestion légitime.
+3. **Commentaire trompeur corrigé** : `session-payload.handler.ts` ne dit plus
+   "not spoofable" — le domain-check est documenté comme best-effort, spoofable
+   hors browser ; le vrai rempart anti-flood reste le rate-limit infra
+   (ticket `2026-06-23-ingest-track-aucun-ratelimit-dos.md`, séparé).
+
+Tests ajoutés : `workspaces.service.spec.ts` (seed depuis website + respect du
+`[]` explicite), `session-payload.handler.spec.ts` (warn quand vide). Fichiers :
+`api/src/workspaces/entities/workspace.entity.ts` (`deriveAllowedDomains`),
+`api/src/workspaces/workspaces.service.ts` (seed au create),
+`api/src/events/session-payload.handler.ts` (warn + commentaire).
+
 ## Impact si non corrigé
 
 Pollution / sabotage des stats par défaut sur tout workspace dont

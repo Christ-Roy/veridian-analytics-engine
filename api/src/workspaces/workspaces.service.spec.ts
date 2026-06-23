@@ -237,6 +237,45 @@ describe('WorkspacesService', () => {
       expect(result.settings.bounce_threshold).toBe(5);
     });
 
+    it('seeds allowed_domains from website (ticket allowed-domains-vide)', async () => {
+      clickhouse.createWorkspaceDatabase.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+
+      const result = await service.create(
+        {
+          id: 'ws-new-001',
+          name: 'New Workspace',
+          website: 'https://www.new.example.com/path',
+          timezone: 'UTC',
+          currency: 'EUR',
+        },
+        mockSuperAdminUser,
+      );
+
+      // www. collapsed, wildcard covers apex + www + subdomains
+      expect(result.settings.allowed_domains).toEqual(['*.new.example.com']);
+    });
+
+    it('keeps an explicit empty allowed_domains as allow-all', async () => {
+      clickhouse.createWorkspaceDatabase.mockResolvedValue(undefined);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+
+      const result = await service.create(
+        {
+          id: 'ws-new-002',
+          name: 'Legacy-style Workspace',
+          website: 'https://new.example.com',
+          timezone: 'UTC',
+          currency: 'EUR',
+          settings: { allowed_domains: [] },
+        },
+        mockSuperAdminUser,
+      );
+
+      // Caller opted into "allow all" explicitly — we don't override it.
+      expect(result.settings.allowed_domains).toEqual([]);
+    });
+
     it('throws ForbiddenException for non-super_admin user', async () => {
       await expect(
         service.create(

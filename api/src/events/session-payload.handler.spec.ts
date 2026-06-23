@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SessionPayloadHandler } from './session-payload.handler';
 import { EventBufferService } from './event-buffer.service';
@@ -1341,6 +1342,33 @@ describe('SessionPayloadHandler', () => {
 
       expect(result.success).toBe(true);
       expect(bufferService.addBatch).toHaveBeenCalled();
+    });
+
+    it('warns when accepting with an empty allowed_domains (open default)', async () => {
+      // Regression guard for ticket 2026-06-23-ingest-allowed-domains-vide:
+      // legacy workspaces with no allowed_domains stay "allow all" but MUST
+      // surface a warning so the exposure is visible in logs.
+      const warnSpy = jest
+        .spyOn(Logger.prototype, 'warn')
+        .mockImplementation(() => undefined);
+      workspacesService.get.mockResolvedValue({
+        ...mockWorkspace,
+        settings: { ...mockWorkspace.settings, allowed_domains: [] },
+      } as never);
+
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://any-domain.com/' },
+      });
+
+      const result = await handler.handle(payload, null, 'https://spoofed.com');
+
+      expect(result.success).toBe(true);
+      expect(bufferService.addBatch).toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('allowed_domains empty'),
+      );
+      warnSpy.mockRestore();
     });
 
     it('accepts requests from allowed domain (via Origin header)', async () => {

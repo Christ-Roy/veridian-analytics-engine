@@ -71,6 +71,36 @@ export interface WorkspaceSettings {
 }
 
 /**
+ * Derive the default `allowed_domains` entry from a workspace `website`.
+ *
+ * Security rationale (ticket 2026-06-23-ingest-allowed-domains-vide): a fresh
+ * workspace should NOT accept tracking from any Origin by default. The client's
+ * own site is already known at provisioning time (`website`), so we seed
+ * `allowed_domains` with a wildcard on its apex domain — covering `apex`,
+ * `www.apex` and legitimate sub-domains while rejecting unrelated origins.
+ *
+ * Returns `[]` when the website cannot be parsed (caller keeps "allow all"
+ * legacy behaviour rather than locking the client out).
+ */
+export function deriveAllowedDomains(website?: string): string[] {
+  if (!website) return [];
+  let host: string;
+  try {
+    // Tolerate values stored without a scheme (e.g. "client.fr").
+    const url = new URL(
+      /^https?:\/\//i.test(website) ? website : `https://${website}`,
+    );
+    host = url.hostname.toLowerCase();
+  } catch {
+    return [];
+  }
+  if (!host) return [];
+  // Collapse a leading www. so the wildcard covers both apex and www.
+  const apex = host.replace(/^www\./, '');
+  return [`*.${apex}`];
+}
+
+/**
  * Default settings for new workspaces.
  */
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {

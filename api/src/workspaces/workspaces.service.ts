@@ -12,6 +12,7 @@ import {
   Workspace,
   WorkspaceSettings,
   DEFAULT_WORKSPACE_SETTINGS,
+  deriveAllowedDomains,
 } from './entities/workspace.entity';
 import { Integration } from './entities/integration.entity';
 import { encryptApiKey, generateId } from '../common/crypto';
@@ -138,6 +139,17 @@ export class WorkspacesService {
     // Apply default filters if none provided
     if (!settings.filters || settings.filters.length === 0) {
       settings.filters = getDefaultFilters();
+    }
+
+    // Seed allowed_domains from the client's own website so a fresh workspace
+    // is NOT open to tracking from any spoofed Origin by default
+    // (ticket 2026-06-23-ingest-allowed-domains-vide). Only when the caller
+    // didn't provide an explicit list — an explicit [] stays "allow all".
+    if (settings.allowed_domains === undefined) {
+      const derived = deriveAllowedDomains(dto.website);
+      if (derived.length > 0) {
+        settings.allowed_domains = derived;
+      }
     }
 
     const workspace: Workspace = {

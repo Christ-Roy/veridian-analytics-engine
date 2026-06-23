@@ -66,9 +66,21 @@ export class SessionPayloadHandler {
       return { success: true };
     }
 
-    // 2. Check domain restriction using browser headers (not spoofable)
+    // 2. Domain restriction (best-effort, NOT a security boundary).
+    //    Origin/Referer come from the browser on real traffic, but are freely
+    //    spoofable by curl/scripts — the previous "not spoofable" comment was
+    //    wrong. New workspaces seed allowed_domains from their website at
+    //    provisioning (see WorkspacesService.create), so the open default only
+    //    affects legacy workspaces. When the list is empty we accept but warn,
+    //    to surface workspaces still exposed to cross-workspace pollution.
+    //    The real anti-flood rampart is infra rate-limiting (separate ticket).
     const requestDomain = this.extractRequestDomain(origin, referer);
-    if (
+    if (!workspace.settings.allowed_domains?.length) {
+      this.logger.warn(
+        `Domain check OPEN (allowed_domains empty) for workspace ${workspace.id} ` +
+          `— accepting origin=${requestDomain || '<none>'}. Configure allowed_domains to close.`,
+      );
+    } else if (
       !this.isDomainAllowed(requestDomain, workspace.settings.allowed_domains)
     ) {
       this.logger.debug(
