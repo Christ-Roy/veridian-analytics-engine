@@ -9,6 +9,7 @@ import { WebhookDelivery } from './entities/webhook-delivery.entity';
 import { TwentyConnectorService } from './connectors/twenty-connector.service';
 import { TwentyEventMapper } from './connectors/twenty-event-mapper';
 import { TwentyBudget } from './connectors/twenty-budget';
+import { WorkspacesService } from '../workspaces/workspaces.service';
 
 const baseWebhook: WebhookDefinition = {
   id: 'wh_unit_1',
@@ -89,6 +90,15 @@ describe('WebhookDeliveryWorker', () => {
         {
           provide: ConfigService,
           useValue: { get: (k: string) => (k === 'WEBHOOK_ALLOW_HTTP' ? 'false' : undefined) },
+        },
+        {
+          // The connector reads each workspace's crm_mapping; stub it as "no
+          // config" so these worker tests exercise the built-in prospection
+          // mapping (unchanged behaviour), independent of the customization N4.
+          provide: WorkspacesService,
+          useValue: {
+            get: async (id: string) => ({ id, settings: {} }),
+          },
         },
       ],
     }).compile();
