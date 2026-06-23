@@ -1,4 +1,4 @@
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { CorsOptionsDelegate } from '@nestjs/common/interfaces/external/cors-options.interface';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -9,12 +9,14 @@ import { MigrationsRunner } from './migrations/migrations.service';
 import { APP_VERSION } from './version';
 
 async function bootstrap() {
+  const logger = new Logger('Bootstrap');
+
   // Run migrations BEFORE NestJS bootstrap
   const migrations = new MigrationsRunner();
   const needsRestart = await migrations.run();
 
   if (needsRestart) {
-    console.log('[Migrations] Restarting server...');
+    logger.log('[Migrations] Restarting server...');
     process.exit(0);
   }
 
@@ -142,6 +144,6 @@ async function bootstrap() {
   );
   const port = process.env.PORT ?? 3000;
   await app.listen(port, '0.0.0.0');
-  console.log(`Staminads API v${APP_VERSION} running on port ${port}`);
+  logger.log(`Staminads API v${APP_VERSION} running on port ${port}`);
 }
 bootstrap();

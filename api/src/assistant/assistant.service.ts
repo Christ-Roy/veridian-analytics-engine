@@ -3,6 +3,7 @@ import {
   BadRequestException,
   OnModuleInit,
   OnModuleDestroy,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Response } from 'express';
@@ -72,6 +73,7 @@ function isThinkingConfigError(err: unknown): boolean {
 
 @Injectable()
 export class AssistantService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(AssistantService.name);
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -229,8 +231,8 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
     const useStructuredOutputs = supportsStructuredOutputs(
       integration.settings.model,
     );
-    console.log(
-      `[Assistant] Model: ${integration.settings.model}, Structured outputs: ${useStructuredOutputs}`,
+    this.logger.debug(
+      `Model: ${integration.settings.model}, Structured outputs: ${useStructuredOutputs}`,
     );
 
     // Create Anthropic client with beta header for structured outputs
@@ -293,7 +295,7 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
           ...(thinkingConfig && { thinking: thinkingConfig }),
         });
       } catch (streamError) {
-        console.error('Failed to create Anthropic stream:', streamError);
+        this.logger.error('Failed to create Anthropic stream:', streamError);
         throw streamError;
       }
 
@@ -318,10 +320,10 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
       try {
         message = await stream.finalMessage();
       } catch (finalError) {
-        console.error('Anthropic stream error:', finalError);
+        this.logger.error('Anthropic stream error:', finalError);
         if (thinkingConfig && isThinkingConfigError(finalError)) {
-          console.warn(
-            '[Assistant] Model rejected thinking config. Set ASSISTANT_THINKING_DISABLED=1 to disable interleaved thinking globally.',
+          this.logger.warn(
+            'Model rejected thinking config. Set ASSISTANT_THINKING_DISABLED=1 to disable interleaved thinking globally.',
           );
         }
         throw finalError;
@@ -426,7 +428,7 @@ export class AssistantService implements OnModuleInit, OnModuleDestroy {
         }
       } catch (titleError) {
         // Title generation is non-critical, log but don't fail
-        console.error('[Assistant] Title generation failed:', titleError);
+        this.logger.error('Title generation failed:', titleError);
       }
     }
 

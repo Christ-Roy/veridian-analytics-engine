@@ -5,6 +5,7 @@ import {
   BadRequestException,
   OnModuleInit,
   OnModuleDestroy,
+  Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'crypto';
@@ -33,6 +34,7 @@ export interface BackfillSummary {
 
 @Injectable()
 export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(FilterBackfillService.name);
   private runningProcessors = new Map<string, FilterBackfillProcessor>();
   private pendingTimeouts = new Set<ReturnType<typeof setTimeout>>();
   private readonly staleThresholdMinutes = parseInt(
@@ -65,7 +67,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
 
     if (this.runningProcessors.size === 0) return;
 
-    console.log(
+    this.logger.log(
       `Shutting down: cancelling ${this.runningProcessors.size} running backfill(s)...`,
     );
 
@@ -88,7 +90,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
           }
         })
         .catch((error) => {
-          console.warn(
+          this.logger.warn(
             `Failed to get task ${taskId} for mutation cleanup:`,
             error,
           );
@@ -116,7 +118,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
           );
         }
       } catch (error) {
-        console.warn(`Failed to cancel task ${taskId} on shutdown:`, error);
+        this.logger.warn(`Failed to cancel task ${taskId} on shutdown:`, error);
       }
     }
   }
@@ -137,7 +139,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
     );
 
     for (const task of staleTasks) {
-      console.warn(
+      this.logger.warn(
         `Recovering stale backfill task ${task.id} (workspace: ${task.workspace_id}, last updated: ${task.updated_at})`,
       );
       await this.updateTaskStatus(
@@ -148,7 +150,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (staleTasks.length > 0) {
-      console.log(`Recovered ${staleTasks.length} stale backfill task(s)`);
+      this.logger.log(`Recovered ${staleTasks.length} stale backfill task(s)`);
     }
   }
 
@@ -229,7 +231,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
           } catch (error) {
             const errorMsg =
               error instanceof Error ? error.message : 'Unknown error';
-            console.error(`Backfill task ${task.id} failed:`, errorMsg);
+            this.logger.error(`Backfill task ${task.id} failed:`, errorMsg);
             // Only strip control chars, keep useful chars like @, ., /
             const sanitizedError =
               errorMsg
@@ -244,7 +246,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
               );
             } catch (statusError) {
               // Last resort: log critical error. Stale recovery will handle on restart.
-              console.error(
+              this.logger.error(
                 'CRITICAL: Cannot update task status after retries',
                 {
                   taskId: task.id,
@@ -260,7 +262,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
             finalStatus = 'failed';
           } finally {
             // Metrics logging
-            console.log('Backfill task finished', {
+            this.logger.log('Backfill task finished', {
               taskId: task.id,
               workspaceId: task.workspace_id,
               status: finalStatus,
@@ -319,7 +321,7 @@ export class FilterBackfillService implements OnModuleInit, OnModuleDestroy {
         return;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.warn(
+        this.logger.warn(
           `Status update attempt ${attempt}/${maxRetries} failed for task ${task.id}: ${lastError.message}`,
         );
         if (attempt < maxRetries) {

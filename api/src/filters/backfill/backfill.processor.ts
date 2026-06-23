@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Semaphore } from 'async-mutex';
 import { ClickHouseService } from '../../database/clickhouse.service';
 import { BackfillTask } from './backfill-task.entity';
@@ -48,6 +49,7 @@ function formatMonthlyPartition(date: Date): string {
 }
 
 export class FilterBackfillProcessor {
+  private readonly logger = new Logger(FilterBackfillProcessor.name);
   private cancelled = false;
   private processedSessionPartitions = new Set<string>();
   private processedGoalPartitions = new Set<string>();
@@ -88,7 +90,7 @@ export class FilterBackfillProcessor {
         `KILL MUTATION WHERE database = '${dbName}' AND is_done = 0`,
       );
     } catch (error) {
-      console.warn(
+      this.logger.warn(
         `Failed to kill mutations for workspace ${workspaceId}:`,
         error,
       );

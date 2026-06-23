@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import dayjs from 'dayjs';
@@ -255,6 +255,8 @@ export class ReportGeneratorService {
     private readonly configService: ConfigService,
   ) {}
 
+  private readonly logger = new Logger(ReportGeneratorService.name);
+
   private getPresetForFrequency(frequency: SubscriptionFrequency): DatePreset {
     switch (frequency) {
       case 'daily':
@@ -470,7 +472,7 @@ export class ReportGeneratorService {
     const { html, errors } = mjml(mjmlSource, { validationLevel: 'soft' });
 
     if (errors.length > 0) {
-      console.warn('MJML compilation warnings:', errors);
+      this.logger.warn('MJML compilation warnings:', errors);
     }
 
     return html;
