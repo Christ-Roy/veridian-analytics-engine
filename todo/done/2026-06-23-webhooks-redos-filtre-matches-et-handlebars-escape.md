@@ -46,16 +46,3 @@ HTML n'a aucun sens ici), documenter que l'échappement JSON correct passe par
 A : auto-DoS par un owner de workspace, ralentit le process partagé sur le chemin
 d'ingestion. B : payloads webhook silencieusement corrompus pour les destinations
 en mode template avec données à caractères spéciaux.
-
-## ✅ Résolu — 2026-06-23 (agent veridian-analytics-engine)
-
-- **A (ReDoS)** : `webhook-filter-engine.ts` borne le pattern
-  (`MAX_REGEX_PATTERN_LENGTH=512`) ET l'input (`MAX_REGEX_INPUT_LENGTH=4096`)
-  avant `new RegExp().test()` → fail-closed (never match) au-delà, pas de
-  backtracking catastrophique sur l'event loop partagé. Pas de dep `re2`
-  ajoutée (interdiction deps). Test : `(a+)+$` sur 10k chars retourne false en
-  <50ms.
-- **B (escape JSON)** : `webhook-transform-engine.ts` passe `noEscape: true`
-  (le contexte de sortie est JSON, pas HTML). Plus de corruption `&`→`&amp;`.
-  Échappement JSON correct = helper `{{json …}}`. Test : body
-  `{"email":"{{email}}"}` avec `a&b'<c>@x.com` reste verbatim et JSON-parsable.

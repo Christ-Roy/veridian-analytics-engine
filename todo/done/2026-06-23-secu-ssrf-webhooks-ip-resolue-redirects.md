@@ -47,28 +47,3 @@ le priorise (P1, pas "plus tard").
 SSRF vers les métadonnées cloud (exfiltration de credentials d'instance) et scan
 réseau interne, déclenchable par tout owner de workspace. À traiter avec le ticket
 `2026-06-23-secu-webhooks-test-sans-garde-ssrf.md` (même périmètre).
-
-## ✅ Résolu — 2026-06-23 (agent veridian-analytics-engine)
-
-- `common/ssrf-guard.ts` : ajout méthode async `assertSafeUrlResolved()` qui
-  fait le check littéral SYNC puis **résout le hostname** (`dns.lookup`, all
-  addresses, resolver injectable pour les tests) et **rejette si UNE IP résolue
-  est privée/loopback/link-local/metadata** (`isPrivateIp` partagé v4+v6, +
-  CGNAT 100.64/10, + IPv4-mapped ::ffff:). Ferme le trou "evil.com passe le
-  check littéral puis pointe sur 127.0.0.1 / 169.254.x" et le DNS-rebinding où
-  le record privé est publié après création.
-- `webhook-delivery-worker.service.ts` : `sendOne()` appelle
-  `assertSafeUrlResolved()` AVANT tout fetch + `fetch(..., { redirect: 'manual' })`
-  qui rejette tout 3xx (`redirect_blocked:`) au lieu de suivre une `Location`
-  non re-validée. Le chemin Twenty (`flushTwentyGroup`) passe au guard résolu
-  aussi. Rejets SSRF/redirect classés **terminaux** (pas de retry) dans
-  `recordOutcome`.
-- Tests : `ssrf-guard.spec.ts` (isPrivateIp v4/v6/mapped/CGNAT +
-  assertSafeUrlResolved : loopback/metadata/mixte/DNS_RESOLUTION_FAILED/
-  short-circuit IP littérale/escape allowPrivate) ;
-  `webhook-delivery-worker.service.spec.ts` (loopback/metadata/privé littéral +
-  hostname qui RÉSOUT vers privé + 3xx non suivi).
-- Résiduel documenté : TOCTOU rebinding sub-seconde non pinné (Node `fetch`
-  global n'accepte pas de `lookup` custom sans dispatcher undici externe — refus
-  d'ajouter une dep). Combiné au `redirect: 'manual'` + check toutes-IP, les
-  chemins d'exploit pratiques sont fermés.

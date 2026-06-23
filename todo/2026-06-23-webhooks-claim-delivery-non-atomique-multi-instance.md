@@ -42,30 +42,3 @@ double-déclenche).
 Double déclenchement d'actions chez le client sur webhooks génériques au
 scale-out ou pendant un overlap de déploiement. Dormant en mono-instance, mais
 piège silencieux dès qu'on scale.
-
-## Réponse agent — 2026-06-23 (laissé en ticket, justifié)
-
-**Décision : NON fixé dans cette passe sécu, laissé en ticket avec garde-fou.**
-
-Vérifié : `grep -rn replicas` sur tous les composes (`compose.yaml`,
-`compose/{base,prod,staging,demo,dev,test}.yml`) = **vide**. Prod = mono-instance
-confirmé → le bug est purement **latent**, non exploité aujourd'hui.
-
-Pourquoi je ne le fixe pas maintenant (et c'est le bon arbitrage) :
-- Un claim atomique correct sur ClickHouse n'existe pas nativement (pas de
-  `SELECT…FOR UPDATE`, pas de transaction). La voie propre = **migration de
-  schéma** (colonnes `worker_id` + `lease_until` sur `webhook_deliveries`) +
-  transition `pending → sending` claimée + relecture `FINAL` avec vérif
-  `worker_id`. C'est du tier 🔴 (migration DB), bien plus lourd/risqué que les
-  3 fixes sécu de la même salve, et hors du focus "3 sécu".
-- Le fixer à moitié (claim non transactionnel sur ClickHouse) donnerait une
-  fausse sécurité sans réelle atomicité → pire que la garde documentée.
-
-Garde-fou posé à la place (mitigation low-risk, zéro migration) :
-- Commentaire explicite `⚠️ NOT an atomic claim` sur `findReadyDeliveries`
-  (`webhooks.service.ts`) : interdiction de scaler à >1 réplica sans ce fix.
-- À inscrire au runbook deploy : pas d'overlap ancien/nouveau container sur le
-  worker (rolling-deploy OK tant que `replicas: 1`).
-
-**À rouvrir/prioriser AVANT** tout passage à `replicas: 2+` ou tout déploiement
-faisant tourner deux workers en parallèle.

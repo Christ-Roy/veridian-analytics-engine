@@ -98,6 +98,7 @@ jobs:
             11-demo-public/demo-banner-cta.spec.ts \
             11-demo-public/demo-restricted-guards.spec.ts \
             11-demo-public/demo-workspace-pages-not-blank.spec.ts \
+            09-dashboard-ui/dashboard-sections-render.spec.ts \
             --project=chromium-desktop
 
       - name: Upload Playwright report on failure

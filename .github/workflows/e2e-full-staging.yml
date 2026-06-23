@@ -65,12 +65,9 @@ jobs:
           PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
         run: |
           # Specs mortes retirées (vision 2026-05-23 + bridge décommissionné) :
-          # 03-forms-leads, 04-push-pwa, 13-cross-app-inbound, 08-voip-calls
-          # (endpoints REST périmés → VoIP couvert par le GATE en M2M), et les
-          # specs 09 chargeant la route /veridian supprimée (dashboard-sections-
-          # render, mobile-responsive, tabs-navigation). Le parcours métier réel
-          # est couvert par le GATE 00-gate-onpremise (e2e-gate-onpremise.yml,
-          # bloquant sur push staging, exécuté via dev-pub car staging = tailnet).
+          # 03-forms-leads, 04-push-pwa, 13-cross-app-inbound. Le parcours
+          # métier réel est désormais couvert par le GATE 00-gate-onpremise
+          # (workflow e2e-gate-onpremise, bloquant sur push staging).
           npx playwright test \
             00-gate-onpremise/ \
             01-smoke/ \
@@ -78,6 +75,7 @@ jobs:
             02-tracker-to-dashboard/ \
             05-gsc-oauth/ \
             07-settings-credentials/ \
+            08-voip-calls/ \
             09-dashboard-ui/ \
             10-onboarding-wizard/ \
             12-auth-flow/ \
@@ -85,7 +83,15 @@ jobs:
             19-sdk-tracker/ \
             --project=chromium-desktop || true
 
-      - name: HMAC contract 06 (staging) — rejection
+      - name: Mobile responsive (staging)
+        env:
+          TARGET: staging
+          E2E_TEST_WORKSPACE_ID: ${{ secrets.E2E_TEST_WORKSPACE_ID_STAGING }}
+        run: |
+          npx playwright test 09-dashboard-ui/mobile-responsive.spec.ts \
+            --project=chromium-mobile
+
+      - name: HMAC contract 06 (staging) — full suite
         env:
           TARGET: staging
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
@@ -94,7 +100,7 @@ jobs:
             --project=chromium-desktop
 
       # ─── Demo staging (full restricted guards + seed + UI) ──────────
-      - name: Demo 11 + bugs P0 (demo-staging) — full
+      - name: Demo 11 + bugs P0 + dashboard UI (demo-staging) — full
         env:
           TARGET: demo-staging
           DEMO_SECRET: ${{ secrets.DEMO_SECRET_ANALYTICS_STAGING }}
@@ -102,6 +108,7 @@ jobs:
           npx playwright test \
             11-demo-public/ \
             02-bugs-regression/ \
+            09-dashboard-ui/dashboard-sections-render.spec.ts \
             --project=chromium-desktop
 
       - name: Upload Playwright report

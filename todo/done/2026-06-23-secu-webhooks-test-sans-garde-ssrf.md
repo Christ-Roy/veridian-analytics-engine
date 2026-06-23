@@ -32,14 +32,3 @@ défaut, l'ajouter dans le handler `test()` avant `sendOne`.
 
 Amplifie le SSRF webhooks en exfiltration directe et lisible inline. À fixer dans
 la même passe que le SSRF DNS.
-
-## ✅ Résolu — 2026-06-23 (agent veridian-analytics-engine)
-
-Le guard SSRF est désormais **dans `sendOne()`** (point de passage unique de
-TOUT fetch sortant). `webhooks.test` appelle `worker.sendOne()` → il hérite
-automatiquement du guard résolu (DNS + check toutes-IP + redirect manual). Plus
-d'asymétrie : delivery async, Twenty et test passent par la même garde. L'oracle
-inline est neutralisé (un test vers localhost/metadata/privé renvoie
-`ssrf: …` sans aucun fetch). Mutualisé, pas dupliqué. Preuve dans
-`webhook-delivery-worker.service.spec.ts` § "sendOne SSRF guard (single choke
-point)".

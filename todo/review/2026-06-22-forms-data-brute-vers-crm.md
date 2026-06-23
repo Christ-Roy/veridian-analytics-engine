@@ -25,3 +25,12 @@ numéro de tél, email, message) pour qu'ils remontent dans le CRM Twenty.
 ## Pourquoi en review
 Risque de re-spécifier une feature débranchée par la vision (module forms). À
 cadrer pour rester dans le natif staminads + connecteur Twenty.
+
+## MAJ 2026-06-23 — recoupe directement 2 chantiers consolidés
+Ce sujet ≠ nouveau module : c'est **pousser les goals `form_submission` (avec leurs properties)
+vers Twenty via le connecteur**, ce qui est exactement le périmètre du **Niveau 4 du ticket
+`2026-06-23-ui-configurable-par-workspace-branding-features-widgets.md`** (mapping goals→CRM
+configurable + résolution d'identité configurable). Quand N4 est traité, ce ticket devient un
+simple cas d'usage de la config générique (déclarer `form_submission` comme milestone CRM, mapper
+ses champs). → Ne PAS recoder un pipeline forms ; cadrer ce ticket dans le N4. Reste à trancher
+avec Robert : quels champs (RGPD), quel objet Twenty (Person/Note), dédup.

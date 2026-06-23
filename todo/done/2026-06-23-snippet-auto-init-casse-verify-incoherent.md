@@ -36,7 +36,7 @@ nominal de TOUS les clients.
 **Conséquence** : le snippet officiel charge le bundle mais **n'appelle jamais `init()`**
 → aucun event émis. Le snippet est **mort à la livraison**. (C'est pour ça que sur Yoga
 Sculpt j'ai dû initialiser le SDK manuellement en JS — `sdk.init({workspace_id, endpoint,
-crossDomains, adClickIds})` depuis un composant — au lieu d'utiliser le snippet.)
+crossDomains, adClickIds})` depuis un composant React — au lieu d'utiliser le snippet.)
 
 **Direction de correction (au choix de l'agent, recommandation en gras)** :
 - **(A, recommandé) Faire lire le DOM au SDK** : dans `index.ts`, si pas de
@@ -60,7 +60,8 @@ dans le **HTML statique**. Sur Yoga Sculpt, le tracker est initialisé via un co
 React qui injecte le script + appelle `init()` côté client → **rien dans le HTML
 server-rendered** → verdict `snippet_missing` ALORS QUE l'ingestion réelle marche
 (`ingestion.ok:true`, `real_tracking.live:true`, goals stockés et requêtables —
-vérifié en prod le 2026-06-23).
+vérifié en prod le 2026-06-23 : `analytics verify yoga_sculpt` → ingestion ok 104ms,
+mais `snippet present:false` → verdict `snippet_missing`).
 
 **Conséquence** : faux négatif. `verify` ne valide que l'install "snippet statique dans
 le `<head>`", pas les intégrations SPA/React/dynamiques (qui sont majoritaires côté
@@ -81,9 +82,11 @@ clients Veridian, tous en Next.js).
 Une fois (A) tranché : mettre à jour `buildTrackerSnippet`, la doc, et le skill
 `analytics-provision` pour que le snippet documenté soit RÉELLEMENT auto-initialisant,
 et préciser comment passer `crossDomains` (essentiel pour les tunnels multi-domaines,
-ex. Yoga Sculpt vitrine↔app : `data-cross-domains="app.yoga-sculpt.fr"`). Aujourd'hui le
-snippet canonique ne permet pas de configurer le cross-domain → impossible de tracker un
-tunnel cross-domaine via le snippet seul (encore une raison de l'init JS manuelle).
+ex. Yoga Sculpt vitrine↔app : `data-cross-domains="app.yoga-sculpt.fr"`).
+→ Recoupe le ticket existant `2026-06-17-configui-sdk-cross-domains-non-configurable.md`
+(P2) : le snippet généré ne permet pas de configurer `crossDomains`, donc impossible de
+tracker un tunnel cross-domaine via le snippet seul (raison de plus de l'init JS manuelle).
+À traiter ensemble.
 
 ## Impact si non corrigé
 

@@ -22,22 +22,8 @@
  *   - le purge en fin de run (super-admin workspaces.delete, best-effort) ;
  *   - tracking.verify est un dry-run qui s'auto-purge → zéro pollution stats.
  *
- * Pas de secret → skip propre (jamais d'erreur).
- *
- * ─── OÙ TOURNE CE GATE ? ──────────────────────────────────────────────────
- * Le gate CI bloquant s'exécute via le script bash jumeau
- * `gate-scenario.sh`, lancé SUR dev-pub par le workflow
- * `e2e-gate-onpremise.yml`. Raison : `analytics-engine.staging.veridian.site`
- * résout sur une IP Tailnet (staging derrière Tailscale) — un runner GitHub
- * public ne peut PAS l'atteindre. dev-pub est sur le tailnet et atteint
- * l'engine en local. Le script bash couvre exactement le même parcours que
- * cette spec, sans imposer un build Playwright sur dev-pub (no-build-local).
- *
- * Cette spec `.ts` reste le reflet typé/lisible du gate, utilisable À LA MAIN
- * par un dev connecté au tailnet :
- *   cd tests/e2e && PLATFORM_ADMIN_API_KEY=… TARGET=staging npm run test:gate
- * (et redeviendra le gate CI direct le jour où le runner rejoint le tailnet
- *  via l'action tailscale/github-action + secret TS_OAUTH — todo INFRA).
+ * Pas de secret → skip propre (jamais d'erreur). Avec le secret (CI staging /
+ * local avec PLATFORM_ADMIN_API_KEY), c'est le gate bloquant.
  */
 
 import { test, expect } from "@playwright/test";
