@@ -643,7 +643,7 @@ describe('Admin Platform — customization M2M (branding/features/crm)', () => {
       })
       .expect(201);
     wsId = prov.body.workspace_id;
-    await waitForMutations();
+    await waitForMutations(ctx.systemClient, 'workspaces');
   });
 
   it('roundtrips branding + features + crm_mapping via getCustomization', async () => {
@@ -652,14 +652,14 @@ describe('Admin Platform — customization M2M (branding/features/crm)', () => {
       .set('Authorization', `Bearer ${PLATFORM_KEY}`)
       .send({ workspace_id: wsId, branding: { color: '#ff8800' } })
       .expect(200);
-    await waitForMutations();
+    await waitForMutations(ctx.systemClient, 'workspaces');
 
     await request(ctx.app.getHttpServer())
       .post('/api/admin/platform/workspaces.setFeatures')
       .set('Authorization', `Bearer ${PLATFORM_KEY}`)
       .send({ workspace_id: wsId, features: { gsc: false, voip: true } })
       .expect(200);
-    await waitForMutations();
+    await waitForMutations(ctx.systemClient, 'workspaces');
 
     const mapping = {
       identity_resolver: 'field',
@@ -671,7 +671,7 @@ describe('Admin Platform — customization M2M (branding/features/crm)', () => {
       .set('Authorization', `Bearer ${PLATFORM_KEY}`)
       .send({ workspace_id: wsId, crm_mapping: mapping })
       .expect(200);
-    await waitForMutations();
+    await waitForMutations(ctx.systemClient, 'workspaces');
 
     const res = await request(ctx.app.getHttpServer())
       .post('/api/admin/platform/workspaces.getCustomization')
