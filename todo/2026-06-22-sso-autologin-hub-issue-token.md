@@ -4,6 +4,54 @@
 > **Owner** : agent veridian-analytics-engine
 > **Créé** : 2026-06-22
 > **Demandeur** : Robert
+> **Statut** : ⏸️ NON CÂBLÉ — design figé, exécution reportée (cf. décision 2026-06-23)
+
+## ⚠️ Décision 2026-06-23 (sprint quick-wins) — NON CÂBLÉ ce sprint, ENV CONSERVÉE
+
+Évalué pendant le sprint quick-wins. **Deux corrections de fond au ticket :**
+
+1. **`HUB_HMAC_SECRET` n'est PAS une ENV morte.** Elle est activement consommée
+   par le **bridge** (`veridian-bridge/src/index.ts:38`) pour le HMAC des routes
+   `/api/tenants/*` (gate `compose/base.yml:151` `${HUB_HMAC_SECRET:?...}`). La
+   retirer **casserait** l'auth tenants bridge↔Hub. → **ENV conservée.** Le ticket
+   se trompait : "utilisé nulle part" ne vaut que pour l'**engine** (api/), pas
+   pour le bridge.
+
+2. **Le SSO autologin n'est PAS un quick win chirurgical.** C'est tier 🔴 HAUT et
+   il est **incomplet par construction** sans deux autres chantiers hors de ce
+   sprint :
+   - **Côté engine** : nouvelle table ClickHouse `sso_login_tokens` + **migration
+     sérialisée** (registry est à v9, deux agents parallèles posent v10/v11 ce
+     sprint → collision de numéro de version garantie si on ajoute une migration ici).
+   - **Côté console** : l'auth front est en **localStorage** (`console/src/lib/auth.tsx`,
+     token `Bearer`), **PAS en cookie de session**. Un simple `GET /auth/token` engine
+     qui pose un cookie ne connecte personne : il faut une **page console**
+     `/auth/token` qui récupère le JWT et le met en localStorage. → chantier console.
+   - **Côté Hub** : ticket miroir `veridian-hub/todo/2026-06-22-brancher-analytics-au-broker-sso-autologin.md`
+     (autre repo / autre agent) — le SSO ne sert à rien tant que le Hub n'appelle
+     pas issue-token.
+
+   → Reporté à un sprint dédié SSO coordonné Hub+engine+console, pas mélangé à des
+   quick wins de qualité. Aucune valeur livrée tant que les 3 côtés ne sont pas faits.
+
+### Design figé (à exécuter quand priorisé, en un seul sprint coordonné)
+
+- **Guard** : `HubHmacGuard` calqué sur `PlatformAdminGuard`
+  (`api/src/admin-platform/guards/platform-admin.guard.ts`) — `timingSafeEqual`,
+  lecture ENV double `ConfigService||process.env`, fail-closed. Vérifie
+  `X-Hub-Signature` = HMAC-SHA256(`HUB_HMAC_SECRET`, `timestamp.body`) + fenêtre
+  timestamp ±5 min (anti-replay).
+- **Token** : réutiliser `generateToken()` + `createSession()` de
+  `auth.service.ts` ; stocker le hash dans `sso_login_tokens`
+  (ReplacingMergeTree, TTL 5 min, `consumed_at`). Usage unique.
+- **Routes** : `POST /api/sso/issue-token` (HubHmacGuard) → `{ autologin_url }` ;
+  `GET /auth/token?t=` (`@Public()`) → consomme, crée session, **renvoie le JWT
+  à la page console** (pas un cookie) qui le pose en localStorage et redirige.
+- **Pas d'énumération** d'email (404 générique sur issue-token).
+
+Le reste du ticket ci-dessous décrit l'implémentation cible inchangée.
+
+---
 
 ## Demande
 
