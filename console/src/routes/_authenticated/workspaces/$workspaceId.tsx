@@ -12,6 +12,12 @@ import { AssistantButton, AssistantPanel } from '../../../components/Assistant'
 import { useAuth } from '../../../lib/useAuth'
 import { useTimezone } from '../../../hooks/useTimezone'
 import { BRAND, DISPLAY_VERSION } from '../../../config/brand'
+import {
+  WorkspaceBrandingEffect,
+  WorkspaceBrandingProvider,
+  brandLogo,
+} from '../../../veridian/branding'
+import { isFeatureEnabled } from '../../../veridian/features'
 import type { DatePreset } from '../../../types/analytics'
 import type { WorkspaceSearch, ComparisonMode } from '../../../types/dashboard'
 
@@ -137,15 +143,28 @@ function WorkspaceLayout() {
     setMobileMenuLevel('main')
   }
 
+  // Per-client white-label logo (defaults to Veridian; never on the demo).
+  const logo = brandLogo(workspace, isDemo)
+
+  // Settings tabs visibility per subscribed features (N2). The header settings
+  // sub-menu (mobile) must mirror what the Settings page shows.
+  const visibleSettingsItems = settingsMenuItems.filter((item) => {
+    if (item.key === 'voip') return isFeatureEnabled(workspace, 'voip')
+    if (item.key === 'search-console') return isFeatureEnabled(workspace, 'gsc')
+    return true
+  })
+
   return (
     <AssistantProvider workspaceId={workspaceId}>
+    <WorkspaceBrandingProvider workspace={workspace} isDemo={isDemo}>
+    <WorkspaceBrandingEffect workspace={workspace} isDemo={isDemo} />
     <div className="flex-1 flex flex-col bg-[var(--background)]">
       <header className="bg-[var(--background)]">
         <div className="h-16 max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between border-b border-gray-200">
           {/* Mobile: Logo only */}
           <div className="flex md:hidden items-center">
             <Link to="/workspaces/$workspaceId" params={{ workspaceId }}>
-              <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-6" />
+              <img src={logo.src} alt={logo.alt} className="h-6 max-w-[140px] object-contain" />
             </Link>
           </div>
 
@@ -153,7 +172,7 @@ function WorkspaceLayout() {
           <div className="hidden md:block">
           <Space size="large">
             <Link to="/workspaces/$workspaceId" params={{ workspaceId }}>
-              <img src="/veridian-logo.svg" alt="Veridian Analytics" className="h-6" />
+              <img src={logo.src} alt={logo.alt} className="h-6 max-w-[160px] object-contain" />
             </Link>
             <Select
               value={workspaceId}
@@ -516,7 +535,7 @@ function WorkspaceLayout() {
                     <LeftOutlined />
                     Retour
                   </button>
-                  {settingsMenuItems.map((item) => (
+                  {visibleSettingsItems.map((item) => (
                     <Link
                       key={item.key}
                       to="/workspaces/$workspaceId/settings"
@@ -630,6 +649,7 @@ function WorkspaceLayout() {
         </>
       )}
     </div>
+    </WorkspaceBrandingProvider>
     </AssistantProvider>
   )
 }

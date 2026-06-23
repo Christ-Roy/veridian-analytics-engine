@@ -113,6 +113,7 @@ function Dashboard() {
         annotations={workspace.settings.annotations}
         globalFilters={filters}
         onAddFilter={handleAddFilter}
+        layout={workspace.settings.dashboard_layout}
       />
       <SubscribeDrawer
         open={subscribeDrawerOpen}

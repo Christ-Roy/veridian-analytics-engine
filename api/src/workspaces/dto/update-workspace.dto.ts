@@ -81,6 +81,91 @@ export class SmtpSettingsUpdateDto {
   from_email: string;
 }
 
+/** Per-client accent color (white-label, N1). */
+export class BrandingDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/, { message: 'color must be a hex #rrggbb' })
+  color?: string;
+}
+
+/** Subscribed feature modules → Settings tab visibility (N2). */
+export class FeaturesDto {
+  @IsOptional()
+  @IsBoolean()
+  voip?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  gsc?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  connectors?: boolean;
+}
+
+/** Native dashboard widget order/visibility per client (N3). */
+export class DashboardLayoutDto {
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  hidden_widgets?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  order?: string[];
+}
+
+/** One CRM milestone rule (N4 generic engine). */
+export class CrmGoalMappingDto {
+  @IsString()
+  @MaxLength(120)
+  match: string;
+
+  @IsString()
+  @MaxLength(120)
+  timeline_name: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  min_scroll?: number;
+}
+
+/** Configurable analytics→CRM semantics per workspace (N4 + S4). */
+export class CrmMappingDto {
+  @IsOptional()
+  @IsIn(['auto', 'email', 'field'])
+  identity_resolver?: 'auto' | 'email' | 'field';
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  @Matches(/^[a-zA-Z0-9_.]+$/, {
+    message: 'identity_field must be a Twenty field identifier',
+  })
+  identity_field?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CrmGoalMappingDto)
+  goals?: CrmGoalMappingDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  map_phone_calls?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  phone_call_timeline_name?: string;
+}
+
 export class UpdateWorkspaceSettingsDto {
   @IsOptional()
   @IsNumber()
@@ -144,6 +229,31 @@ export class UpdateWorkspaceSettingsDto {
       'Each domain must be a valid domain (e.g., example.com or *.example.com)',
   })
   allowed_domains?: string[];
+
+  // ─── White-label / multi-industrie (pilotable M2M) ───────────────────────
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => BrandingDto)
+  branding?: BrandingDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => FeaturesDto)
+  features?: FeaturesDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => DashboardLayoutDto)
+  dashboard_layout?: DashboardLayoutDto;
+
+  @IsOptional()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => CrmMappingDto)
+  crm_mapping?: CrmMappingDto;
 }
 
 export class UpdateWorkspaceDto {

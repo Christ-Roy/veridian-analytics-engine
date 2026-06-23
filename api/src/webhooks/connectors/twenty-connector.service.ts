@@ -10,6 +10,8 @@ import {
 import { TwentyClient } from './twenty-client';
 import { TwentyBudget } from './twenty-budget';
 import { deterministicTimelineId } from './deterministic-id';
+import { WorkspacesService } from '../../workspaces/workspaces.service';
+import type { WorkspaceCrmMapping } from '../../workspaces/entities/workspace.entity';
 
 /**
  * TwentyConnectorService — the engine-native Twenty destination (design B,
@@ -41,9 +43,16 @@ export interface ConnectorOutcome {
 
 const BATCH_SIZE = 60; // §4c.2
 const PERSON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/** crm_mapping config cache TTL — config changes rarely; a flush is a tick. */
+const CRM_CONFIG_CACHE_TTL_MS = 60 * 1000;
 
 interface CachedPerson {
   id: string;
+  resolvedAt: number;
+}
+
+interface CachedCrmConfig {
+  config: WorkspaceCrmMapping | undefined;
   resolvedAt: number;
 }
 
@@ -56,12 +65,15 @@ type PersonResolution =
 @Injectable()
 export class TwentyConnectorService {
   private readonly logger = new Logger(TwentyConnectorService.name);
-  /** Person resolution cache, keyed by `${workspace_id}:${identity}` (tenant-scoped). */
+  /** Person resolution cache, keyed by `${workspace_id}:${kind}:${identity}` (tenant-scoped). */
   private readonly personCache = new Map<string, CachedPerson>();
+  /** Per-workspace crm_mapping config cache (60s TTL). */
+  private readonly crmConfigCache = new Map<string, CachedCrmConfig>();
 
   constructor(
     private readonly mapper: TwentyEventMapper,
     private readonly config: ConfigService,
+    private readonly workspaces: WorkspacesService,
   ) {}
 
   /** True when a webhook is a Twenty destination. */
@@ -110,10 +122,14 @@ export class TwentyConnectorService {
     };
     if (deliveries.length === 0) return outcome;
 
+    // Fetch the workspace's CRM mapping ONCE per flush (cached 60s). Drives the
+    // generic mapping (N4) + identity resolution; undefined → built-in fallback.
+    const crmConfig = await this.getCrmConfig(webhook.workspace_id);
+
     const activities: Array<{ deliveryId: string; mapped: MappedTimelineEvent; personId: string }> = [];
 
     for (const delivery of deliveries) {
-      const mappedList = this.mapDelivery(webhook, delivery);
+      const mappedList = this.mapDelivery(webhook, delivery, crmConfig);
       if (mappedList.length === 0) {
         // Not a timeline milestone (raw noise / unknown goal / no identity).
         // Treated as a success no-op so the delivery is not retried forever.
@@ -124,7 +140,12 @@ export class TwentyConnectorService {
       // All milestones of one delivery share the same identity → resolve once.
       let resolution: PersonResolution;
       try {
-        resolution = await this.resolvePersonId(webhook.workspace_id, mappedList[0].identity, client, budget);
+        resolution = await this.resolvePersonId(
+          webhook.workspace_id,
+          mappedList[0],
+          client,
+          budget,
+        );
       } catch (err) {
         this.logger.warn(
           `Twenty resolve failed (ws=${webhook.workspace_id}, id=${mappedList[0].identity}): ${(err as Error).message}`,
@@ -190,6 +211,7 @@ export class TwentyConnectorService {
   private mapDelivery(
     webhook: WebhookDefinition,
     delivery: WebhookDelivery,
+    crmConfig: WorkspaceCrmMapping | undefined,
   ): MappedTimelineEvent[] {
     const payload = this.parseBody(delivery.request_body);
     const ctx: TrackedEventContext = {
@@ -200,7 +222,34 @@ export class TwentyConnectorService {
       // request_body; the mapper reads payload fields (path, goal_name, user_id…).
       payload,
     };
-    return this.mapper.mapAll(ctx);
+    return this.mapper.mapAll(ctx, crmConfig);
+  }
+
+  /**
+   * Read (and cache 60s) a workspace's CRM mapping config. A missing workspace
+   * or empty config yields `undefined` → the mapper falls back to the built-in
+   * prospection mapping (back-compat). Never throws — a config read failure must
+   * not break delivery (the fallback still works).
+   */
+  private async getCrmConfig(
+    workspaceId: string,
+  ): Promise<WorkspaceCrmMapping | undefined> {
+    const cached = this.crmConfigCache.get(workspaceId);
+    if (cached && Date.now() - cached.resolvedAt < CRM_CONFIG_CACHE_TTL_MS) {
+      return cached.config;
+    }
+    let config: WorkspaceCrmMapping | undefined;
+    try {
+      const ws = await this.workspaces.get(workspaceId);
+      config = ws.settings?.crm_mapping;
+    } catch (err) {
+      this.logger.warn(
+        `crm_mapping read failed (ws=${workspaceId}): ${(err as Error).message} — using fallback`,
+      );
+      config = undefined;
+    }
+    this.crmConfigCache.set(workspaceId, { config, resolvedAt: Date.now() });
+    return config;
   }
 
   /**
@@ -212,17 +261,23 @@ export class TwentyConnectorService {
    */
   private async resolvePersonId(
     workspaceId: string,
-    identity: string,
+    mapped: MappedTimelineEvent,
     client: TwentyClient,
     budget: TwentyBudget,
   ): Promise<PersonResolution> {
-    const key = `${workspaceId}:${identity}`;
+    // Cache key includes the resolution kind/field so two workspaces (or two
+    // identity strategies) never collide on the same identity string.
+    const key = `${workspaceId}:${mapped.identityKind}:${mapped.identityField ?? ''}:${mapped.identity}`;
     const cached = this.personCache.get(key);
     if (cached && Date.now() - cached.resolvedAt < PERSON_CACHE_TTL_MS) {
       return { status: 'found', personId: cached.id };
     }
     if (!budget.take()) return { status: 'no_budget' };
-    const person = await client.resolvePerson(identity);
+    const person = await client.resolvePerson(
+      mapped.identity,
+      mapped.identityKind,
+      mapped.identityField,
+    );
     if (!person) return { status: 'not_found' };
     this.personCache.set(key, { id: person.id, resolvedAt: Date.now() });
     return { status: 'found', personId: person.id };
@@ -237,8 +292,9 @@ export class TwentyConnectorService {
     }
   }
 
-  /** Test seam — clears the per-tenant Person cache. */
+  /** Test seam — clears the per-tenant Person cache + crm config cache. */
   clearCache(): void {
     this.personCache.clear();
+    this.crmConfigCache.clear();
   }
 }

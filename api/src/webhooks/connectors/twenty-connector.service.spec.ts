@@ -59,19 +59,35 @@ function delivery(
 /** A fake TwentyClient that records calls without any HTTP. */
 function fakeClient(
   resolveImpl: (identity: string) => Promise<{ id: string; doNotContact: boolean } | null>,
-): { client: TwentyClient; batches: any[][]; resolves: string[] } {
+): {
+  client: TwentyClient;
+  batches: any[][];
+  resolves: string[];
+  resolveCalls: Array<{ identity: string; kind?: string; field?: string }>;
+} {
   const batches: any[][] = [];
   const resolves: string[] = [];
+  const resolveCalls: Array<{ identity: string; kind?: string; field?: string }> = [];
   const client = {
-    async resolvePerson(identity: string) {
+    async resolvePerson(identity: string, kind?: string, field?: string) {
       resolves.push(identity);
+      resolveCalls.push({ identity, kind, field });
       return resolveImpl(identity);
     },
     async batchTimeline(items: any[]) {
       batches.push(items);
     },
   } as unknown as TwentyClient;
-  return { client, batches, resolves };
+  return { client, batches, resolves, resolveCalls };
+}
+
+/** Fake WorkspacesService returning a configurable crm_mapping per workspace. */
+function fakeWorkspaces(crmByWs: Record<string, unknown> = {}) {
+  return {
+    async get(id: string) {
+      return { id, settings: { crm_mapping: crmByWs[id] } };
+    },
+  } as any;
 }
 
 describe('TwentyConnectorService', () => {
@@ -80,7 +96,11 @@ describe('TwentyConnectorService', () => {
 
   beforeEach(() => {
     config = { get: () => undefined } as unknown as ConfigService;
-    connector = new TwentyConnectorService(new TwentyEventMapper(), config);
+    connector = new TwentyConnectorService(
+      new TwentyEventMapper(),
+      config,
+      fakeWorkspaces(),
+    );
   });
 
   describe('isTwentyDestination', () => {
@@ -107,7 +127,7 @@ describe('TwentyConnectorService', () => {
 
     it('global TWENTY_CONNECTOR_DRY_RUN forces dry-run', () => {
       config = { get: (k: string) => (k === 'TWENTY_CONNECTOR_DRY_RUN' ? 'true' : undefined) } as unknown as ConfigService;
-      connector = new TwentyConnectorService(new TwentyEventMapper(), config);
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces());
       expect(connector.buildClient(twentyWebhook(), 's')).toBeInstanceOf(TwentyClient);
     });
   });
@@ -317,6 +337,65 @@ describe('TwentyConnectorService', () => {
       // One unique activity stored despite two flushes — exactly-once.
       expect(stored.size).toBe(1);
       expect(duplicateRejected).toBe(1);
+    });
+  });
+
+  describe('config-driven mapping (N4) + field identity (S4)', () => {
+    it('maps a workspace-declared goal that the built-in mapping ignores', async () => {
+      // 'purchase' is unknown to the prospection fallback → would be skipped.
+      const crm = {
+        goals: [{ match: 'goal:purchase', timeline_name: 'achat' }],
+      };
+      connector = new TwentyConnectorService(
+        new TwentyEventMapper(),
+        config,
+        fakeWorkspaces({ ws_yoga: crm }),
+      );
+      const { client, batches } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const wh = twentyWebhook({ workspace_id: 'ws_yoga' });
+      const d = delivery('d1', { event_type: 'goal', goal_name: 'purchase', user_id: 'client@yoga.fr' });
+      const out = await connector.flushBatch(wh, [d], client, budget);
+      expect(out.written).toEqual(['d1']);
+      expect(batches[0][0]).toMatchObject({ name: 'achat', targetPersonId: 'p9' });
+    });
+
+    it('resolves identity on a custom Twenty field when configured (UUID Supabase)', async () => {
+      const crm = {
+        identity_resolver: 'field',
+        identity_field: 'supabaseId',
+        goals: [{ match: 'goal:reservation_confirmed', timeline_name: 'reservation' }],
+      };
+      connector = new TwentyConnectorService(
+        new TwentyEventMapper(),
+        config,
+        fakeWorkspaces({ ws_yoga: crm }),
+      );
+      const { client, resolveCalls } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const wh = twentyWebhook({ workspace_id: 'ws_yoga' });
+      const uuid = 'a1b2c3d4-0000-4000-8000-000000000000';
+      const d = delivery('d1', { event_type: 'goal', goal_name: 'reservation_confirmed', user_id: uuid });
+      await connector.flushBatch(wh, [d], client, budget);
+      expect(resolveCalls[0]).toEqual({ identity: uuid, kind: 'field', field: 'supabaseId' });
+    });
+
+    it('maps phone_call to a CRM milestone with acquisition + phone source (S4)', async () => {
+      const { client, batches } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const d = delivery('d1', {
+        event_type: 'goal',
+        goal_name: 'phone_call',
+        user_id: 'a@b.com',
+        properties: { source: 'ads' },
+      });
+      const out = await connector.flushBatch(twentyWebhook(), [d], client, budget);
+      expect(out.written).toEqual(['d1']);
+      expect(batches[0][0]).toMatchObject({ name: 'appel' });
+      expect(batches[0][0].properties).toMatchObject({
+        acquisitionSource: 'google_ads',
+        phoneSource: 'ads',
+      });
     });
   });
 });

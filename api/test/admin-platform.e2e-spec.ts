@@ -609,6 +609,93 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
   });
 });
 
+// Customization M2M (N1–N4) — roundtrip fonctionnel : on provisionne un tenant,
+// on pose branding + features + crm_mapping, et getCustomization renvoie le tout.
+describe('Admin Platform — customization M2M (branding/features/crm)', () => {
+  let ctx: TestAppContext;
+  let wsId: string;
+
+  beforeAll(async () => {
+    ctx = await createAdminPlatformTestApp();
+  });
+
+  afterAll(async () => {
+    await closeTestApp(ctx);
+  });
+
+  beforeEach(async () => {
+    await truncateSystemTables(ctx.systemClient, [
+      'workspaces',
+      'workspace_memberships',
+      'users',
+      'api_keys',
+      'invitations',
+      'backfill_tasks',
+      'password_reset_tokens',
+    ]);
+    const prov = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/tenants.provision')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({
+        email: 'owner@yoga-sculpt.fr',
+        siteUrl: 'https://yoga-sculpt.fr',
+        name: 'Yoga Sculpt',
+      })
+      .expect(201);
+    wsId = prov.body.workspace_id;
+    await waitForMutations();
+  });
+
+  it('roundtrips branding + features + crm_mapping via getCustomization', async () => {
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setBranding')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, branding: { color: '#ff8800' } })
+      .expect(200);
+    await waitForMutations();
+
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setFeatures')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, features: { gsc: false, voip: true } })
+      .expect(200);
+    await waitForMutations();
+
+    const mapping = {
+      identity_resolver: 'field',
+      identity_field: 'supabaseId',
+      goals: [{ match: 'goal:purchase', timeline_name: 'achat' }],
+    };
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/crm.setMapping')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, crm_mapping: mapping })
+      .expect(200);
+    await waitForMutations();
+
+    const res = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.getCustomization')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId })
+      .expect(200);
+
+    expect(res.body.branding).toEqual({ color: '#ff8800' });
+    expect(res.body.features).toEqual({ gsc: false, voip: true });
+    expect(res.body.crm_mapping).toMatchObject({
+      identity_resolver: 'field',
+      identity_field: 'supabaseId',
+    });
+  });
+
+  it('rejects an invalid branding color (validation)', async () => {
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setBranding')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, branding: { color: 'red' } })
+      .expect(400);
+  });
+});
+
 // Surface M2M IA-first (workspaces.status, voip.*, gsc.*, webhooks.*,
 // workspaces.updateSettings, ads.conversions) — garantie de sécurité : AUCUN
 // de ces endpoints ne doit être atteignable sans la clé plateforme. La logique
@@ -644,6 +731,13 @@ describe('Admin Platform — surface M2M IA-first : auth gate', () => {
     'webhooks.test',
     'ads.conversions',
     'tracking.verify',
+    // Customization M2M (white-label + multi-industrie, N1–N4)
+    'workspaces.getCustomization',
+    'workspaces.setBranding',
+    'workspaces.setFeatures',
+    'workspaces.setLayout',
+    'crm.setMapping',
+    'crm.getMapping',
   ];
 
   it.each(M2M_ENDPOINTS)(

@@ -1,24 +1,38 @@
 import { Injectable } from '@nestjs/common';
+import type {
+  WorkspaceCrmMapping,
+  CrmGoalMapping,
+} from '../../workspaces/entities/workspace.entity';
 
 /**
- * TwentyEventMapper — pure mapping of a tracked analytics event onto a Twenty
- * timeline activity name + the identity used to resolve the target Person.
+ * TwentyEventMapper — maps a tracked analytics event onto a Twenty timeline
+ * activity name + the identity used to resolve the target Person.
  *
- * The QUOI is frozen by CONTRATS-TUNNEL §4c.3 ("namespace.verbe", digests only,
- * never the raw goal stream) and §4a ("the bridge alone maps raw goal names →
- * timeline names; the site never knows Twenty's names, Twenty never knows the
- * site's goal names"). This class is the engine-native re-implementation of the
- * mapping that lived in the micro-service `bridge/src/analytics-pull.ts`.
+ * GENERIC ENGINE (N4, 2026-06-23): the mapping is now driven by a per-workspace
+ * `WorkspaceCrmMapping` config instead of hardcoded prospection Sets. Any
+ * industry declares its own goal→milestone catalogue + identity resolution via
+ * the M2M API; the prospection mapping survives ONLY as the built-in fallback
+ * for workspaces that have no config (back-compat with the live site-audit
+ * tunnel). It also carries the normalized acquisition source to the CRM (S4).
  *
- * Stateless, no I/O — safe to unit-test in isolation.
+ * Historic contract for the prospection fallback: CONTRATS-TUNNEL §4c.3
+ * ("namespace.verbe", digests only) + §4a (the bridge alone maps raw goal names
+ * → timeline names). Stateless, no I/O — safe to unit-test in isolation.
  *
  * Input shape = the `event.tracked` payload emitted by
  * `events/session-payload.handler.ts#emitTracked`:
  *   { workspace_id, event_type, event_id, payload: {
- *       path, goal_name, goal_value, properties, user_id, utm, … } }
+ *       path, goal_name, goal_value, properties, user_id, utm, referrer*, … } }
  */
 
-/** Twenty timeline activity names — frozen §4c.3 (analytics namespace). */
+/**
+ * Timeline activity names.
+ *
+ * For the BUILT-IN prospection fallback these are the frozen §4c.3 names. With a
+ * workspace `crm_mapping`, the name is whatever the workspace declared
+ * (`CrmGoalMapping.timeline_name`) — hence the `string` widening. We keep the
+ * literal union as documentation of the canonical prospection vocabulary.
+ */
 export type TwentyTimelineName =
   | 'audit.page_view'
   | 'audit.scroll'
@@ -26,11 +40,13 @@ export type TwentyTimelineName =
   | 'audit.rdv'
   | 'signup'
   | 'app.started'
-  | 'score.threshold';
+  | 'score.threshold'
+  | (string & {});
 
 /**
- * Raw goal names emitted by the site (terrain site-audit 2026-06-10). The
- * mapping to §4c.3 timeline names happens HERE — the site keeps its own names.
+ * Built-in prospection mapping (terrain site-audit 2026-06-10). Used ONLY when a
+ * workspace has NO `crm_mapping.goals` declared. New industries override these by
+ * declaring their own catalogue via the M2M API — no code change required.
  */
 const CTA_GOALS = new Set([
   'audit_cta_rdv',
@@ -41,8 +57,6 @@ const CTA_GOALS = new Set([
 const RDV_GOALS = new Set(['rdv_booked']);
 const AUDIT_VIEW_GOALS = new Set(['audit_view', 'audit_page_view']);
 const AUDIT_SCROLL_GOALS = new Set(['audit_scroll', 'scroll_depth']);
-
-/** Hub goals (contrat §4a-bis). */
 const SIGNUP_GOALS = new Set(['signup']);
 const APP_STARTED_GOALS = new Set(['app_started']);
 
@@ -55,6 +69,9 @@ const APP_STARTED_TIMELINE_APPS = new Set(['notifuse', 'prospection']);
 
 /** Scroll depth (%) above which a /audit/ view counts as a `audit.scroll`. */
 const AUDIT_SCROLL_THRESHOLD = 75;
+
+/** Identity resolution strategy resolved for a single event. */
+export type IdentityKind = 'email' | 'slug' | 'field';
 
 export interface TrackedEventContext {
   workspace_id: string;
@@ -70,20 +87,24 @@ export interface MappedTimelineEvent {
    * Person resolution via deterministicTimelineId(personId, eventId, name).
    * The mapper only carries `eventId` + `name`, the inputs to that id.
    */
-  /** Frozen timeline name §4c.3 (the activity `name`). */
+  /** Timeline activity `name` (frozen §4c.3 for the fallback, or workspace-declared). */
   name: TwentyTimelineName;
   /**
    * Identity used to resolve the Person §4c.1:
    *   - an email (contains '@') → emails.primaryEmail
-   *   - otherwise an audit slug → auditSlug
-   * Comes from the event's user_id (identify(slug) then identify(email), §4a).
+   *   - a slug → auditSlug
+   *   - a custom field value (UUID Supabase…) → identityField[eq] (N4)
    */
   identity: string;
+  /** How `identity` must be resolved against Twenty (drives the filter form). */
+  identityKind: IdentityKind;
+  /** Twenty custom field to match when identityKind = 'field' (e.g. 'supabaseId'). */
+  identityField?: string;
   /** True heure de l'event ISO UTC §4c.2 — jamais l'heure d'écriture. */
   happensAt: string;
   /** Stable id of the underlying tracked event — used for delivery dedup. */
   eventId: string;
-  /** Extra timeline properties (audit trail §4.3). */
+  /** Extra timeline properties (audit trail §4.3 + S4 acquisition source). */
   properties: Record<string, unknown>;
 }
 
@@ -94,17 +115,50 @@ export class TwentyEventMapper {
    *
    * Most events produce NONE (raw stream noise, unknown goal, no identity).
    * A single event can produce TWO milestones: a deep /audit/ screen_view emits
-   * BOTH `audit.page_view` AND `audit.scroll` — mirroring the reference
-   * analytics-pull.ts (setMilestone page_view + setMilestone scroll). The
+   * BOTH `audit.page_view` AND `audit.scroll` (prospection fallback). The
    * connector derives each milestone's deterministic id from
    * (personId, eventId, name) after resolving the Person (task #13).
+   *
+   * @param config the workspace's CRM mapping. When it declares `goals`, those
+   *               rules drive the mapping; otherwise the built-in prospection
+   *               fallback applies.
    */
-  mapAll(event: TrackedEventContext): MappedTimelineEvent[] {
+  mapAll(
+    event: TrackedEventContext,
+    config?: WorkspaceCrmMapping,
+  ): MappedTimelineEvent[] {
     const p = event.payload ?? {};
-    const identity = this.normalizeIdentity(p.user_id);
+    const { identity, identityKind, identityField } = this.resolveIdentity(
+      p.user_id,
+      config,
+    );
     if (!identity) return []; // no identity → no Person to attach to
 
-    const names = this.resolveNames(event.event_type, p);
+    const isPhoneCall =
+      event.event_type === 'goal' &&
+      String(p.goal_name ?? '') === 'phone_call';
+
+    // A workspace MAY map phone_call explicitly in its goals catalogue. If it
+    // didn't, S4 still emits a default phone_call milestone (calls matter to
+    // every industry). We never emit it twice.
+    const configMatchedPhoneCall =
+      isPhoneCall &&
+      !!config?.goals?.some((r) => r.match === 'goal:phone_call');
+
+    const names = config?.goals?.length
+      ? this.resolveNamesFromConfig(event.event_type, p, config.goals)
+      : this.resolveNamesBuiltin(event.event_type, p);
+
+    // S4 — phone_call → a CRM milestone for every industry (default on), unless
+    // the workspace already mapped it explicitly above.
+    if (
+      isPhoneCall &&
+      !configMatchedPhoneCall &&
+      (config?.map_phone_calls ?? true)
+    ) {
+      names.push(config?.phone_call_timeline_name || 'appel');
+    }
+
     if (names.length === 0) return [];
 
     const happensAt = this.resolveHappensAt(p);
@@ -112,6 +166,8 @@ export class TwentyEventMapper {
     return names.map((name) => ({
       name,
       identity,
+      identityKind,
+      identityField,
       happensAt,
       eventId: event.event_id,
       properties,
@@ -123,25 +179,73 @@ export class TwentyEventMapper {
    * callers that only need one; the connector uses mapAll to not drop the
    * page_view of a deep audit view.
    */
-  map(event: TrackedEventContext): MappedTimelineEvent | null {
-    return this.mapAll(event)[0] ?? null;
+  map(
+    event: TrackedEventContext,
+    config?: WorkspaceCrmMapping,
+  ): MappedTimelineEvent | null {
+    return this.mapAll(event, config)[0] ?? null;
   }
 
+  // ─── Config-driven mapping (N4) ─────────────────────────────────────────
+
   /**
-   * Resolve ALL timeline names a raw event produces. A deep /audit/ screen_view
-   * yields TWO: audit.page_view + audit.scroll (mirrors analytics-pull.ts which
-   * sets both milestones). Every other case yields 0 or 1.
+   * Resolve milestone names from the workspace's declared rules. A rule matches
+   * either a goal (`goal:<name>`) or a screen_view path prefix
+   * (`screen_view:<prefix>`), with an optional scroll threshold. Rules are
+   * ordered; ALL matching rules fire (a deep view can yield page_view + scroll).
    */
-  private resolveNames(
+  private resolveNamesFromConfig(
+    eventType: string,
+    p: Record<string, unknown>,
+    rules: CrmGoalMapping[],
+  ): TwentyTimelineName[] {
+    const out: TwentyTimelineName[] = [];
+    const goal = String(p.goal_name ?? '');
+    const path = String(p.path ?? '');
+
+    for (const rule of rules) {
+      const [kind, ...rest] = rule.match.split(':');
+      const target = rest.join(':');
+      if (eventType === 'goal' && kind === 'goal' && goal === target) {
+        if (!this.scrollOk(p, rule.min_scroll)) continue;
+        out.push(rule.timeline_name);
+      } else if (
+        eventType === 'screen_view' &&
+        kind === 'screen_view' &&
+        (target === '' || path.startsWith(target))
+      ) {
+        if (!this.scrollOk(p, rule.min_scroll)) continue;
+        out.push(rule.timeline_name);
+      }
+    }
+    return out;
+  }
+
+  /** A rule with no `min_scroll` always passes; otherwise the page scroll must reach it. */
+  private scrollOk(p: Record<string, unknown>, min?: number): boolean {
+    if (min === undefined || min === null) return true;
+    const scroll = this.coerceNumber(
+      (p as { max_scroll?: unknown }).max_scroll ??
+        p.scroll ??
+        (p.properties as Record<string, unknown> | undefined)?.depth,
+    );
+    return scroll !== null && scroll >= min;
+  }
+
+  // ─── Built-in prospection fallback (back-compat) ────────────────────────
+
+  /**
+   * Resolve ALL timeline names a raw event produces with the BUILT-IN
+   * prospection mapping. A deep /audit/ screen_view yields TWO:
+   * audit.page_view + audit.scroll. Every other case yields 0 or 1.
+   */
+  private resolveNamesBuiltin(
     eventType: string,
     p: Record<string, unknown>,
   ): TwentyTimelineName[] {
     if (eventType === 'screen_view') {
       const path = String(p.path ?? '');
       if (path.startsWith('/audit/')) {
-        // An /audit/ view ALWAYS produces page_view; a deep one (scroll >= bar)
-        // ALSO produces scroll. We must not drop page_view on deep views — the
-        // reference emits both.
         const names: TwentyTimelineName[] = ['audit.page_view'];
         const scroll = this.coerceNumber(
           (p as { max_scroll?: unknown }).max_scroll ?? p.scroll,
@@ -151,7 +255,6 @@ export class TwentyEventMapper {
         }
         return names;
       }
-      // Non-audit page views are not timeline milestones (§4c.3).
       return [];
     }
 
@@ -175,23 +278,120 @@ export class TwentyEventMapper {
         );
         return APP_STARTED_TIMELINE_APPS.has(app) ? ['app.started'] : [];
       }
-      // Unknown goal → not a timeline milestone.
       return [];
     }
 
     return [];
   }
 
+  // ─── Identity resolution (configurable, §4a/§4c.1 + N4) ──────────────────
+
   /**
-   * Identity normalization §4a/§4c.1. Emails are lowercased + trimmed so the
-   * union slug↔email and the Person lookup are stable. A slug is passed
-   * through verbatim (the secret-derived suffix is case-sensitive).
+   * Resolve the identity used to find the Person, honoring the workspace's
+   * `identity_resolver`:
+   *   - undefined / 'auto' : '@' → email (lowercased), else slug (verbatim).
+   *   - 'email'            : always an email (lowercased + trimmed).
+   *   - 'field'            : opaque id (e.g. Supabase UUID) resolved on a custom
+   *                          Twenty field (`identity_field`). Passed verbatim.
+   */
+  resolveIdentity(
+    userId: unknown,
+    config?: WorkspaceCrmMapping,
+  ): { identity: string | null; identityKind: IdentityKind; identityField?: string } {
+    if (typeof userId !== 'string') {
+      return { identity: null, identityKind: 'slug' };
+    }
+    const trimmed = userId.trim();
+    if (!trimmed) return { identity: null, identityKind: 'slug' };
+
+    const resolver = config?.identity_resolver ?? 'auto';
+
+    if (resolver === 'field') {
+      const field = config?.identity_field?.trim();
+      if (!field) {
+        // Misconfigured: 'field' without a field name → cannot resolve.
+        return { identity: null, identityKind: 'field' };
+      }
+      return { identity: trimmed, identityKind: 'field', identityField: field };
+    }
+
+    if (resolver === 'email') {
+      return { identity: trimmed.toLowerCase(), identityKind: 'email' };
+    }
+
+    // 'auto'
+    return trimmed.includes('@')
+      ? { identity: trimmed.toLowerCase(), identityKind: 'email' }
+      : { identity: trimmed, identityKind: 'slug' };
+  }
+
+  /**
+   * Legacy single-string identity normalizer (kept for the existing unit tests
+   * and any caller that only needs the string form of the 'auto' resolver).
    */
   normalizeIdentity(userId: unknown): string | null {
-    if (typeof userId !== 'string') return null;
-    const trimmed = userId.trim();
-    if (!trimmed) return null;
-    return trimmed.includes('@') ? trimmed.toLowerCase() : trimmed;
+    return this.resolveIdentity(userId).identity;
+  }
+
+  // ─── S4 — normalized acquisition source ─────────────────────────────────
+
+  /**
+   * Compute the normalized acquisition source pushed to the CRM (S4), with a
+   * strict priority order so web and phone signals stay consistent:
+   *   gclid/gbraid/wbraid → 'google_ads'
+   *   phone_call source=ads → 'google_ads'
+   *   referrer = a search engine (no click id) → 'organic_seo'
+   *   utm_medium = cpc/ppc/paid → 'paid_other'
+   *   utm_medium = email OR phone source=email → 'email'
+   *   social referrer/medium OR phone source=social → 'social'
+   *   phone source=seo → 'organic_seo' ; phone source=direct → 'direct'
+   *   referrer present → 'referral'
+   *   else → 'direct'
+   * Returns '' when no signal is usable (caller omits the property).
+   */
+  acquisitionSource(p: Record<string, unknown>): string {
+    const utm = (p.utm ?? {}) as Record<string, unknown>;
+    const idFrom = String(utm.id_from ?? '').toLowerCase();
+    const medium = String(utm.medium ?? '').toLowerCase();
+    const props = (p.properties ?? {}) as Record<string, unknown>;
+    const phoneSource = String(props.source ?? '').toLowerCase();
+    const referrerDomain = String(p.referrer_domain ?? '').toLowerCase();
+
+    if (idFrom === 'gclid' || idFrom === 'gbraid' || idFrom === 'wbraid') {
+      return 'google_ads';
+    }
+    if (phoneSource === 'ads') return 'google_ads';
+    if (referrerDomain && this.isSearchEngine(referrerDomain)) {
+      return 'organic_seo';
+    }
+    if (medium === 'cpc' || medium === 'ppc' || medium === 'paid') {
+      return 'paid_other';
+    }
+    if (medium === 'email' || phoneSource === 'email') return 'email';
+    if (
+      phoneSource === 'social' ||
+      this.isSocial(referrerDomain) ||
+      medium === 'social'
+    ) {
+      return 'social';
+    }
+    if (phoneSource === 'seo') return 'organic_seo';
+    if (phoneSource === 'direct') return 'direct';
+    if (referrerDomain) return 'referral';
+    if (phoneSource && phoneSource !== 'other') return phoneSource;
+    return 'direct';
+  }
+
+  private isSearchEngine(domain: string): boolean {
+    return /(^|\.)(google|bing|yahoo|duckduckgo|ecosia|qwant|yandex|baidu)\./.test(
+      domain + '.',
+    );
+  }
+
+  private isSocial(domain: string): boolean {
+    return /(^|\.)(facebook|instagram|linkedin|twitter|x|t|tiktok|youtube|pinterest|reddit|snapchat)\.(com|co|fr)$/.test(
+      domain,
+    );
   }
 
   /**
@@ -228,6 +428,18 @@ export class TwentyEventMapper {
     const utm = p.utm as Record<string, unknown> | undefined;
     if (utm?.source) props.utmSource = utm.source;
     if (utm?.campaign) props.utmCampaign = utm.campaign;
+    // S4 — normalized acquisition source + phone source on every milestone.
+    const acq = this.acquisitionSource(p);
+    if (acq) props.acquisitionSource = acq;
+    const phoneSource = (p.properties as Record<string, unknown> | undefined)
+      ?.source;
+    if (
+      String(p.goal_name ?? '') === 'phone_call' &&
+      typeof phoneSource === 'string' &&
+      phoneSource
+    ) {
+      props.phoneSource = phoneSource;
+    }
     return props;
   }
 

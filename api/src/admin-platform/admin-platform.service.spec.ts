@@ -872,6 +872,80 @@ describe('AdminPlatformService.provisionTenant', () => {
     });
   });
 
+  // ─── Lot H — Customization M2M (branding / features / layout / CRM) ──────
+
+  describe('customization M2M (N1–N4)', () => {
+    beforeEach(() => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      (workspacesService.update as jest.Mock).mockResolvedValue({} as never);
+    });
+
+    it('setBranding writes the accent color and returns a snapshot', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga Sculpt',
+        logo_url: 'https://x.fr/logo.png',
+        settings: { branding: { color: '#ff8800' } },
+      });
+      const res = await service.setBranding({
+        workspace_id: 'ws1',
+        branding: { color: '#ff8800' },
+      });
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'ws1',
+          settings: { branding: { color: '#ff8800' } },
+        }),
+      );
+      expect(res).toMatchObject({ branding: { color: '#ff8800' } });
+    });
+
+    it('setFeatures DEEP-merges over the existing flags', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: { features: { voip: true, gsc: true } },
+      });
+      await service.setFeatures({
+        workspace_id: 'ws1',
+        features: { gsc: false },
+      });
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: { features: { voip: true, gsc: false } },
+        }),
+      );
+    });
+
+    it('setCrmMapping replaces the mapping and getCrmMapping reads it back', async () => {
+      const mapping = {
+        identity_resolver: 'field' as const,
+        identity_field: 'supabaseId',
+        goals: [{ match: 'goal:purchase', timeline_name: 'achat' }],
+      };
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: { crm_mapping: mapping },
+      });
+      const res = await service.setCrmMapping({
+        workspace_id: 'ws1',
+        crm_mapping: mapping,
+      });
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({ settings: { crm_mapping: mapping } }),
+      );
+      expect(res).toEqual({ workspace_id: 'ws1', crm_mapping: mapping });
+    });
+
+    it('getCustomization 404s on a missing workspace', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.getCustomization({ workspace_id: 'ghost' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+    });
+  });
+
   // ─── Lot F — ads.conversions ────────────────────────────────────────
 
   describe('getAdsConversions (M2M, read-only)', () => {

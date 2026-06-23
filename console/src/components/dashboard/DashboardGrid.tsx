@@ -22,7 +22,8 @@ import {
   type ColumnConfig,
 } from '../../types/dashboard'
 import type { DatePreset, Granularity, Filter } from '../../types/analytics'
-import type { Annotation } from '../../types/workspace'
+import type { Annotation, DashboardLayout } from '../../types/workspace'
+import { orderDashboardWidgets } from './dashboard-layout'
 
 interface DashboardGridProps {
   workspaceId: string
@@ -35,6 +36,8 @@ interface DashboardGridProps {
   annotations?: Annotation[]
   globalFilters?: Filter[]
   onAddFilter?: (filter: Filter | Filter[]) => void
+  /** Per-client widget order/visibility (N3). Undefined → native default. */
+  layout?: DashboardLayout
 }
 
 export function DashboardGrid({
@@ -47,7 +50,8 @@ export function DashboardGrid({
   customEnd,
   annotations,
   globalFilters = [],
-  onAddFilter
+  onAddFilter,
+  layout
 }: DashboardGridProps) {
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('sessions')
   const [showEvoDetails, setShowEvoDetails] = useState(false)
@@ -231,14 +235,14 @@ export function DashboardGrid({
       label: 'Pages d\'entrée',
       dimensionLabel: 'Page',
       dimension: 'landing_path',
-      metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate']
+      metrics: ['sessions', 'median_duration', 'bounce_rate']
     },
     {
       key: 'exits',
       label: 'Sorties',
       dimensionLabel: 'Page de sortie',
       dimension: 'exit_path',
-      metrics: ['unique_visitors', 'sessions', 'median_duration']
+      metrics: ['sessions', 'median_duration']
     }
   ]
 
@@ -477,88 +481,127 @@ export function DashboardGrid({
           </div>
         </div>
 
+        {/* Secondary widgets — order/visibility configurable per client (N3).
+            Keyed nodes laid out in `layout` order (default = native order). The
+            grid keeps the 2-column responsive flow regardless of order. */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <DimensionTableWidget
-            title="Pages les plus consultées"
-            tabs={pagesTabConfig}
-            onRowClick={handleRowClick}
-          />
-          <DimensionTableWidget
-            title="Sources principales"
-            tabs={sourcesTabConfig}
-            iconPrefix={(value, tabKey) =>
-              tabKey === 'referrers' && value ? (
-                <img
-                  src={`/api/tools.favicon?url=https://${encodeURIComponent(value)}`}
-                  alt=""
-                  className="w-4 h-4 shrink-0"
-                  onError={(e) => {
-                    e.currentTarget.style.display = 'none'
-                  }}
-                />
-              ) : null
-            }
-            onRowClick={handleRowClick}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <DimensionTableWidget
-            title="Campagnes principales"
-            tabs={campaignsTabConfig}
-            emptyText="Aucune donnée de campagne"
-            onRowClick={handleRowClick}
-          />
-          <DimensionTableWidget
-            title="Pays"
-            tabs={countriesTabConfig}
-            iconPrefix={(value, tabKey) =>
-              tabKey === 'list' && value ? <span className={`fi fi-${value.toLowerCase()} shrink-0 relative`} /> : null
-            }
-            emptyText="Aucune donnée de pays"
-            onRowClick={handleRowClick}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          <TrafficHeatmapWidget
-            title="Trafic par jour et heure"
-            data={heatmapData}
-            loading={heatmapFetching && !heatmapResponse}
-            timescoreReference={timescoreReference}
-            emptyText="Aucune donnée de trafic"
-            onCellClick={handleHeatmapCellClick}
-          />
-          <DimensionTableWidget
-            title="Appareils"
-            tabs={devicesTabConfig}
-            iconPrefix={getDeviceIcon}
-            onRowClick={handleRowClick}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-          {/* Pas de onRowClick sur « Pages les plus vues » : un filtre
-              `page_path` (dimension propre à la table `pages`) propagé aux
-              filtres globaux casserait tous les widgets sur les tables
-              `sessions`/`goals` (le backend rejette une dimension absente de la
-              table interrogée). Widget informatif, apparié avec « Objectifs »
-              pour remplir la rangée. */}
-          <DimensionTableWidget
-            title="Pages les plus vues"
-            infoTooltip="Pages les plus consultées, avec le temps médian passé, la profondeur de scroll médiane et le taux de sortie"
-            tabs={pageViewsTabConfig}
-            columns={pageViewsColumns}
-            emptyText="Aucune donnée de page"
-          />
-          <DimensionTableWidget
-            title="Objectifs"
-            infoTooltip="Suivez les conversions de vos objectifs et leur valeur totale"
-            tabs={goalsTabConfig}
-            columns={goalsColumns}
-            emptyText="Aucune donnée d'objectif"
-            onRowClick={handleRowClick}
-          />
+          {orderDashboardWidgets(
+            [
+              {
+                key: 'pages',
+                node: (
+                  <DimensionTableWidget
+                    title="Pages les plus consultées"
+                    tabs={pagesTabConfig}
+                    onRowClick={handleRowClick}
+                  />
+                )
+              },
+              {
+                key: 'sources',
+                node: (
+                  <DimensionTableWidget
+                    title="Sources principales"
+                    tabs={sourcesTabConfig}
+                    iconPrefix={(value, tabKey) =>
+                      tabKey === 'referrers' && value ? (
+                        <img
+                          src={`/api/tools.favicon?url=https://${encodeURIComponent(value)}`}
+                          alt=""
+                          className="w-4 h-4 shrink-0"
+                          onError={(e) => {
+                            e.currentTarget.style.display = 'none'
+                          }}
+                        />
+                      ) : null
+                    }
+                    onRowClick={handleRowClick}
+                  />
+                )
+              },
+              {
+                key: 'campaigns',
+                node: (
+                  <DimensionTableWidget
+                    title="Campagnes principales"
+                    tabs={campaignsTabConfig}
+                    emptyText="Aucune donnée de campagne"
+                    onRowClick={handleRowClick}
+                  />
+                )
+              },
+              {
+                key: 'countries',
+                node: (
+                  <DimensionTableWidget
+                    title="Pays"
+                    tabs={countriesTabConfig}
+                    iconPrefix={(value, tabKey) =>
+                      tabKey === 'list' && value ? <span className={`fi fi-${value.toLowerCase()} shrink-0 relative`} /> : null
+                    }
+                    emptyText="Aucune donnée de pays"
+                    onRowClick={handleRowClick}
+                  />
+                )
+              },
+              {
+                key: 'heatmap',
+                node: (
+                  <TrafficHeatmapWidget
+                    title="Trafic par jour et heure"
+                    data={heatmapData}
+                    loading={heatmapFetching && !heatmapResponse}
+                    timescoreReference={timescoreReference}
+                    emptyText="Aucune donnée de trafic"
+                    onCellClick={handleHeatmapCellClick}
+                  />
+                )
+              },
+              {
+                key: 'devices',
+                node: (
+                  <DimensionTableWidget
+                    title="Appareils"
+                    tabs={devicesTabConfig}
+                    iconPrefix={getDeviceIcon}
+                    onRowClick={handleRowClick}
+                  />
+                )
+              },
+              {
+                key: 'page_views',
+                node: (
+                  // Pas de onRowClick sur « Pages les plus vues » : un filtre
+                  // `page_path` (dimension propre à la table `pages`) propagé
+                  // aux filtres globaux casserait les widgets sur `sessions`/
+                  // `goals`. Widget informatif.
+                  <DimensionTableWidget
+                    title="Pages les plus vues"
+                    infoTooltip="Pages les plus consultées, avec le temps médian passé, la profondeur de scroll médiane et le taux de sortie"
+                    tabs={pageViewsTabConfig}
+                    columns={pageViewsColumns}
+                    emptyText="Aucune donnée de page"
+                  />
+                )
+              },
+              {
+                key: 'goals',
+                node: (
+                  <DimensionTableWidget
+                    title="Objectifs"
+                    infoTooltip="Suivez les conversions de vos objectifs et leur valeur totale"
+                    tabs={goalsTabConfig}
+                    columns={goalsColumns}
+                    emptyText="Aucune donnée d'objectif"
+                    onRowClick={handleRowClick}
+                  />
+                )
+              }
+            ],
+            layout
+          ).map((w) => (
+            <div key={w.key}>{w.node}</div>
+          ))}
         </div>
       </div>
     </DashboardProvider>

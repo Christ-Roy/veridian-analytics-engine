@@ -42,6 +42,24 @@ export interface Annotation {
   color?: string // Hex color, defaults to '#7763f1'
 }
 
+/** Per-client accent color (white-label, N1). */
+export interface WorkspaceBranding {
+  color?: string
+}
+
+/** Subscribed feature modules → Settings tab visibility (N2). */
+export interface WorkspaceFeatures {
+  voip?: boolean
+  gsc?: boolean
+  connectors?: boolean
+}
+
+/** Native dashboard widget order/visibility per client (N3). */
+export interface DashboardLayout {
+  hidden_widgets?: string[]
+  order?: string[]
+}
+
 /**
  * Workspace settings stored as JSON.
  */
@@ -56,6 +74,10 @@ export interface WorkspaceSettings {
   geo_coordinates_precision: number
   annotations?: Annotation[]
   allowed_domains?: string[]
+  // White-label / multi-industrie (pilotable M2M)
+  branding?: WorkspaceBranding
+  features?: WorkspaceFeatures
+  dashboard_layout?: DashboardLayout
 }
 
 /**

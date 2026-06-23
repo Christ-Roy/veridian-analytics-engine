@@ -29,6 +29,7 @@ import { VoIPSettingsPanel } from '../../../../veridian/settings-panels/voip-pan
 import { SearchConsoleSettingsPanel } from '../../../../veridian/settings-panels/search-console-panel'
 import { ConnectorsSettingsPanel } from '../../../../veridian/settings-panels/connectors-panel'
 import { buildTrackerSnippet } from '../../../../veridian/snippet'
+import { isFeatureEnabled } from '../../../../veridian/features'
 import { z } from 'zod'
 
 // Vision Veridian 2026-05-25 : pas de sous-route/onglet "Veridian" custom.
@@ -84,12 +85,16 @@ type MenuItem = {
   key: SettingsSection
   label: string
   ownerOnly?: boolean
+  /** Optional feature flag that gates this tab's visibility (N2). */
+  feature?: 'voip' | 'gsc' | 'connectors'
   icon?: React.ComponentType<{ size?: number; className?: string }>
 }
 
 // Icône lucide (taille 14) sur CHAQUE item pour un menu uniforme : les
 // features Veridian (voip/search-console/connectors) ne doivent pas ressortir
 // du reste du menu — elles se fondent dans le natif.
+// Les onglets feature (voip/search-console/connectors) sont MASQUÉS (jamais
+// grisés — vision pricing) pour les workspaces qui n'ont pas souscrit l'option.
 const menuItems: MenuItem[] = [
   { key: 'workspace', label: 'Espace de travail', icon: Building2 },
   { key: 'dimensions', label: 'Dimensions personnalisées', icon: Tags },
@@ -99,9 +104,9 @@ const menuItems: MenuItem[] = [
   { key: 'api-keys', label: 'Clés API', icon: KeyRound },
   { key: 'privacy', label: 'Confidentialité', icon: ShieldCheck },
   { key: 'sdk', label: 'Installer le SDK', icon: Code2 },
-  { key: 'voip', label: 'Téléphonie / VoIP', icon: PhoneCall },
-  { key: 'search-console', label: 'Search Console', icon: SearchIcon },
-  { key: 'connectors', label: 'Connecteurs', icon: Plug },
+  { key: 'voip', label: 'Téléphonie / VoIP', feature: 'voip', icon: PhoneCall },
+  { key: 'search-console', label: 'Search Console', feature: 'gsc', icon: SearchIcon },
+  { key: 'connectors', label: 'Connecteurs', feature: 'connectors', icon: Plug },
   { key: 'danger', label: 'Zone dangereuse', ownerOnly: true, icon: TriangleAlert },
 ]
 
@@ -710,6 +715,7 @@ function Settings() {
           <nav className="space-y-1">
             {menuItems
               .filter((item) => !item.ownerOnly || isOwner)
+              .filter((item) => !item.feature || isFeatureEnabled(workspace, item.feature))
               .map((item) => {
                 const isActive = section === item.key
                 const Icon = item.icon
@@ -741,16 +747,16 @@ function Settings() {
           {section === 'api-keys' && <ApiKeysPage workspaceId={workspaceId} />}
           {section === 'privacy' && privacyContent}
           {section === 'sdk' && sdkContent}
-          {section === 'voip' && (
+          {section === 'voip' && isFeatureEnabled(workspace, 'voip') && (
             <VoIPSettingsPanel workspaceId={workspaceId} />
           )}
-          {section === 'search-console' && (
+          {section === 'search-console' && isFeatureEnabled(workspace, 'gsc') && (
             <SearchConsoleSettingsPanel
               workspaceId={workspaceId}
               siteDomain={workspace.website || undefined}
             />
           )}
-          {section === 'connectors' && (
+          {section === 'connectors' && isFeatureEnabled(workspace, 'connectors') && (
             <ConnectorsSettingsPanel workspaceId={workspaceId} />
           )}
           {section === 'danger' && isOwner && dangerContent}

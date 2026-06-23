@@ -42,6 +42,14 @@ import {
   VoipSaveCredentialDto,
 } from './dto/voip-admin.dto';
 import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
+import {
+  GetCrmMappingDto,
+  GetCustomizationDto,
+  SetBrandingDto,
+  SetCrmMappingDto,
+  SetFeaturesDto,
+  SetLayoutDto,
+} from './dto/customization.dto';
 import { WorkspaceStatusResponseDto } from './dto/workspace-status-response.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import {
@@ -779,6 +787,89 @@ export class AdminPlatformService {
       logo_url: dto.logo_url,
       settings: dto.settings,
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Customization M2M — branding / features / layout / CRM mapping (N1–N4)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Set a workspace's accent color (N1). Logo + name are top-level
+   * (updateSettings). Returns a compact customization snapshot.
+   */
+  async setBranding(dto: SetBrandingDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    await this.workspacesService.update({
+      id: dto.workspace_id,
+      settings: { branding: dto.branding },
+    });
+    return this.getCustomization({ workspace_id: dto.workspace_id });
+  }
+
+  /**
+   * Set subscribed feature modules (N2). DEEP-merges over the existing flags so
+   * `{ voip: false }` flips one module without clearing the rest.
+   */
+  async setFeatures(dto: SetFeaturesDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    const merged = { ...(ws.settings.features ?? {}), ...dto.features };
+    await this.workspacesService.update({
+      id: dto.workspace_id,
+      settings: { features: merged },
+    });
+    return this.getCustomization({ workspace_id: dto.workspace_id });
+  }
+
+  /** Set the native dashboard widget order/visibility (N3). Full replace. */
+  async setLayout(dto: SetLayoutDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    await this.workspacesService.update({
+      id: dto.workspace_id,
+      settings: { dashboard_layout: dto.dashboard_layout },
+    });
+    return this.getCustomization({ workspace_id: dto.workspace_id });
+  }
+
+  /**
+   * Set the configurable analytics→CRM mapping (N4 + S4). Full replace of the
+   * `crm_mapping` object — the workspace owns its complete CRM vocabulary.
+   */
+  async setCrmMapping(dto: SetCrmMappingDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    await this.workspacesService.update({
+      id: dto.workspace_id,
+      settings: { crm_mapping: dto.crm_mapping },
+    });
+    return this.getCrmMapping({ workspace_id: dto.workspace_id });
+  }
+
+  /** Read a workspace's CRM mapping (audit / IA introspection). */
+  async getCrmMapping(dto: GetCrmMappingDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    return {
+      workspace_id: dto.workspace_id,
+      crm_mapping: ws.settings.crm_mapping ?? null,
+    };
+  }
+
+  /**
+   * Read the full per-workspace customization (branding + features + layout +
+   * crm_mapping) in one call — the snapshot an IA / the Hub reads before tuning.
+   */
+  async getCustomization(dto: GetCustomizationDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    return {
+      workspace_id: dto.workspace_id,
+      name: ws.name,
+      logo_url: ws.logo_url ?? null,
+      branding: ws.settings.branding ?? null,
+      features: ws.settings.features ?? null,
+      dashboard_layout: ws.settings.dashboard_layout ?? null,
+      crm_mapping: ws.settings.crm_mapping ?? null,
+    };
   }
 
   // ---------------------------------------------------------------------------

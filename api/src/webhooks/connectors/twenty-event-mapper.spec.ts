@@ -227,4 +227,123 @@ describe('TwentyEventMapper', () => {
       expect(out?.eventId).toBe('evt_42');
     });
   });
+
+  // ─── N4 — config-driven generic engine (multi-industrie) ────────────────
+  describe('config-driven mapping (N4)', () => {
+    it('uses workspace goals catalogue instead of the built-in Sets', () => {
+      const config = {
+        goals: [
+          { match: 'goal:purchase', timeline_name: 'achat' },
+          { match: 'goal:reservation_confirmed', timeline_name: 'reservation' },
+        ],
+      };
+      // 'purchase' is unknown to the built-in mapping → only the config maps it.
+      const out = mapper.map(
+        ctx({ payload: { goal_name: 'purchase', user_id: 'a@b.com' } }),
+        config,
+      );
+      expect(out?.name).toBe('achat');
+    });
+
+    it('ignores built-in prospection goals once a config is declared', () => {
+      const config = { goals: [{ match: 'goal:purchase', timeline_name: 'achat' }] };
+      // 'rdv_booked' is a built-in goal but NOT in this workspace's config.
+      const out = mapper.mapAll(
+        ctx({ payload: { goal_name: 'rdv_booked', user_id: 'a@b.com' } }),
+        config,
+      );
+      expect(out).toEqual([]);
+    });
+
+    it('matches screen_view path prefixes with a scroll threshold', () => {
+      const config = {
+        goals: [
+          { match: 'screen_view:/cours/', timeline_name: 'vue_cours', min_scroll: 50 },
+        ],
+      };
+      const shallow = mapper.mapAll(
+        ctx({ event_type: 'screen_view', payload: { path: '/cours/yoga', max_scroll: 20, user_id: 'a@b.com' } }),
+        config,
+      );
+      expect(shallow).toEqual([]);
+      const deep = mapper.mapAll(
+        ctx({ event_type: 'screen_view', payload: { path: '/cours/yoga', max_scroll: 80, user_id: 'a@b.com' } }),
+        config,
+      );
+      expect(deep[0]?.name).toBe('vue_cours');
+    });
+
+    it('falls back to the built-in mapping when no config is given', () => {
+      const out = mapper.map(ctx({ payload: { goal_name: 'rdv_booked', user_id: 'a@b.com' } }));
+      expect(out?.name).toBe('audit.rdv');
+    });
+  });
+
+  describe('configurable identity resolution (N4)', () => {
+    it("resolver 'field' carries the field + opaque id verbatim", () => {
+      const config = {
+        identity_resolver: 'field' as const,
+        identity_field: 'supabaseId',
+        goals: [{ match: 'goal:purchase', timeline_name: 'achat' }],
+      };
+      const uuid = 'a1b2-c3d4';
+      const out = mapper.map(ctx({ payload: { goal_name: 'purchase', user_id: uuid } }), config);
+      expect(out?.identity).toBe(uuid);
+      expect(out?.identityKind).toBe('field');
+      expect(out?.identityField).toBe('supabaseId');
+    });
+
+    it("resolver 'field' without a field name yields no milestone", () => {
+      const config = {
+        identity_resolver: 'field' as const,
+        goals: [{ match: 'goal:purchase', timeline_name: 'achat' }],
+      };
+      expect(mapper.mapAll(ctx({ payload: { goal_name: 'purchase', user_id: 'x' } }), config)).toEqual([]);
+    });
+
+    it("resolver 'email' forces an email lookup even for a bare token", () => {
+      const r = mapper.resolveIdentity('Robert@Veridian.SITE', { identity_resolver: 'email' });
+      expect(r).toEqual({ identity: 'robert@veridian.site', identityKind: 'email' });
+    });
+
+    it("default 'auto' branches on the value shape", () => {
+      expect(mapper.resolveIdentity('a@b.com').identityKind).toBe('email');
+      expect(mapper.resolveIdentity('slug-x').identityKind).toBe('slug');
+    });
+  });
+
+  // ─── S4 — phone_call mapping + normalized acquisition source ─────────────
+  describe('phone_call + acquisition source (S4)', () => {
+    it('maps a phone_call goal to the default "appel" milestone', () => {
+      const out = mapper.map(
+        ctx({ payload: { goal_name: 'phone_call', user_id: 'a@b.com', properties: { source: 'seo' } } }),
+      );
+      expect(out?.name).toBe('appel');
+      expect(out?.properties).toMatchObject({ phoneSource: 'seo', acquisitionSource: 'organic_seo' });
+    });
+
+    it('honors a custom phone_call_timeline_name and can be disabled', () => {
+      const named = mapper.map(
+        ctx({ payload: { goal_name: 'phone_call', user_id: 'a@b.com', properties: { source: 'ads' } } }),
+        { phone_call_timeline_name: 'appel_entrant' },
+      );
+      expect(named?.name).toBe('appel_entrant');
+      const off = mapper.mapAll(
+        ctx({ payload: { goal_name: 'phone_call', user_id: 'a@b.com' } }),
+        { map_phone_calls: false },
+      );
+      expect(off).toEqual([]);
+    });
+
+    it('normalizes acquisition source with the priority order', () => {
+      expect(mapper.acquisitionSource({ utm: { id_from: 'gclid' } })).toBe('google_ads');
+      expect(mapper.acquisitionSource({ properties: { source: 'ads' } })).toBe('google_ads');
+      expect(mapper.acquisitionSource({ referrer_domain: 'www.google.com' })).toBe('organic_seo');
+      expect(mapper.acquisitionSource({ utm: { medium: 'cpc' } })).toBe('paid_other');
+      expect(mapper.acquisitionSource({ utm: { medium: 'email' } })).toBe('email');
+      expect(mapper.acquisitionSource({ referrer_domain: 'facebook.com' })).toBe('social');
+      expect(mapper.acquisitionSource({ referrer_domain: 'partner.fr' })).toBe('referral');
+      expect(mapper.acquisitionSource({})).toBe('direct');
+    });
+  });
 });

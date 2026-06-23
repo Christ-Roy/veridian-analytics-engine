@@ -1,6 +1,7 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { MembersModule } from '../members/members.module';
+import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { WebhooksController } from './webhooks.controller';
 import { WebhooksService } from './webhooks.service';
 import { WebhookCrypto } from './webhook-crypto';
@@ -13,7 +14,11 @@ import { TwentyEventMapper } from './connectors/twenty-event-mapper';
 import { TwentyConnectorService } from './connectors/twenty-connector.service';
 
 @Module({
-  imports: [DatabaseModule, forwardRef(() => MembersModule)],
+  imports: [
+    DatabaseModule,
+    forwardRef(() => MembersModule),
+    forwardRef(() => WorkspacesModule),
+  ],
   controllers: [WebhooksController],
   providers: [
     WebhooksService,

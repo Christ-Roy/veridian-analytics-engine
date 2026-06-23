@@ -86,11 +86,36 @@ export class TwentyClient {
   }
 
   /**
+   * N4: resolve a Person on an arbitrary Twenty field (e.g. a custom `supabaseId`
+   * holding the app's opaque user id). The field name is workspace-declared
+   * (`crm_mapping.identity_field`); it is sanitized to a safe identifier so it
+   * cannot break the Twenty filter grammar.
+   */
+  async resolveByField(
+    field: string,
+    value: string,
+  ): Promise<ResolvedPerson | null> {
+    const safeField = field.replace(/[^a-zA-Z0-9_.]/g, '');
+    if (!safeField) return null;
+    return this.resolve(`${safeField}[eq]:"${this.escape(value)}"`);
+  }
+
+  /**
    * Resolve a Person by the FORM of the identity (email vs slug), §4c.1.
    * A user_id becomes an email after identify(email) (§4a) so we branch on
    * the value's shape, never on the event source.
+   *
+   * `kind`/`field` (N4) override the heuristic: an 'email' or 'slug' kind forces
+   * the corresponding lookup; a 'field' kind resolves on the given custom field.
    */
-  async resolvePerson(identity: string): Promise<ResolvedPerson | null> {
+  async resolvePerson(
+    identity: string,
+    kind?: 'email' | 'slug' | 'field',
+    field?: string,
+  ): Promise<ResolvedPerson | null> {
+    if (kind === 'field' && field) return this.resolveByField(field, identity);
+    if (kind === 'email') return this.resolveByEmail(identity);
+    if (kind === 'slug') return this.resolveBySlug(identity);
     return identity.includes('@')
       ? this.resolveByEmail(identity)
       : this.resolveBySlug(identity);

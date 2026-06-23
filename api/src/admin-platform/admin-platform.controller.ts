@@ -17,6 +17,14 @@ import {
 } from './dto/voip-admin.dto';
 import { GscResyncDto, GscStatusDto } from './dto/gsc-admin.dto';
 import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
+import {
+  GetCrmMappingDto,
+  GetCustomizationDto,
+  SetBrandingDto,
+  SetCrmMappingDto,
+  SetFeaturesDto,
+  SetLayoutDto,
+} from './dto/customization.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import { AdsConversionsResponseDto } from './dto/ads-conversions-response.dto';
 import { TrackingVerifyDto } from './dto/tracking-verify.dto';
@@ -276,6 +284,67 @@ export class AdminPlatformController {
   })
   updateWorkspaceSettings(@Body() dto: UpdateWorkspaceSettingsM2MDto) {
     return this.adminPlatformService.updateWorkspaceSettings(dto);
+  }
+
+  // ─── Lot H — Customization M2M (white-label + multi-industrie) ─────────
+
+  @Post('workspaces.getCustomization')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Read a workspace’s full customization (branding accent + subscribed features + dashboard layout + CRM mapping) in one M2M call. The snapshot an IA / the Hub reads before tuning a client.',
+  })
+  getCustomization(@Body() dto: GetCustomizationDto) {
+    return this.adminPlatformService.getCustomization(dto);
+  }
+
+  @Post('workspaces.setBranding')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Set a workspace’s accent color (white-label N1). Logo/name go via workspaces.updateSettings.',
+  })
+  setBranding(@Body() dto: SetBrandingDto) {
+    return this.adminPlatformService.setBranding(dto);
+  }
+
+  @Post('workspaces.setFeatures')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Set the subscribed feature modules of a workspace (voip/gsc/connectors). Drives Settings tab visibility (masqué si non souscrit). Deep-merges over existing flags.',
+  })
+  setFeatures(@Body() dto: SetFeaturesDto) {
+    return this.adminPlatformService.setFeatures(dto);
+  }
+
+  @Post('workspaces.setLayout')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Set the native dashboard widget order/visibility for a workspace (N3). Reorders/hides existing staminads widgets — no custom component.',
+  })
+  setLayout(@Body() dto: SetLayoutDto) {
+    return this.adminPlatformService.setLayout(dto);
+  }
+
+  @Post('crm.setMapping')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Declare the analytics→CRM mapping of a workspace (N4 + S4): goal→timeline catalogue, identity resolution (email/slug/custom field), phone_call mapping. Turns the Twenty connector into a generic engine — vendable to any industry.',
+  })
+  setCrmMapping(@Body() dto: SetCrmMappingDto) {
+    return this.adminPlatformService.setCrmMapping(dto);
+  }
+
+  @Post('crm.getMapping')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Read a workspace’s current analytics→CRM mapping (audit / IA).',
+  })
+  getCrmMapping(@Body() dto: GetCrmMappingDto) {
+    return this.adminPlatformService.getCrmMapping(dto);
   }
 
   // ─── Lot F — ads.conversions (read-only Ads-attributed conversions) ───
