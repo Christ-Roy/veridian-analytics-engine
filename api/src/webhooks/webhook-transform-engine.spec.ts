@@ -58,18 +58,20 @@ describe('WebhookTransformEngine', () => {
     });
 
     it('does NOT HTML-escape values in a JSON body (noEscape:true)', () => {
-      // A value with &, <, >, ', " must survive verbatim — the output is JSON,
-      // not HTML. With HTML-escaping ON this would become &amp; &lt; &#x27; etc.
-      // and corrupt the payload for the destination.
+      // Values with &, <, >, ' must survive verbatim — the output is JSON, not
+      // HTML. With HTML-escaping ON these become &amp; &lt; &#x27; etc. and
+      // corrupt the payload. (A literal `"` still needs {{json}} — JSON quoting
+      // is the author's job; HTML-escaping was never the right tool.)
       const out = engine.render(
         { type: 'template', template: '{"email":"{{email}}","note":"{{note}}"}' },
-        { email: "a&b'<c>@x.com", note: 'tom & jerry "quote"' },
+        { email: "a&b'<c>@x.com", note: 'tom & jerry <3' },
       );
       const parsed = JSON.parse(out);
       expect(parsed.email).toBe("a&b'<c>@x.com");
-      expect(parsed.note).toBe('tom & jerry "quote"');
+      expect(parsed.note).toBe('tom & jerry <3');
       expect(out).not.toContain('&amp;');
       expect(out).not.toContain('&#x27;');
+      expect(out).not.toContain('&lt;');
     });
 
     it('json helper still produces valid JSON for special-char data', () => {
