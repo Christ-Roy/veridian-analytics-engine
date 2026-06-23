@@ -105,6 +105,36 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# ─── Sweep best-effort des workspaces gate orphelins (runs antérieurs) ─────
+# Si un run précédent n'a pas pu nettoyer (pas de creds à l'époque), on purge
+# ici les vieux e2e_gate_* AVANT de créer le nouveau. Strictement scopé au
+# préfixe `e2e_gate_` → ne touche JAMAIS un workspace client ni le workspace
+# `e2e_onpremise_test` du coordinateur (préfixe différent). Best-effort total.
+sweep_orphans() {
+  local email="${E2E_ADMIN_EMAIL:-}" pass="${E2E_ADMIN_PASSWORD:-}"
+  [ -z "$email" ] || [ -z "$pass" ] && return 0
+  local token
+  token="$(curl -s -m 20 -X POST "$BASE/api/auth.login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$email\",\"password\":\"$pass\"}" \
+    | grep -oE '"access_token":"[^"]+"' | sed -E 's/.*"([^"]+)"/\1/')"
+  [ -z "$token" ] && return 0
+  local ids
+  ids="$(curl -s -m 20 -X GET "$BASE/api/workspaces.list" \
+    -H "Authorization: Bearer $token" \
+    | grep -oE '"id":"e2e_gate_[a-z0-9]+"' | sed -E 's/.*"(e2e_gate_[a-z0-9]+)"/\1/')"
+  local n=0
+  for id in $ids; do
+    curl -s -m 20 -o /dev/null -X POST "$BASE/api/workspaces.delete" \
+      -H 'Content-Type: application/json' \
+      -H "Authorization: Bearer $token" \
+      -d "{\"id\":\"$id\"}" && n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] && echo "[sweep] $n workspace(s) e2e_gate_* orphelin(s) purgé(s)."
+  return 0
+}
+sweep_orphans
+
 echo "═══ E2E GATE on-premise (staging réel) — workspace jetable $WS ═══"
 
 # ─── 1. Provision ─────────────────────────────────────────────────────────
