@@ -42,22 +42,6 @@ describe('buildAnalyticsQuery', () => {
     );
   });
 
-  it('builds unique_visitors as uniqExact(visitor_id) on the sessions table', () => {
-    const { sql } = buildAnalyticsQuery(
-      {
-        ...baseQuery,
-        metrics: ['unique_visitors', 'sessions'],
-      },
-      undefined,
-      defaultContext,
-    );
-    // The real B2B unique-visitor count: distinct stable visitor_id.
-    expect(sql).toContain('uniqExact(visitor_id) as unique_visitors');
-    // sessions remains a plain count (= "Visites"), distinct from visitors.
-    expect(sql).toContain('count() as sessions');
-    expect(sql).toContain('FROM sessions FINAL');
-  });
-
   it('adds dimensions to SELECT and GROUP BY', () => {
     const { sql } = buildAnalyticsQuery({
       ...baseQuery,
@@ -563,6 +547,44 @@ describe('buildAnalyticsQuery', () => {
       );
       expect(sql).toContain('device = {f0:String}');
       expect(params.f0).toBe('mobile');
+    });
+  });
+
+  // Regression: pageviews used to be `countIf(name = 'screen_view')` on the
+  // sessions table, which has NO `name` column -> ClickHouse 500 in prod
+  // (ticket 2026-06-17-fix-metric-pageviews-native-cassee). It must aggregate
+  // the per-session `pageview_count` instead.
+  describe('pageviews metric (regression: no `name` column on sessions)', () => {
+    it('aggregates pageview_count and never references a `name` column', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        metrics: ['pageviews'],
+      });
+      expect(sql).toContain('sum(pageview_count) as pageviews');
+      expect(sql).not.toMatch(/\bname\b/);
+      expect(sql).not.toContain('screen_view');
+    });
+
+    it('does not double-aggregate in filtered totals (no sum(sum(...)))', () => {
+      const { sql } = buildAnalyticsQuery(
+        {
+          ...baseQuery,
+          metrics: ['pageviews'],
+          dimensions: [],
+          totalsGroupBy: ['utm_source'],
+          metricFilters: [
+            { metric: 'bounce_rate', operator: 'gt', values: [50] },
+          ],
+        },
+        undefined,
+        defaultContext,
+      );
+      // Uses the subquery pattern (filtered totals)
+      expect(sql).toContain('FROM (');
+      // Inner stage sums per-session counts, outer stage sums the partials.
+      expect(sql).toContain('sum(pageview_count) as _pageviews');
+      expect(sql).toContain('sum(_pageviews) as pageviews');
+      expect(sql).not.toContain('sum(sum(');
     });
   });
 

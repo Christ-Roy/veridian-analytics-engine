@@ -157,6 +157,11 @@ function buildFilteredTotalsQuery(
         innerSelectParts.push('count() as _page_count');
         outerSelectParts.push('sum(_page_count) as page_count');
         break;
+      case 'pageviews':
+        // sessions.pageview_count is already per-session; sum at both stages.
+        innerSelectParts.push('sum(pageview_count) as _pageviews');
+        outerSelectParts.push('sum(_pageviews) as pageviews');
+        break;
       case 'goals':
         innerSelectParts.push('count() as _goals');
         outerSelectParts.push('sum(_goals) as goals');

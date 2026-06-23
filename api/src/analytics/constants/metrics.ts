@@ -26,16 +26,6 @@ export const METRICS: Record<string, MetricDefinition> = {
     description: 'Total sessions',
     tables: ['sessions'],
   },
-  // Unique visitors (B2B). Distinct stable visitor_id across sessions — a
-  // returning visitor counts ONCE, unlike `sessions` (which the front used to
-  // mislabel "Visites uniques"). visitor_id is propagated into the sessions
-  // table by sessions_mv (any(e.visitor_id)).
-  unique_visitors: {
-    name: 'unique_visitors',
-    sql: 'uniqExact(visitor_id)',
-    description: 'Visiteurs uniques',
-    tables: ['sessions'],
-  },
   median_duration: {
     name: 'median_duration',
     sql: 'round(median(duration) / 1000, 1)',
@@ -64,7 +54,11 @@ export const METRICS: Record<string, MetricDefinition> = {
   // Session page metrics (aggregated from sessions table)
   pageviews: {
     name: 'pageviews',
-    sql: "countIf(name = 'screen_view')",
+    // The sessions table is pre-aggregated (sessions_mv): each row already
+    // carries its own `pageview_count` (UInt16 = countIf(name='screen_view')
+    // computed at materialization time). The sessions table has NO `name`
+    // column, so summing the per-session counts is the correct rollup.
+    sql: 'sum(pageview_count)',
     description: 'Total pageviews',
     tables: ['sessions'],
   },
