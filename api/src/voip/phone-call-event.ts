@@ -17,6 +17,36 @@
 import { TrackingEvent } from '../events/entities/event.entity';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 import { NormalizedCall, PhoneSource } from './voip.types';
+import type { Channel, ChannelGroup } from '../events/derive-channel';
+
+/**
+ * Mappe la `phone_source` (par numéro appelé) vers le couple
+ * (channel fin, channel_group coarse) pour que les appels téléphoniques
+ * apparaissent dans la MÊME dimension `channel`/`channel_group` que le web.
+ * channel_group est aligné 1:1 sur phone_source ; channel reprend la valeur
+ * GA4-like la plus proche. Cohérence web↔appel = pilier de l'attribution.
+ */
+function phoneSourceToChannel(source: PhoneSource): {
+  channel: Channel;
+  channel_group: ChannelGroup;
+} {
+  switch (source) {
+    case 'ads':
+      return { channel: 'paid_search', channel_group: 'ads' };
+    case 'seo':
+      return { channel: 'organic_search', channel_group: 'seo' };
+    case 'social':
+      return { channel: 'organic_social', channel_group: 'social' };
+    case 'email':
+      return { channel: 'email', channel_group: 'email' };
+    case 'direct':
+      return { channel: 'direct', channel_group: 'direct' };
+    case 'print':
+    case 'other':
+    default:
+      return { channel: 'other', channel_group: 'other' };
+  }
+}
 
 export interface SourceMatch {
   source: PhoneSource;
@@ -42,6 +72,7 @@ export function buildPhoneCallEvent(
   const callTs = call.startedAt.getTime();
   const sessionId = `voip:${provider}:${call.externalId}`;
   const source: PhoneSource = match?.source ?? 'direct';
+  const { channel, channel_group } = phoneSourceToChannel(source);
 
   const properties: Record<string, string> = {
     direction: call.direction,
@@ -92,8 +123,8 @@ export function buildPhoneCallEvent(
     utm_content: '',
     utm_id: '',
     utm_id_from: '',
-    channel: '',
-    channel_group: '',
+    channel,
+    channel_group,
     stm_1: '',
     stm_2: '',
     stm_3: '',

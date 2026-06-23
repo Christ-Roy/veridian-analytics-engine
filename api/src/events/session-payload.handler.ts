@@ -18,6 +18,7 @@ import {
   extractFieldValues,
   applyFilterResults,
 } from '../filters/lib/filter-evaluator';
+import { deriveChannel } from './derive-channel';
 
 export interface HandleResult {
   success: boolean;
@@ -282,6 +283,20 @@ export class SessionPayloadHandler {
     const referrerParsed = this.parseUrl(attrs?.referrer);
     const landingParsed = this.parseUrl(attrs?.landing_page);
 
+    // Derive acquisition channel (figé à l'ingestion) from the signals already
+    // captured. channel = GA4-like fin ; channel_group = coarse aligné sur
+    // phone_source pour la cohérence web↔appel. Cf derive-channel.ts (S1 du
+    // chantier attribution). Sans ça channel/channel_group restent '' → filtre
+    // et funnel par canal borgnes.
+    const { channel, channel_group } = deriveChannel({
+      referrer_domain: referrerParsed.domain,
+      referrer: attrs?.referrer,
+      utm_source: attrs?.utm_source,
+      utm_medium: attrs?.utm_medium,
+      utm_id_from: attrs?.utm_id_from,
+      is_direct: !attrs?.referrer,
+    });
+
     // Apply skew correction to session timestamps
     const correctedCreatedAt = skewMs
       ? this.correctTimestamp(payload.created_at, skewMs)
@@ -344,9 +359,9 @@ export class SessionPayloadHandler {
       // SDK
       sdk_version: payload.sdk_version ?? '',
 
-      // Defaults
-      channel: '',
-      channel_group: '',
+      // Acquisition channel derived at ingestion (cf derive-channel.ts).
+      channel,
+      channel_group,
 
       // Custom dimensions from SDK payload (default to empty string)
       stm_1: payload.dimensions?.stm_1 ?? '',
