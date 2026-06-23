@@ -68,19 +68,35 @@ export class VoipSyncService {
       this.logger.log(`VoIP sync: ${creds.length} active credential(s).`);
       for (const c of creds) {
         try {
-          const n = await this.syncOne(c.workspaceId, c.kind, c.creds);
+          const n = await this.syncOne(
+            c.workspaceId,
+            c.kind,
+            c.creds,
+            c.lastSyncAt,
+          );
           pushedEvents += n;
           syncedWorkspaces++;
           await this.voip.markSynced(c.workspaceId, c.kind);
         } catch (err) {
           const msg = (err as Error).message;
           this.logger.error(
-            `VoIP sync failed ws=${c.workspaceId} kind=${c.kind}: ${msg}`,
+            `VoIP sync FAILED ws=${c.workspaceId} kind=${c.kind}: ${msg}`,
           );
           await this.voip.markSyncError(c.workspaceId, c.kind, msg);
         }
       }
+    } catch (err) {
+      // Garde-fou : toute exception inattendue (ex findAllActiveCredentials qui
+      // throw) ne doit JAMAIS laisser `running` bloqué — le `finally` ci-dessous
+      // s'en charge, mais on loggue clairement pour ne pas échouer en silence.
+      this.logger.error(
+        `VoIP sync run aborted unexpectedly: ${(err as Error).message}`,
+      );
     } finally {
+      // INVARIANT CRITIQUE : `running` revient TOUJOURS à false, même sur
+      // timeout/exception d'un fetch provider. Couplé aux timeouts des
+      // providers (AbortSignal.timeout), cela garantit qu'un incident réseau
+      // côté provider ne gèle JAMAIS le module VoIP entier à vie.
       this.running = false;
     }
     this.logger.log(
@@ -94,19 +110,25 @@ export class VoipSyncService {
     workspaceId: string,
     kind: VoipCredentialKind,
     creds: OvhCreds | TelnyxCreds,
+    lastSyncAt: Date | null = null,
   ): Promise<number> {
-    const since = new Date(
-      Date.now() - this.lookbackDays() * 24 * 60 * 60 * 1000,
-    );
+    const since = this.computeSince(lastSyncAt);
     const calls = await this.pull(kind, creds, since);
     if (calls.length === 0) return 0;
 
     const lookup = await this.voip.buildSourceLookup(workspaceId);
     const provider = this.voip.providerOf(kind);
     const batch: TrackingEvent[] = [];
+    // Visibilité attribution : on collecte les numéros appelés non mappés à une
+    // source (vision "1 numéro = 1 source"). Ces appels sont quand même poussés
+    // (attribués `direct` pour l'affichage + `source_attributed='false'`) mais
+    // on remonte un WARN clair pour que Robert/le client sache qu'un numéro est
+    // à configurer dans Settings → VoIP. Sinon l'attribution est borgne.
+    const unmappedNumbers = new Set<string>();
     for (const call of calls) {
       const e164 = toE164(call.toNumber);
       const match = e164 ? (lookup.get(e164) ?? null) : null;
+      if (!match) unmappedNumbers.add(e164 || call.toNumber || '(inconnu)');
       batch.push(buildPhoneCallEvent(workspaceId, provider, call, match));
     }
     await this.events.addBatch(batch);
@@ -116,14 +138,43 @@ export class VoipSyncService {
     this.logger.log(
       `VoIP sync ws=${workspaceId} kind=${kind}: ${batch.length} call(s) pushed.`,
     );
+    if (unmappedNumbers.size > 0) {
+      this.logger.warn(
+        `VoIP sync ws=${workspaceId} kind=${kind}: ${unmappedNumbers.size} ` +
+          `numéro(s) appelé(s) non mappé(s) à une source (attribués 'direct') ` +
+          `→ à configurer dans Settings → VoIP : ${[...unmappedNumbers].join(', ')}`,
+      );
+    }
     return batch.length;
   }
 
-  private lookbackDays(): number {
-    // Fenêtre = max(overlap, defaultLookback). En l'absence d'un curseur
-    // précis par cred, on re-pull une fenêtre fixe — l'idempotence dedup_token
-    // absorbe le recouvrement.
-    return Math.max(this.overlapDays, this.defaultLookbackDays);
+  /**
+   * Borne basse de pull incrémentale.
+   *
+   * `since = max(last_sync_at − overlap, now − defaultLookback)` :
+   *   - jamais synchronisé (`lastSyncAt` null) → `now − defaultLookback` (7j,
+   *     premier pull complet) ;
+   *   - synchronisé récemment → repart de `last_sync_at − overlap` (recouvrement
+   *     de 2j, idempotent via dedup_token) au lieu de re-pull 7j à chaque run
+   *     (96×/jour). Économise massivement les appels API providers ;
+   *   - `last_sync_at` vieux de >defaultLookback (cron resté off longtemps) → on
+   *     plafonne au lookback par défaut pour ne pas pull une fenêtre démesurée.
+   */
+  private computeSince(lastSyncAt: Date | null): Date {
+    const defaultFloor = new Date(
+      Date.now() - this.defaultLookbackDays * 24 * 60 * 60 * 1000,
+    );
+    if (!lastSyncAt || Number.isNaN(lastSyncAt.getTime())) {
+      return defaultFloor;
+    }
+    const incremental = new Date(
+      lastSyncAt.getTime() - this.overlapDays * 24 * 60 * 60 * 1000,
+    );
+    // max(incremental, defaultFloor) : ne JAMAIS remonter plus loin que le
+    // lookback par défaut, mais ne JAMAIS pull moins que l'overlap récent.
+    return incremental.getTime() > defaultFloor.getTime()
+      ? incremental
+      : defaultFloor;
   }
 
   private pull(

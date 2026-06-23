@@ -156,6 +156,13 @@ const OVH_HOSTS: Record<OvhEndpoint, string> = {
   'ovh-us': 'https://api.us.ovhcloud.com/1.0',
 };
 
+/**
+ * Timeout des requêtes du test de connexion (OVH /auth/time + /me, Telnyx
+ * /balance). Le test est déclenché depuis une requête HTTP admin : sans timeout,
+ * un provider lent gèlerait la requête utilisateur indéfiniment.
+ */
+const TEST_CONNECTION_TIMEOUT_MS = 12000;
+
 // ─── Définition de provider ─────────────────────────────────────────────────
 
 export interface ConnectionTestResult {
@@ -193,7 +200,9 @@ async function ovhSignedFetch(
   const host = OVH_HOSTS[creds.endpoint];
   const url = `${host}${path}`;
   // OVH veut un timestamp serveur — on récupère /auth/time (public, non signé).
-  const timeRes = await fetchImpl(`${host}/auth/time`);
+  const timeRes = await fetchImpl(`${host}/auth/time`, {
+    signal: AbortSignal.timeout(TEST_CONNECTION_TIMEOUT_MS),
+  });
   const timestamp = timeRes.ok
     ? (await timeRes.text()).trim()
     : String(Math.floor(Date.now() / 1000));
@@ -216,6 +225,7 @@ async function ovhSignedFetch(
       'X-Ovh-Signature': signature,
       'Content-Type': 'application/json',
     },
+    signal: AbortSignal.timeout(TEST_CONNECTION_TIMEOUT_MS),
   });
 }
 
@@ -280,6 +290,7 @@ const telnyxProvider: ProviderDef<TelnyxCreds> = {
           Authorization: `Bearer ${creds.apiKey}`,
           Accept: 'application/json',
         },
+        signal: AbortSignal.timeout(TEST_CONNECTION_TIMEOUT_MS),
       });
       if (res.ok) {
         return { ok: true, message: "Connecté à l'API Telnyx." };

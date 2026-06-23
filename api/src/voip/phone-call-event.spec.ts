@@ -47,6 +47,16 @@ describe('buildPhoneCallEvent', () => {
     expect(ev.properties?.source).toBe('seo');
     expect(ev.properties?.tracked_number_id).toBe('phn_x');
     expect(ev.properties?.tracked_number_label).toBe('Ligne SEO');
+    expect(ev.properties?.source_attributed).toBe('true');
+  });
+
+  it('marks source_attributed=false on an unmapped number (no match)', () => {
+    const ev = buildPhoneCallEvent('ws_1', 'ovh', baseCall, null);
+    // Displayed as `direct` for native Live/Explore/Goals…
+    expect(ev.properties?.source).toBe('direct');
+    // …but explicitly flagged as NOT attributed so the gap is filterable.
+    expect(ev.properties?.source_attributed).toBe('false');
+    expect(ev.properties?.tracked_number_id).toBeUndefined();
   });
 
   it('includes recording_url only when present', () => {

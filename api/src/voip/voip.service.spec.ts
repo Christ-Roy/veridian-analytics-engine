@@ -139,6 +139,26 @@ describe('VoipService — credentials', () => {
       NotFoundException,
     );
   });
+
+  it('findAllActiveCredentials surfaces lastSyncAt for the incremental cursor', async () => {
+    const { svc } = makeService();
+    await svc.saveCredential('ws_1', 'voip_telnyx', {
+      apiKey: 'KEY0123456789abcdef',
+    });
+
+    // Never synced yet → cursor is null (first run pulls the default window).
+    const before = await svc.findAllActiveCredentials();
+    expect(before).toHaveLength(1);
+    expect(before[0].lastSyncAt).toBeNull();
+
+    // After a successful sync, the cursor is a real Date the sync can read to
+    // bound the pull window (no more full 7-day re-pull every run).
+    await svc.markSynced('ws_1', 'voip_telnyx');
+    const after = await svc.findAllActiveCredentials();
+    expect(after).toHaveLength(1);
+    expect(after[0].lastSyncAt).toBeInstanceOf(Date);
+    expect(Number.isNaN(after[0].lastSyncAt!.getTime())).toBe(false);
+  });
 });
 
 describe('VoipService — phone numbers', () => {

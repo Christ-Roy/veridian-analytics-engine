@@ -66,6 +66,7 @@ describe('AdminPlatformService.provisionTenant', () => {
             create: jest.fn().mockResolvedValue({}),
             get: jest.fn().mockResolvedValue({}),
             update: jest.fn().mockResolvedValue({}),
+            delete: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -338,9 +339,11 @@ describe('AdminPlatformService.provisionTenant', () => {
       'user-uuid-1',
     );
     expect(apiKeysService.create).not.toHaveBeenCalled();
+    // Workspace was never created → nothing to roll back on the workspace side.
+    expect(workspacesService.delete).not.toHaveBeenCalled();
   });
 
-  it('compensates by soft-deleting user when API key creation fails', async () => {
+  it('compensates by deleting the orphan workspace AND the user when API key creation fails', async () => {
     happyPathStubs();
     apiKeysService.create.mockRejectedValue(new Error('role denied'));
 
@@ -352,6 +355,10 @@ describe('AdminPlatformService.provisionTenant', () => {
       }),
     ).rejects.toThrow(InternalServerErrorException);
 
+    // The workspace was created before the API key step failed → it MUST be
+    // deleted so it doesn't linger as an orphan and derive a `_2` slug on the
+    // next provision with the same name.
+    expect(workspacesService.delete).toHaveBeenCalledWith('boulangerie_dupont');
     expect(usersService.delete).toHaveBeenCalledWith(
       'user-uuid-1',
       'user-uuid-1',

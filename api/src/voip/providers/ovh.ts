@@ -45,6 +45,21 @@ const OVH_HOSTS: Record<OvhCreds['endpoint'], string> = {
 const MAX_CONSUMPTIONS_PER_LINE = 2000;
 /** Plafond de lignes traitées par compte — garde-fou. */
 const MAX_LINES = 200;
+/**
+ * Timeout par requête HTTP vers OVH. Le `fetch` global Node n'a PAS de timeout
+ * par défaut : un TCP black-hole côté provider gèlerait le sync À VIE (le flag
+ * `running` de VoipSyncService ne serait jamais relâché → arrêt silencieux de
+ * TOUTE l'ingestion d'appels). On borne donc chaque call.
+ */
+const OVH_REQUEST_TIMEOUT_MS = 15000;
+/**
+ * Re-signature périodique : la signature OVH embarque un timestamp serveur et
+ * OVH tolère ~30s de dérive. Sur un pull multi-lignes (jusqu'à
+ * MAX_LINES × MAX_CONSUMPTIONS_PER_LINE = 400k GET), réutiliser le même
+ * timestamp ferait échouer les requêtes tardives en `401 OVH:QUERY_TIME_OUT`.
+ * On re-fetch /auth/time toutes les ~20s d'horloge écoulée.
+ */
+const OVH_RESIGN_INTERVAL_MS = 20000;
 
 /** Forme brute d'une voiceConsumption OVH (champs qu'on consomme). */
 interface OvhVoiceConsumption {
@@ -89,7 +104,10 @@ async function fetchOvhTime(
   host: string,
   fetchImpl: typeof fetch,
 ): Promise<number> {
-  const res = await fetchImpl(`${host}/auth/time`, { method: 'GET' });
+  const res = await fetchImpl(`${host}/auth/time`, {
+    method: 'GET',
+    signal: AbortSignal.timeout(OVH_REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) {
     throw new VoipApiError(
       `ovh_auth_time_failed status=${res.status}`,
@@ -105,32 +123,64 @@ async function fetchOvhTime(
   return n;
 }
 
-/** GET signé sur l'API OVH. */
-async function ovhGet<T>(
-  host: string,
-  path: string,
-  creds: OvhCreds,
-  timestamp: number,
-  fetchImpl: typeof fetch,
-): Promise<T> {
-  const url = `${host}${path}`;
-  const headers = signOvhRequest({
-    creds,
-    method: 'GET',
-    url,
-    body: '',
-    timestamp,
-  });
-  const res = await fetchImpl(url, { method: 'GET', headers });
-  if (!res.ok) {
-    const txt = await res.text();
-    throw new VoipApiError(
-      `ovh_get_failed path=${path} status=${res.status} body=${txt.slice(0, 200)}`,
-      res.status,
-      'ovh',
-    );
+/**
+ * Contexte de signature OVH qui se ré-aligne sur l'heure serveur. Garde un
+ * timestamp serveur frais et le re-fetch quand il dérive de plus de
+ * `OVH_RESIGN_INTERVAL_MS` (mesuré sur l'horloge locale). Évite à la fois le
+ * coût d'un /auth/time par requête ET les `401 QUERY_TIME_OUT` d'un timestamp
+ * réutilisé sur des centaines de milliers de GET.
+ */
+class OvhSigner {
+  private serverTime: number; // epoch secondes côté OVH
+  private fetchedAtMonotonic: number; // Date.now() local au moment du fetch
+
+  private constructor(serverTime: number) {
+    this.serverTime = serverTime;
+    this.fetchedAtMonotonic = Date.now();
   }
-  return (await res.json()) as T;
+
+  static async create(host: string, fetchImpl: typeof fetch): Promise<OvhSigner> {
+    return new OvhSigner(await fetchOvhTime(host, fetchImpl));
+  }
+
+  /** Renvoie un timestamp serveur frais, re-synchronisé si trop vieux. */
+  private async timestamp(host: string, fetchImpl: typeof fetch): Promise<number> {
+    const elapsed = Date.now() - this.fetchedAtMonotonic;
+    if (elapsed >= OVH_RESIGN_INTERVAL_MS) {
+      this.serverTime = await fetchOvhTime(host, fetchImpl);
+      this.fetchedAtMonotonic = Date.now();
+      return this.serverTime;
+    }
+    // Avance le timestamp serveur de l'écoulé local (reste dans la tolérance OVH).
+    return this.serverTime + Math.floor(elapsed / 1000);
+  }
+
+  /** GET signé sur l'API OVH, avec timestamp re-synchronisé au besoin. */
+  async get<T>(host: string, path: string, creds: OvhCreds, fetchImpl: typeof fetch): Promise<T> {
+    const url = `${host}${path}`;
+    const timestamp = await this.timestamp(host, fetchImpl);
+    const headers = signOvhRequest({
+      creds,
+      method: 'GET',
+      url,
+      body: '',
+      timestamp,
+    });
+    const res = await fetchImpl(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(OVH_REQUEST_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const txt = await res.text();
+      throw new VoipApiError(
+        `ovh_get_failed path=${path} status=${res.status} body=${txt.slice(0, 200)}`,
+        res.status,
+        'ovh',
+      );
+    }
+    return (await res.json()) as T;
+  }
 }
 
 /** Mappe `wayType` OVH → direction normalisée. */
@@ -174,26 +224,33 @@ async function fetchLineCdr(
   billingAccount: string,
   serviceName: string,
   creds: OvhCreds,
-  timestamp: number,
+  signer: OvhSigner,
   since: Date,
   until: Date,
   fetchImpl: typeof fetch,
 ): Promise<NormalizedCall[]> {
   const base = `/telephony/${encodeURIComponent(billingAccount)}/service/${encodeURIComponent(serviceName)}/voiceConsumption`;
-  const ids = await ovhGet<number[]>(host, base, creds, timestamp, fetchImpl);
+  const ids = await signer.get<number[]>(host, base, creds, fetchImpl);
   if (!Array.isArray(ids)) {
     throw new VoipApiError('ovh_unexpected_consumption_list', 502, 'ovh');
   }
-  const capped = ids.slice(0, MAX_CONSUMPTIONS_PER_LINE);
+  // Cap APRÈS tri par récence : `consumptionId` OVH est monotone croissant
+  // (id plus grand = conso plus récente), donc trier décroissant puis capper
+  // garde les appels LES PLUS RÉCENTS. L'ancien `ids.slice(0, MAX)` tronquait
+  // dans l'ordre brut de l'API (non garanti chronologique) → on pouvait perdre
+  // les appels récents au profit des plus vieux. Le filtre date reste appliqué
+  // par-détail (le seul endroit où OVH expose `creationDatetime`).
+  const capped = [...ids]
+    .sort((a, b) => b - a)
+    .slice(0, MAX_CONSUMPTIONS_PER_LINE);
   const calls: NormalizedCall[] = [];
   for (const id of capped) {
     let detail: OvhVoiceConsumption;
     try {
-      detail = await ovhGet<OvhVoiceConsumption>(
+      detail = await signer.get<OvhVoiceConsumption>(
         host,
         `${base}/${id}`,
         creds,
-        timestamp,
         fetchImpl,
       );
     } catch (err) {
@@ -226,14 +283,16 @@ export async function fetchOvhCdr(
   const host = hostFor(creds);
   const until = opts.until ?? new Date();
 
-  const timestamp = await fetchOvhTime(host, fetchImpl);
+  // Signer auto-re-synchronisé : un seul /auth/time initial, re-fetché ensuite
+  // toutes les ~20s d'horloge écoulée (cf OvhSigner) pour éviter les 401
+  // QUERY_TIME_OUT sur un gros pull multi-lignes.
+  const signer = await OvhSigner.create(host, fetchImpl);
 
   // 1. billingAccounts du compte.
-  const billingAccounts = await ovhGet<string[]>(
+  const billingAccounts = await signer.get<string[]>(
     host,
     '/telephony',
     creds,
-    timestamp,
     fetchImpl,
   );
   if (!Array.isArray(billingAccounts)) {
@@ -244,11 +303,10 @@ export async function fetchOvhCdr(
   let lineCount = 0;
   for (const ba of billingAccounts) {
     // 2. serviceNames (lignes) du billingAccount.
-    const services = await ovhGet<string[]>(
+    const services = await signer.get<string[]>(
       host,
       `/telephony/${encodeURIComponent(ba)}/service`,
       creds,
-      timestamp,
       fetchImpl,
     );
     if (!Array.isArray(services)) continue;
@@ -260,7 +318,7 @@ export async function fetchOvhCdr(
         ba,
         sn,
         creds,
-        timestamp,
+        signer,
         opts.since,
         until,
         fetchImpl,

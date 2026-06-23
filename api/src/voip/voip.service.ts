@@ -7,7 +7,10 @@ import {
 } from '@nestjs/common';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { generateId } from '../common/crypto';
-import { toClickHouseDateTime } from '../common/utils/datetime.util';
+import {
+  parseClickHouseDateTime,
+  toClickHouseDateTime,
+} from '../common/utils/datetime.util';
 import { VoipCrypto } from './voip-crypto.service';
 import {
   ClearCreds,
@@ -197,10 +200,16 @@ export class VoipService {
 
   /**
    * Tous les credentials actifs, tous workspaces — utilisé par le sync cron.
-   * Renvoie les creds en clair (déchiffrés) prêts à pull. À NE PAS exposer.
+   * Renvoie les creds en clair (déchiffrés) prêts à pull + `lastSyncAt`
+   * (curseur incrémental pour borner la fenêtre de pull). À NE PAS exposer.
    */
   async findAllActiveCredentials(): Promise<
-    Array<{ workspaceId: string; kind: VoipCredentialKind; creds: ClearCreds }>
+    Array<{
+      workspaceId: string;
+      kind: VoipCredentialKind;
+      creds: ClearCreds;
+      lastSyncAt: Date | null;
+    }>
   > {
     const rows = await this.clickhouse.querySystem<CredRow>(
       `SELECT * FROM ${CREDS_TABLE} FINAL
@@ -210,6 +219,7 @@ export class VoipService {
       workspaceId: string;
       kind: VoipCredentialKind;
       creds: ClearCreds;
+      lastSyncAt: Date | null;
     }> = [];
     for (const row of rows) {
       const cred = this.parseCred(row);
@@ -224,6 +234,9 @@ export class VoipService {
           workspaceId: cred.workspace_id,
           kind: cred.kind,
           creds,
+          lastSyncAt: cred.last_sync_at
+            ? parseClickHouseDateTime(cred.last_sync_at)
+            : null,
         });
       } catch (err) {
         this.logger.error(

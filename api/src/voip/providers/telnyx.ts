@@ -26,6 +26,13 @@ import {
 const TELNYX_BASE = 'https://api.telnyx.com/v2';
 const PAGE_SIZE = 250;
 const MAX_PAGES = 40;
+/**
+ * Timeout par requête HTTP vers Telnyx. Le `fetch` global Node n'a PAS de
+ * timeout par défaut : sans cette borne, un provider qui laisse pendre la
+ * connexion gèlerait le sync À VIE (flag `running` jamais relâché → arrêt
+ * silencieux de TOUTE l'ingestion d'appels).
+ */
+const TELNYX_REQUEST_TIMEOUT_MS = 15000;
 
 /** Forme brute d'un detail record CDR Telnyx (champs consommés). */
 interface TelnyxCdr {
@@ -116,6 +123,7 @@ async function telnyxGet(
         Authorization: `Bearer ${apiKey}`,
         Accept: 'application/json',
       },
+      signal: AbortSignal.timeout(TELNYX_REQUEST_TIMEOUT_MS),
     });
     if (res.ok) {
       return (await res.json()) as TelnyxListResponse;

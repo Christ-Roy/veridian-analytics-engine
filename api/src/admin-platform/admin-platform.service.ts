@@ -166,7 +166,15 @@ export class AdminPlatformService {
     }
 
     // 4 + 5. Workspace + API key.
+    // Compensation ordering matters: ClickHouse has no transactions, so we
+    // track WHAT got created and unwind in reverse on any failure. The bug we
+    // fix here: if the workspace is created but the API key creation throws,
+    // the OLD code only rolled back the user — leaving an ORPHAN workspace in
+    // DB. The next provision with the same name would then see that ghost
+    // workspace and derive a `_2` slug (collision / dirty state). We now also
+    // delete the orphan workspace so a retry on the same name is clean.
     let apiKeyValue: string;
+    let workspaceCreated = false;
     try {
       await this.workspacesService.create(
         {
@@ -183,6 +191,7 @@ export class AdminPlatformService {
           isSuperAdmin: true, // platform-admin acts as super_admin for create
         },
       );
+      workspaceCreated = true;
 
       const keyResult = await this.apiKeysService.create(
         {
@@ -197,17 +206,24 @@ export class AdminPlatformService {
       );
       apiKeyValue = keyResult.key;
     } catch (err) {
-      // Compensation: soft-delete the user so the email is freed.
+      // Compensation (reverse order): delete the orphan workspace if it was
+      // created, THEN soft-delete the user so the email is freed. Deleting the
+      // workspace also cascades any partially-created API key + membership +
+      // workspace DB (WorkspacesService.delete), leaving NO ghost behind → a
+      // retry on the same name reuses the original slug instead of deriving _2.
       this.logger.error(
         `[provision] workspace/apikey creation failed for ${email} / ${workspaceId}: ${(err as Error).message}`,
       );
+      if (workspaceCreated) {
+        await this.deleteWorkspaceSilently(workspaceId);
+      }
       if (createdUserId) {
         await this.softDeleteUserSilently(createdUserId);
       }
       throw new InternalServerErrorException({
         error: 'provisioning_failed',
         message:
-          'Workspace or API key creation failed; user rolled back. Retry safe.',
+          'Workspace or API key creation failed; workspace + user rolled back. Retry safe.',
         cause: (err as Error).message,
       });
     }
@@ -1420,6 +1436,23 @@ export class AdminPlatformService {
       // Don't mask the original error; just log.
       this.logger.error(
         `[provision] compensation: soft-delete user ${userId} failed: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * Compensation: hard-delete a workspace created mid-provision when a later
+   * step (API key) failed. WorkspacesService.delete cascades memberships,
+   * invitations, API keys, backfill tasks AND drops the workspace database, so
+   * the slug is fully freed for a clean retry. Best-effort: a failure here is
+   * logged but never masks the original provisioning error.
+   */
+  private async deleteWorkspaceSilently(workspaceId: string): Promise<void> {
+    try {
+      await this.workspacesService.delete(workspaceId);
+    } catch (err) {
+      this.logger.error(
+        `[provision] compensation: delete orphan workspace ${workspaceId} failed: ${(err as Error).message}`,
       );
     }
   }

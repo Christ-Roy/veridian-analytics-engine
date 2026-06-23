@@ -52,6 +52,14 @@ export function buildPhoneCallEvent(
     provider,
     external_id: call.externalId,
     source,
+    // Visibilité de l'attribution : un numéro non mappé à une source (vision
+    // "1 numéro = 1 source") retombe sur `direct` POUR L'AFFICHAGE, mais on
+    // marque explicitement que l'attribution n'a PAS eu lieu. Permet de
+    // filtrer/alerter sur les numéros à configurer côté Settings → VoIP sans
+    // casser l'affichage natif (Live/Explore/Goals). Sinon ces appels
+    // polluent `direct` en silence (le client ne sait pas qu'il lui manque un
+    // numéro). Cf ticket 2026-06-23-voip-attribution-borgne.
+    source_attributed: match ? 'true' : 'false',
   };
   if (match) {
     properties.tracked_number_id = match.id;

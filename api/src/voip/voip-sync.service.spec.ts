@@ -68,6 +68,7 @@ describe('VoipSyncService', () => {
         workspaceId: 'ws_1',
         kind: 'voip_telnyx',
         creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt: null,
       },
     ]);
     mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([sampleCall]);
@@ -94,6 +95,7 @@ describe('VoipSyncService', () => {
           consumerKey: 'c',
           endpoint: 'ovh-eu',
         } as never,
+        lastSyncAt: null,
       },
     ]);
     voip.buildSourceLookup.mockResolvedValue(
@@ -105,16 +107,23 @@ describe('VoipSyncService', () => {
 
     expect(added[0].properties?.source).toBe('seo');
     expect(added[0].properties?.tracked_number_id).toBe('phn_x');
+    expect(added[0].properties?.source_attributed).toBe('true');
   });
 
   it('records an error without aborting other credentials', async () => {
     const { sync, voip } = makeHarness(true);
     voip.findAllActiveCredentials.mockResolvedValue([
-      { workspaceId: 'ws_bad', kind: 'voip_ovh', creds: {} as never },
+      {
+        workspaceId: 'ws_bad',
+        kind: 'voip_ovh',
+        creds: {} as never,
+        lastSyncAt: null,
+      },
       {
         workspaceId: 'ws_ok',
         kind: 'voip_telnyx',
         creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt: null,
       },
     ]);
     mockedOvh.fetchOvhCdr.mockRejectedValue(new Error('ovh boom'));
@@ -138,11 +147,104 @@ describe('VoipSyncService', () => {
         workspaceId: 'ws_1',
         kind: 'voip_telnyx',
         creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt: null,
       },
     ]);
     mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([]);
     const res = await sync.syncAll();
     expect(res.pushedEvents).toBe(0);
     expect(added).toHaveLength(0);
+  });
+
+  it('always releases the `running` flag even when a provider fetch throws', async () => {
+    const { sync, voip } = makeHarness(true);
+    voip.findAllActiveCredentials.mockResolvedValue([
+      {
+        workspaceId: 'ws_1',
+        kind: 'voip_ovh',
+        creds: {} as never,
+        lastSyncAt: null,
+      },
+    ]);
+    // Simulate a provider that explodes (timeout/abort surfaces as a throw too).
+    mockedOvh.fetchOvhCdr.mockRejectedValue(new Error('frozen fetch'));
+
+    // First run: provider fails, the per-cred catch records the error.
+    await sync.syncAll();
+    // Second run MUST proceed (flag was released) — if `running` had stuck at
+    // true, this call would early-return without touching the providers.
+    mockedOvh.fetchOvhCdr.mockClear();
+    mockedOvh.fetchOvhCdr.mockResolvedValue([sampleCall]);
+    const res = await sync.syncAll();
+
+    expect(mockedOvh.fetchOvhCdr).toHaveBeenCalledTimes(1);
+    expect(res.pushedEvents).toBe(1);
+  });
+
+  it('uses an incremental window from lastSyncAt (pulls less than the 7d floor)', async () => {
+    const { sync, voip } = makeHarness(true);
+    const lastSyncAt = new Date('2026-06-20T12:00:00.000Z');
+    voip.findAllActiveCredentials.mockResolvedValue([
+      {
+        workspaceId: 'ws_1',
+        kind: 'voip_telnyx',
+        creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt,
+      },
+    ]);
+    mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([]);
+
+    await sync.syncAll();
+
+    const opts = mockedTelnyx.fetchTelnyxCdr.mock.calls[0][1];
+    // since = lastSyncAt - overlap(2d) = 2026-06-18T12:00:00Z
+    expect(opts.since.toISOString()).toBe('2026-06-18T12:00:00.000Z');
+  });
+
+  it('falls back to the default 7d lookback when never synced', async () => {
+    const { sync, voip } = makeHarness(true);
+    voip.findAllActiveCredentials.mockResolvedValue([
+      {
+        workspaceId: 'ws_1',
+        kind: 'voip_telnyx',
+        creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt: null,
+      },
+    ]);
+    mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([]);
+
+    const before = Date.now();
+    await sync.syncAll();
+    const after = Date.now();
+
+    const opts = mockedTelnyx.fetchTelnyxCdr.mock.calls[0][1];
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    // since ≈ now - 7d (allow the test's own wall-clock jitter)
+    expect(opts.since.getTime()).toBeGreaterThanOrEqual(before - sevenDaysMs - 50);
+    expect(opts.since.getTime()).toBeLessThanOrEqual(after - sevenDaysMs + 50);
+  });
+
+  it('warns about unmapped called numbers (attribution visibility)', async () => {
+    const { sync, voip } = makeHarness(true);
+    const warn = jest
+      .spyOn((sync as unknown as { logger: { warn: () => void } }).logger, 'warn')
+      .mockImplementation(() => {});
+    voip.findAllActiveCredentials.mockResolvedValue([
+      {
+        workspaceId: 'ws_1',
+        kind: 'voip_telnyx',
+        creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+        lastSyncAt: null,
+      },
+    ]);
+    // No source lookup entry → the called number is unmapped.
+    voip.buildSourceLookup.mockResolvedValue(new Map());
+    mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([sampleCall]);
+
+    await sync.syncAll();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('non mappé');
+    expect(warn.mock.calls[0][0]).toContain('+33177123456');
   });
 });
