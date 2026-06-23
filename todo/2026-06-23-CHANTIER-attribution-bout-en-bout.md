@@ -118,3 +118,48 @@ livrés/résolus ; ne restaient que channel = S1 et ads-keyword = S5).
 ## Liens
 - Review attribution dure : `review/2026-06-22-attribution-gmb-rapprochement-timestamp.md` (GMB, R&D)
 - Mapping CRM configurable (industrie) : `2026-06-23-ui-configurable-par-workspace-branding-features-widgets.md` N4
+
+## Réalisé — S1/S2/S3 (agent engine, 2026-06-23)
+
+**S1 — channel/channel_group à l'ingestion ✅**
+- `api/src/events/derive-channel.ts` : util pure déterministe (GA4-like,
+  France-aware : google.fr, qwant, ecosia…), `channel` fin + `channel_group`
+  coarse aligné 1:1 sur `phone_source` (ads/seo/social/email/referral/direct/
+  other) pour la cohérence web↔appel.
+- Appelée dans `session-payload.handler.ts` (web) ET `phone-call-event.ts`
+  (un appel `phone_source='seo'` → `channel='organic_search'`/`group='seo'`).
+- Le pipeline propage déjà channel via `sessions_mv`/`goals_mv` (`any(e.channel)`)
+  → zéro autre changement, la dimension `channel`/`channel_group` (déjà câblée
+  dans BreakdownModal/Explore) se peuple toute seule.
+- Tests : table de cas exhaustive (`derive-channel.spec.ts`).
+
+**S2 — Funnel ✅**
+- `POST /api/analytics.funnel` (workspace) + `/api/admin/platform/analytics.funnel`
+  (M2M). `windowFunnel` ClickHouse sur la table **durable `goals`** (pas
+  `events`, TTL 7j). Étapes ordonnées (2..8), par étape : count + taux N→N+1 +
+  taux global, filtrable par `channel`/`channel_group`. Unité session|visitor.
+- UI : panel **Entonnoir de conversion** dans la page **Objectifs** native
+  (pas de sous-route custom Veridian, vision 2026-05-23), filtre par groupe de
+  canal, libellés FR.
+
+**S3 — Conversions par app × canal ✅**
+- `POST /api/analytics.conversionsByChannel` (workspace + M2M). Group by
+  `channel_group × properties['app']`, taux vs sessions du même canal.
+- UI : panel **Conversions par canal & app** dans Objectifs.
+
+**Backfill historique — NON shippé (décision documentée)**
+Un backfill SQL `ALTER … UPDATE channel = CASE…` DUPLIQUERAIT la logique de
+`derive-channel.ts` en SQL (listes de domaines + priorités = drift garanti),
+serait une mutation lourde sur des `ReplacingMergeTree`, et `events` a un TTL
+7j (impossible de remonter au-delà). Pour ~332 sessions historiques à faible
+valeur, le ratio risque/bénéfice ne le justifie pas. Précédent assumé : la
+migration v10 (`visitor_id`) laisse aussi l'historique vide. **Le fix qui
+compte = tout NOUVEau trafic est attribué dès l'ingestion.** Si un backfill
+devient nécessaire, le faire en rejouant `deriveChannel()` en TS sur un dump
+des sessions (source unique), pas en ré-implémentant la règle en SQL.
+
+**Hors scope de cet agent** : S4 (attribution→CRM, `twenty-event-mapper.ts`)
+et S5 (upload Google Ads) — confiés à un autre agent.
+
+**Validation** : api unit 1708/1708, analytics.e2e 102/102, admin-platform.e2e
+86/86, build prod tsc clean, console typecheck+eslint clean (dev-pub).
