@@ -71,6 +71,12 @@ export interface SessionAttributes {
   connection_type?: string;
   language?: string;
   timezone?: string;
+  /**
+   * Lightweight browser fingerprint (UA + language + screen + timezone + …).
+   * Combined SERVER-SIDE with the captured IP to distinguish several visitors
+   * behind a single company/NAT IP (B2B). Device-derived → lives in attributes.
+   */
+  fingerprint?: string;
 }
 
 /**
@@ -92,6 +98,12 @@ export interface SessionPayload {
   sdk_version: string;
   // User identification
   user_id?: string | null;
+  /**
+   * Stable, long-lived visitor identifier (B2B). Top-level alongside user_id
+   * because it's an identity, not a device attribute. The server stores it on
+   * every event row so `uniqExact(visitor_id)` = real unique-visitor count.
+   */
+  visitor_id?: string;
   // Custom dimensions (stm_1 through stm_10)
   dimensions?: Record<string, string>;
 }

@@ -30,18 +30,21 @@ export interface ExploreRow {
   [dimensionKey: string]: unknown
 
   // Metrics - current period
+  unique_visitors: number
   sessions: number
   median_duration: number
   bounce_rate: number
   median_scroll: number
 
   // Metrics - previous period (when comparison enabled)
+  unique_visitors_prev?: number
   sessions_prev?: number
   median_duration_prev?: number
   bounce_rate_prev?: number
   median_scroll_prev?: number
 
   // Change percentages
+  unique_visitors_change?: number
   sessions_change?: number
   median_duration_change?: number
   bounce_rate_change?: number
@@ -79,16 +82,19 @@ export interface HeatMapRange {
  * Used for calculating percentages and displaying summary stats
  */
 export interface ExploreTotals {
+  unique_visitors: number
   sessions: number
   median_duration: number
   bounce_rate: number
   median_scroll: number
   // Previous period values (when comparison enabled)
+  unique_visitors_prev?: number
   sessions_prev?: number
   median_duration_prev?: number
   bounce_rate_prev?: number
   median_scroll_prev?: number
   // Change percentages
+  unique_visitors_change?: number
   sessions_change?: number
   median_duration_change?: number
   bounce_rate_change?: number

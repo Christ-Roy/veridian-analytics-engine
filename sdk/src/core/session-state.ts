@@ -190,7 +190,11 @@ export class SessionState {
 
   buildPayload(
     attributes: SessionAttributes,
-    options?: { userId?: string | null; dimensions?: Record<string, string> }
+    options?: {
+      userId?: string | null;
+      visitorId?: string;
+      dimensions?: Record<string, string>;
+    }
   ): SessionPayload {
     // Update current page's duration and exited_at before building payload
     if (this.currentPageIndex !== null) {
@@ -216,6 +220,11 @@ export class SessionState {
     // Add user_id if provided in options
     if (options && 'userId' in options) {
       payload.user_id = options.userId;
+    }
+
+    // Add visitor_id if provided in options (stable B2B visitor identity)
+    if (options && 'visitorId' in options && options.visitorId) {
+      payload.visitor_id = options.visitorId;
     }
 
     // Add dimensions if provided in options

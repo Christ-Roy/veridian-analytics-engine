@@ -184,6 +184,7 @@ describe('SessionManager', () => {
         sequence: 3,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);
@@ -212,6 +213,7 @@ describe('SessionManager', () => {
         sequence: 3,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);
@@ -241,6 +243,7 @@ describe('SessionManager', () => {
         sequence: 0,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);
@@ -270,6 +273,7 @@ describe('SessionManager', () => {
         sequence: 5,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);
@@ -444,6 +448,82 @@ describe('SessionManager', () => {
     });
   });
 
+  describe('visitor ID (stable, survives session expiry)', () => {
+    it('auto-generates and persists a visitor_id on first session', () => {
+      const session = sessionManager.getOrCreateSession();
+      expect(session.visitorId).toMatch(/^mock-uuid-v7-/);
+      // Persisted under the dedicated long-lived key.
+      expect(mockLocalStorage.setItem).toHaveBeenCalledWith(
+        'stm_visitor_id',
+        expect.any(String),
+      );
+    });
+
+    it('reuses the SAME visitor_id when a NEW session is created after expiry', () => {
+      // First session mints a visitor_id and persists it.
+      const first = sessionManager.getOrCreateSession();
+      const visitorId = first.visitorId;
+      expect(visitorId).toBeTruthy();
+
+      // Expire the session (visitor_id key remains in storage).
+      mockLocalStorage._store['stm_session'] = JSON.stringify({
+        ...first,
+        last_active_at: Date.now() - 35 * 60 * 1000, // 35 min ago → expired
+      });
+      storage = new Storage();
+      sessionManager = new SessionManager(storage, tabStorage, config);
+
+      const second = sessionManager.getOrCreateSession();
+      // Brand-new SESSION id but the SAME stable visitor_id (B2B requirement).
+      expect(second.id).not.toBe(first.id);
+      expect(second.visitorId).toBe(visitorId);
+    });
+
+    it('backfills visitor_id when resuming a session persisted without one', () => {
+      // Pre-visitor_id session in storage (no visitorId field), still valid.
+      const legacy = {
+        id: 'legacy-session',
+        workspace_id: 'ws_123',
+        created_at: Date.now() - 60 * 1000,
+        updated_at: Date.now() - 30 * 1000,
+        last_active_at: Date.now() - 30 * 1000,
+        focus_duration_ms: 0,
+        total_duration_ms: 0,
+        referrer: null,
+        landing_page: 'https://example.com',
+        utm: null,
+        max_scroll_percent: 0,
+        interaction_count: 0,
+        sdk_version: '5.0.0',
+        sequence: 0,
+        dimensions: {},
+        userId: null,
+        // visitorId intentionally absent
+      };
+      mockLocalStorage._store['stm_session'] = JSON.stringify(legacy);
+      storage = new Storage();
+      sessionManager = new SessionManager(storage, tabStorage, config);
+
+      const resumed = sessionManager.getOrCreateSession();
+      expect(resumed.id).toBe('legacy-session'); // resumed, not recreated
+      expect(resumed.visitorId).toMatch(/^mock-uuid-v7-/); // backfilled
+    });
+
+    it('getVisitorId() returns the current session visitor_id', () => {
+      const session = sessionManager.getOrCreateSession();
+      expect(sessionManager.getVisitorId()).toBe(session.visitorId);
+    });
+
+    it('reset() mints a BRAND-NEW visitor_id (new identity)', () => {
+      const first = sessionManager.getOrCreateSession();
+      const firstVisitor = first.visitorId;
+
+      const after = sessionManager.reset();
+      expect(mockLocalStorage.removeItem).toHaveBeenCalledWith('stm_visitor_id');
+      expect(after.visitorId).not.toBe(firstVisitor);
+    });
+  });
+
   describe('reset', () => {
     it('removes session from storage', () => {
       sessionManager.getOrCreateSession();
@@ -576,6 +656,7 @@ describe('SessionManager', () => {
         sequence: 3,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);
@@ -614,6 +695,7 @@ describe('SessionManager', () => {
         sequence: 3,
         dimensions: {},
         userId: null,
+        visitorId: 'existing-visitor-id',
       };
 
       mockLocalStorage._store['stm_session'] = JSON.stringify(existingSession);

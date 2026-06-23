@@ -132,6 +132,11 @@ export function buildPhoneCallEvent(
     exited_at: chDate,
     goal_timestamp: chDate,
     user_id: null,
+    // B2B identification: a phone call has no web visitor_id/fingerprint, and
+    // the IP is not a web client IP — leave empty (schema columns default '').
+    visitor_id: '',
+    fingerprint: '',
+    ip: '',
     properties,
   };
 }

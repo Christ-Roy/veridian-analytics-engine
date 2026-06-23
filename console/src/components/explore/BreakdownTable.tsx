@@ -47,7 +47,14 @@ export function BreakdownTableView({
       },
     },
     {
-      title: 'Visites uniques',
+      title: 'Visiteurs',
+      dataIndex: 'unique_visitors',
+      width: 90,
+      align: 'right' as const,
+      render: (v: number) => formatNumber(v),
+    },
+    {
+      title: 'Visites',
       dataIndex: 'sessions',
       width: 80,
       align: 'right' as const,

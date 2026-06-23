@@ -287,6 +287,7 @@ describe('STORAGE_KEYS', () => {
       TAB_ID: 'tab_id',
       DIMENSIONS: 'dimensions',
       USER_ID: 'user_id',
+      VISITOR_ID: 'visitor_id',
     });
   });
 });

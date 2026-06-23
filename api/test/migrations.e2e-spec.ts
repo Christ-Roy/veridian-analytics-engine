@@ -32,6 +32,7 @@ jest.mock('../src/migrations/migrations.registry', () => ({
 // Import after mocks are set up
 import { MigrationsRunner } from '../src/migrations/migrations.service';
 import { V8VoipMigration } from '../src/migrations/v8-voip-migration';
+import { V10VisitorIdMigration } from '../src/migrations/v10-visitor-id-migration';
 
 describe('Migrations E2E', () => {
   let systemClient: ClickHouseClient;
@@ -318,6 +319,212 @@ describe('Migrations E2E', () => {
       // No-op workspace migration must resolve without error.
       await expect(
         V8VoipMigration.migrateWorkspace(systemClient, TEST_SYSTEM_DATABASE),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('V10 Visitor ID Migration', () => {
+    // The real V10 migration is additive (workspace-level): it adds
+    // visitor_id / fingerprint / ip to events, sessions, pages, goals and
+    // recreates the 3 MVs so the columns flow events → sessions/pages/goals.
+    // We build a workspace DB WITHOUT the new columns (simulating a v9 install),
+    // run the actual migrateWorkspace, and assert the columns now exist on every
+    // table AND that the recreated sessions_mv propagates visitor_id end-to-end.
+    const V10_DB = `${TEST_SYSTEM_DATABASE}_ws_v10`;
+
+    afterAll(async () => {
+      await systemClient.command({
+        query: `DROP DATABASE IF EXISTS ${V10_DB}`,
+      });
+    });
+
+    /** Build events + sessions (+ sessions_mv) WITHOUT visitor_id/fingerprint/ip. */
+    async function buildPreV10Schema(): Promise<void> {
+      await systemClient.command({
+        query: `DROP DATABASE IF EXISTS ${V10_DB}`,
+      });
+      await systemClient.command({
+        query: `CREATE DATABASE ${V10_DB}`,
+      });
+      // Minimal events table: the columns sessions_mv reads, MINUS the 3 new ones.
+      await systemClient.command({
+        query: `
+          CREATE TABLE ${V10_DB}.events (
+            id UUID DEFAULT generateUUIDv4(),
+            session_id String,
+            workspace_id String,
+            received_at DateTime64(3),
+            created_at DateTime64(3),
+            updated_at DateTime64(3),
+            name LowCardinality(String),
+            path String,
+            duration UInt64 DEFAULT 0,
+            page_duration UInt32 DEFAULT 0,
+            max_scroll UInt8 DEFAULT 0,
+            page_number UInt16 DEFAULT 0,
+            _version UInt64 DEFAULT 0,
+            goal_value Float32 DEFAULT 0,
+            user_id Nullable(String),
+            dedup_token String DEFAULT ''
+          ) ENGINE = ReplacingMergeTree(_version)
+          ORDER BY (session_id, dedup_token)
+        `,
+      });
+      await systemClient.command({
+        query: `
+          CREATE TABLE ${V10_DB}.sessions (
+            id String,
+            workspace_id String,
+            created_at DateTime64(3),
+            updated_at DateTime64(3),
+            user_id Nullable(String),
+            visitor_id String DEFAULT '',
+            fingerprint String DEFAULT '',
+            ip String DEFAULT ''
+          ) ENGINE = ReplacingMergeTree(updated_at)
+          ORDER BY (created_at, id)
+        `,
+      });
+      // pages + goals minimal targets so migrateWorkspace's ALTER+MV recreation
+      // has tables to operate on.
+      await systemClient.command({
+        query: `
+          CREATE TABLE ${V10_DB}.pages (
+            id UUID DEFAULT generateUUIDv4(),
+            session_id String,
+            workspace_id String,
+            path String,
+            entered_at DateTime64(3) DEFAULT now64(3),
+            exited_at DateTime64(3) DEFAULT now64(3),
+            page_number UInt16 DEFAULT 1,
+            user_id Nullable(String),
+            visitor_id String DEFAULT '',
+            fingerprint String DEFAULT '',
+            ip String DEFAULT '',
+            received_at DateTime64(3) DEFAULT now64(3),
+            _version UInt64 DEFAULT 0
+          ) ENGINE = ReplacingMergeTree(_version)
+          ORDER BY (session_id, page_number)
+        `,
+      });
+      await systemClient.command({
+        query: `
+          CREATE TABLE ${V10_DB}.goals (
+            id UUID DEFAULT generateUUIDv4(),
+            session_id String,
+            workspace_id String,
+            goal_name String,
+            goal_timestamp DateTime64(3),
+            user_id Nullable(String),
+            visitor_id String DEFAULT '',
+            fingerprint String DEFAULT '',
+            ip String DEFAULT '',
+            _version UInt64 DEFAULT 0
+          ) ENGINE = ReplacingMergeTree(_version)
+          ORDER BY (goal_timestamp, session_id, goal_name)
+        `,
+      });
+      await waitForClickHouse();
+    }
+
+    it('declares itself a workspace-level migration to version 10', () => {
+      expect(V10VisitorIdMigration.majorVersion).toBe(10);
+      expect(V10VisitorIdMigration.hasWorkspaceMigration()).toBe(true);
+      expect(V10VisitorIdMigration.hasSystemMigration()).toBe(false);
+    });
+
+    it('adds visitor_id/fingerprint/ip to events and recreates sessions_mv', async () => {
+      await buildPreV10Schema();
+
+      // Pre-condition: events table lacks the 3 columns.
+      const before = await systemClient.query({
+        query: `SELECT name FROM system.columns
+                WHERE database = {db:String} AND table = 'events'
+                  AND name IN ('visitor_id','fingerprint','ip')`,
+        query_params: { db: V10_DB },
+        format: 'JSONEachRow',
+      });
+      expect((await before.json<{ name: string }>()).length).toBe(0);
+
+      // Run the real workspace migration.
+      await V10VisitorIdMigration.migrateWorkspace(systemClient, V10_DB);
+      await waitForClickHouse();
+
+      // events now carries the 3 B2B columns.
+      const cols = await systemClient.query({
+        query: `SELECT name FROM system.columns
+                WHERE database = {db:String} AND table = 'events'`,
+        query_params: { db: V10_DB },
+        format: 'JSONEachRow',
+      });
+      const colNames = (await cols.json<{ name: string }>()).map((r) => r.name);
+      expect(colNames).toEqual(
+        expect.arrayContaining(['visitor_id', 'fingerprint', 'ip']),
+      );
+
+      // sessions_mv exists again (recreated) and selects visitor_id.
+      const mv = await systemClient.query({
+        query: `SELECT count() AS c FROM system.tables
+                WHERE database = {db:String} AND name = 'sessions_mv'`,
+        query_params: { db: V10_DB },
+        format: 'JSONEachRow',
+      });
+      expect(Number((await mv.json<{ c: number }>())[0]?.c ?? 0)).toBe(1);
+    });
+
+    it('propagates visitor_id from events to sessions via the recreated MV', async () => {
+      await buildPreV10Schema();
+      await V10VisitorIdMigration.migrateWorkspace(systemClient, V10_DB);
+      await waitForClickHouse();
+
+      // Insert a screen_view carrying a visitor_id — the MV must fan it out.
+      const now = toClickHouseDateTime();
+      await systemClient.insert({
+        table: `${V10_DB}.events`,
+        values: [
+          {
+            session_id: 'sess_v10',
+            workspace_id: 'ws_v10',
+            received_at: now,
+            created_at: now,
+            updated_at: now,
+            name: 'screen_view',
+            path: '/',
+            page_number: 1,
+            dedup_token: 'sess_v10_pv_1',
+            visitor_id: 'visitor_v10_abc',
+            fingerprint: 'fp_v10',
+            ip: '203.0.113.7',
+          },
+        ],
+        format: 'JSONEachRow',
+      });
+      await waitForData(
+        systemClient,
+        `${V10_DB}.sessions`,
+        "id = 'sess_v10'",
+        {},
+        { timeoutMs: 3000, intervalMs: 50 },
+      );
+
+      const res = await systemClient.query({
+        query: `SELECT visitor_id, fingerprint, ip
+                FROM ${V10_DB}.sessions FINAL WHERE id = 'sess_v10'`,
+        format: 'JSONEachRow',
+      });
+      const row = (
+        await res.json<{ visitor_id: string; fingerprint: string; ip: string }>()
+      )[0];
+      expect(row?.visitor_id).toBe('visitor_v10_abc');
+      expect(row?.fingerprint).toBe('fp_v10');
+      expect(row?.ip).toBe('203.0.113.7');
+    });
+
+    it('is idempotent (running twice does not throw)', async () => {
+      await buildPreV10Schema();
+      await V10VisitorIdMigration.migrateWorkspace(systemClient, V10_DB);
+      await expect(
+        V10VisitorIdMigration.migrateWorkspace(systemClient, V10_DB),
       ).resolves.toBeUndefined();
     });
   });

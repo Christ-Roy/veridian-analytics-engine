@@ -231,14 +231,14 @@ export function DashboardGrid({
       label: 'Pages d\'entrée',
       dimensionLabel: 'Page',
       dimension: 'landing_path',
-      metrics: ['sessions', 'median_duration', 'bounce_rate']
+      metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate']
     },
     {
       key: 'exits',
       label: 'Sorties',
       dimensionLabel: 'Page de sortie',
       dimension: 'exit_path',
-      metrics: ['sessions', 'median_duration']
+      metrics: ['unique_visitors', 'sessions', 'median_duration']
     }
   ]
 

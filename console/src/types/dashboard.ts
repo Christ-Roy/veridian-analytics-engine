@@ -101,7 +101,12 @@ export interface WorkspaceSearch {
   minSessions?: string // Stored as string in URL, parsed to number
 }
 
-export type MetricKey = 'sessions' | 'median_duration' | 'bounce_rate' | 'median_scroll'
+export type MetricKey =
+  | 'unique_visitors'
+  | 'sessions'
+  | 'median_duration'
+  | 'bounce_rate'
+  | 'median_scroll'
 
 export interface MetricConfig {
   key: MetricKey
@@ -143,11 +148,24 @@ export interface KpiTotals {
 
 export const METRICS: MetricConfig[] = [
   {
-    key: 'sessions',
-    label: 'Visites uniques',
+    // VRAIS visiteurs uniques (uniqExact(visitor_id)) — feature #1. Un visiteur
+    // qui revient compte UNE fois, contrairement à `sessions`.
+    key: 'unique_visitors',
+    label: 'Visiteurs uniques',
     format: 'number',
     color: '#7763f1',
     previousColor: '#9ca3af',
+    tooltip:
+      'Personnes distinctes (visitor_id stable). Un visiteur qui revient compte une seule fois.',
+  },
+  {
+    // Visites = sessions (count). Anciennement (à tort) labellisé "Visites uniques".
+    key: 'sessions',
+    label: 'Visites',
+    format: 'number',
+    color: '#06b6d4',
+    previousColor: '#9ca3af',
+    tooltip: 'Nombre de visites (sessions). Un même visiteur peut générer plusieurs visites.',
   },
   {
     key: 'median_duration',

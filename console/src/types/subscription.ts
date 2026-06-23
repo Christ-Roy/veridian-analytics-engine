@@ -115,7 +115,8 @@ export const SUBSCRIPTION_WIDGETS = [
 ] as const
 
 export const AVAILABLE_METRICS = [
-  { key: 'sessions', label: 'Visites uniques' },
+  { key: 'unique_visitors', label: 'Visiteurs uniques' },
+  { key: 'sessions', label: 'Visites' },
   { key: 'median_duration', label: 'Median TimeScore' },
   { key: 'bounce_rate', label: 'Bounce Rate' },
   { key: 'median_scroll', label: 'Median Scroll Depth' },

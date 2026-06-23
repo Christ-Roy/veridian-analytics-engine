@@ -99,6 +99,13 @@ export interface Session {
   sequence: number;
   dimensions: CustomDimensions;
   userId: string | null;
+  /**
+   * Stable, long-lived visitor identifier (B2B). Auto-generated (UUIDv7) on the
+   * very first load and persisted under STORAGE_KEYS.VISITOR_ID, which survives
+   * session expiry — so a visitor that returns 3× shares ONE visitor_id across 3
+   * sessions. Never null once a session exists.
+   */
+  visitorId: string;
 }
 
 export interface UTMParams {

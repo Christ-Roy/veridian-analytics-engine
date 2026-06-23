@@ -42,6 +42,22 @@ describe('buildAnalyticsQuery', () => {
     );
   });
 
+  it('builds unique_visitors as uniqExact(visitor_id) on the sessions table', () => {
+    const { sql } = buildAnalyticsQuery(
+      {
+        ...baseQuery,
+        metrics: ['unique_visitors', 'sessions'],
+      },
+      undefined,
+      defaultContext,
+    );
+    // The real B2B unique-visitor count: distinct stable visitor_id.
+    expect(sql).toContain('uniqExact(visitor_id) as unique_visitors');
+    // sessions remains a plain count (= "Visites"), distinct from visitors.
+    expect(sql).toContain('count() as sessions');
+    expect(sql).toContain('FROM sessions FINAL');
+  });
+
   it('adds dimensions to SELECT and GROUP BY', () => {
     const { sql } = buildAnalyticsQuery({
       ...baseQuery,

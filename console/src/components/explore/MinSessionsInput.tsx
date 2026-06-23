@@ -44,10 +44,10 @@ export function MinSessionsInput({ value, onChange }: MinSessionsInputProps) {
   )
 
   return (
-    <Tooltip title="Définir le seuil minimum de visites uniques">
+    <Tooltip title="Définir le seuil minimum de visites">
       <Popover
         content={popoverContent}
-        title="Visites uniques minimum"
+        title="Visites minimum"
         trigger="click"
         open={isPopoverVisible}
         onOpenChange={handleOpenChange}
@@ -59,7 +59,7 @@ export function MinSessionsInput({ value, onChange }: MinSessionsInputProps) {
             <Tag color="purple" style={{ marginRight: 0 }}>
               {value}
             </Tag>
-            visites uniques
+            visites
           </Space>
         </Button>
       </Popover>

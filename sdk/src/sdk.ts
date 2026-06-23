@@ -25,6 +25,7 @@ import { isBot } from './detection/bot';
 import { DEFAULT_AD_CLICK_IDS } from './utils/utm';
 import { CrossDomainLinker } from './core/cross-domain';
 import { parseStmDimensions } from './utils/stm-dimensions';
+import { computeFingerprint } from './utils/fingerprint';
 
 // Heartbeat constants
 const MIN_HEARTBEAT_INTERVAL = 5000; // 5 seconds minimum
@@ -71,6 +72,12 @@ export class StaminadsSDK {
   private navigationTracker: NavigationTracker | null = null;
   private crossDomainLinker: CrossDomainLinker | null = null;
   private deviceInfo: DeviceInfo | null = null;
+  /**
+   * Browser fingerprint, computed once at init (stable for the device+browser).
+   * Sent in every payload's attributes; combined SERVER-SIDE with the captured
+   * IP to separate visitors behind a shared company IP (B2B).
+   */
+  private fingerprint = '';
   private heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
   private sendDebounceTimeout: ReturnType<typeof setTimeout> | null = null;
   private heartbeatState: HeartbeatState = {
@@ -151,6 +158,9 @@ export class StaminadsSDK {
 
     // Set mobile device flag for heartbeat intervals
     this.isMobileDevice = this.deviceInfo?.device !== 'desktop';
+
+    // Compute the browser fingerprint once (stable across the session/visitor).
+    this.fingerprint = computeFingerprint();
 
     // Read cross-domain param BEFORE session creation
     const crossDomainPayload = CrossDomainLinker.readParam(this.config.crossDomainExpiry);
@@ -377,6 +387,7 @@ export class StaminadsSDK {
     const attributes = this.buildAttributes();
     const payload = this.sessionState.buildPayload(attributes, {
       userId: this.sessionManager?.getUserId() ?? null,
+      visitorId: this.sessionManager?.getVisitorId() ?? '',
       dimensions: this.sessionManager?.getDimensionsPayload() ?? {},
     });
     this.sender.sendSessionBeacon(payload);
@@ -752,6 +763,7 @@ export class StaminadsSDK {
     const attributes = this.buildAttributes();
     const payload = this.sessionState.buildPayload(attributes, {
       userId: this.sessionManager?.getUserId() ?? null,
+      visitorId: this.sessionManager?.getVisitorId() ?? '',
       dimensions: this.sessionManager?.getDimensionsPayload() ?? {},
     });
 
@@ -792,6 +804,7 @@ export class StaminadsSDK {
       connection_type: device?.connection_type,
       language: device?.language,
       timezone: device?.timezone,
+      fingerprint: this.fingerprint || undefined,
     };
   }
 

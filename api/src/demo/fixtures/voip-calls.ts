@@ -290,6 +290,11 @@ export function generateVoipCalls(config: VoipCallsConfig): TrackingEvent[] {
       exited_at: chDate,
       goal_timestamp: chDate,
       user_id: null,
+      // B2B identification : un appel téléphonique n'a pas de visitor_id/
+      // fingerprint/ip web (colonnes par défaut '').
+      visitor_id: '',
+      fingerprint: '',
+      ip: '',
       // Properties : dimension `source` + métadonnées appel (cf sync.ts)
       properties: {
         direction: 'inbound',

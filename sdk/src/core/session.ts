@@ -68,6 +68,12 @@ export class SessionManager {
       stored.last_active_at = Date.now();
       stored.updated_at = Date.now();
       stored.sequence++;
+      // Backfill visitorId for sessions persisted by a pre-visitor_id SDK so the
+      // payload always carries a stable visitor id. Reads the long-lived
+      // VISITOR_ID storage key (or mints+persists one if truly absent).
+      if (!stored.visitorId) {
+        stored.visitorId = this.loadOrCreateVisitorId();
+      }
       this.session = stored;
       this.saveSession();
 
@@ -138,6 +144,7 @@ export class SessionManager {
       sequence: 0,
       dimensions: this.loadDimensions(),
       userId: this.loadUserId(),
+      visitorId: this.loadOrCreateVisitorId(),
     };
 
     this.session = session;
@@ -174,6 +181,7 @@ export class SessionManager {
       sequence: 0,
       dimensions: this.loadDimensions(),
       userId: this.loadUserId(),
+      visitorId: this.loadOrCreateVisitorId(),
     };
 
     this.session = session;
@@ -393,6 +401,35 @@ export class SessionManager {
     }
   }
 
+  // Visitor ID (stable, long-lived — survives session expiry)
+
+  /**
+   * Load the stable visitor id from storage, or mint + persist a new one
+   * (UUIDv7) on first ever load. Stored under STORAGE_KEYS.VISITOR_ID which is
+   * NEVER removed on session expiry — only on a full reset() — so a returning
+   * visitor keeps the same visitor_id across all their sessions.
+   */
+  private loadOrCreateVisitorId(): string {
+    const existing = this.storage.get<string>(STORAGE_KEYS.VISITOR_ID);
+    if (existing) {
+      return existing;
+    }
+    const visitorId = generateUUIDv7();
+    this.storage.set(STORAGE_KEYS.VISITOR_ID, visitorId);
+
+    if (this.debug) {
+      console.log('[Staminads] Minted new visitor ID:', visitorId);
+    }
+    return visitorId;
+  }
+
+  /**
+   * Get the current stable visitor id (empty string if no session yet).
+   */
+  getVisitorId(): string {
+    return this.session?.visitorId || '';
+  }
+
   /**
    * Apply dimensions from URL parameters
    * Only sets dimensions that don't already have values (existing wins)
@@ -426,6 +463,9 @@ export class SessionManager {
     this.storage.remove(STORAGE_KEYS.SESSION);
     this.storage.remove(STORAGE_KEYS.DIMENSIONS);
     this.storage.remove(STORAGE_KEYS.USER_ID);
+    // Full reset = brand-new visitor identity (next createSession mints a fresh
+    // visitor_id via loadOrCreateVisitorId).
+    this.storage.remove(STORAGE_KEYS.VISITOR_ID);
     this.session = null;
     return this.createSession();
   }

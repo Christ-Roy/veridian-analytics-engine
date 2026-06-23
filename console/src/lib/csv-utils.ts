@@ -25,8 +25,10 @@ export function generateCSVHeaders(
 ): string[] {
   const headers = [
     ...dimensions.map(d => getDimensionLabel(d, customDimensionLabels)),
-    'Visites uniques',
-    'Visites uniques (%)',
+    'Visiteurs uniques',
+    'Visiteurs uniques (%)',
+    'Visites',
+    'Visites (%)',
     'TimeScore',
     'TimeScore (seconds)',
     'Bounce Rate (%)',
@@ -35,8 +37,10 @@ export function generateCSVHeaders(
 
   if (showComparison) {
     headers.push(
-      'Visites uniques (Previous)',
-      'Visites uniques (Change %)',
+      'Visiteurs uniques (Previous)',
+      'Visiteurs uniques (Change %)',
+      'Visites (Previous)',
+      'Visites (Change %)',
       'TimeScore (Previous)',
       'TimeScore (Change %)',
       'Bounce Rate (Previous)',
@@ -56,13 +60,18 @@ export function rowToCSVValues(
   row: Record<string, unknown>,
   dimensions: string[],
   totalSessions: number,
+  totalVisitors: number,
   showComparison: boolean
 ): string[] {
+  const uniqueVisitors = Number(row.unique_visitors) || 0
   const sessions = Number(row.sessions) || 0
   const medianDuration = Number(row.median_duration) || 0
   const bounceRate = Number(row.bounce_rate) || 0
   const medianScroll = Number(row.median_scroll) || 0
 
+  const visitorPercent = totalVisitors > 0
+    ? ((uniqueVisitors / totalVisitors) * 100).toFixed(2)
+    : '0'
   const sessionPercent = totalSessions > 0
     ? ((sessions / totalSessions) * 100).toFixed(2)
     : '0'
@@ -72,6 +81,8 @@ export function rowToCSVValues(
       const val = row[d]
       return val === null || val === undefined || val === '' ? EMPTY_VALUE_LABEL : String(val)
     }),
+    String(uniqueVisitors),
+    visitorPercent,
     String(sessions),
     sessionPercent,
     formatDuration(medianDuration),
@@ -81,12 +92,15 @@ export function rowToCSVValues(
   ]
 
   if (showComparison) {
+    const visitorsPrev = row.unique_visitors_prev !== undefined ? Number(row.unique_visitors_prev) : null
     const sessionsPrev = row.sessions_prev !== undefined ? Number(row.sessions_prev) : null
     const durationPrev = row.median_duration_prev !== undefined ? Number(row.median_duration_prev) : null
     const bouncePrev = row.bounce_rate_prev !== undefined ? Number(row.bounce_rate_prev) : null
     const scrollPrev = row.median_scroll_prev !== undefined ? Number(row.median_scroll_prev) : null
 
     values.push(
+      visitorsPrev !== null ? String(visitorsPrev) : '',
+      row.unique_visitors_change !== undefined ? Number(row.unique_visitors_change).toFixed(2) : '',
       sessionsPrev !== null ? String(sessionsPrev) : '',
       row.sessions_change !== undefined ? Number(row.sessions_change).toFixed(2) : '',
       durationPrev !== null ? formatDuration(durationPrev) : '',
@@ -108,6 +122,7 @@ export function generateCSV(
   rows: Record<string, unknown>[],
   dimensions: string[],
   totalSessions: number,
+  totalVisitors: number,
   showComparison: boolean,
   customDimensionLabels?: CustomDimensionLabels | null
 ): string {
@@ -116,7 +131,7 @@ export function generateCSV(
   const csvLines = [
     headers.map(escapeCSVValue).join(','),
     ...rows.map(row =>
-      rowToCSVValues(row, dimensions, totalSessions, showComparison)
+      rowToCSVValues(row, dimensions, totalSessions, totalVisitors, showComparison)
         .map(escapeCSVValue)
         .join(',')
     )

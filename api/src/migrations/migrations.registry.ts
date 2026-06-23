@@ -5,6 +5,7 @@ import { V6UserIdMigration } from './v6-user-id-migration';
 import { V7WebhooksMigration } from './v7-webhooks-migration';
 import { V8VoipMigration } from './v8-voip-migration';
 import { V9GscMigration } from './v9-gsc-migration';
+import { V10VisitorIdMigration } from './v10-visitor-id-migration';
 
 /**
  * Registry of all major migrations.
@@ -17,4 +18,5 @@ export const MIGRATIONS: MajorMigration[] = [
   V7WebhooksMigration,
   V8VoipMigration,
   V9GscMigration,
+  V10VisitorIdMigration,
 ];

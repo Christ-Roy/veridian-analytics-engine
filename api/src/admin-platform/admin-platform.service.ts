@@ -421,24 +421,34 @@ export class AdminPlatformService {
   }
 
   /**
-   * Tracking liveness via two analytics session counts (30d window + 30min
-   * live). We use the `sessions` metric (`count()`) on the `sessions` table —
-   * the most robust signal, immune to the pageviews `countIf(name=…)` quirk.
+   * Tracking liveness via analytics counts (30d window + 30min live). We use
+   * the `sessions` metric (`count()`) AND the `unique_visitors` metric
+   * (`uniqExact(visitor_id)`) on the `sessions` table — robust signals, immune
+   * to the pageviews `countIf(name=…)` quirk. `visitors_30d` ≤ `sessions_30d`
+   * (a returning visitor counts once).
    */
   private async probeTracking(workspaceId: string): Promise<{
     active: boolean;
     sessions_30d: number;
+    visitors_30d: number;
     live: boolean;
   }> {
-    const safe = { active: false, sessions_30d: 0, live: false };
+    const safe = {
+      active: false,
+      sessions_30d: 0,
+      visitors_30d: 0,
+      live: false,
+    };
     try {
-      const [last30d, last30min] = await Promise.all([
-        this.countSessions(workspaceId, 'previous_30_days'),
-        this.countSessions(workspaceId, 'previous_30_minutes'),
+      const [sessions30d, visitors30d, last30min] = await Promise.all([
+        this.countMetric(workspaceId, 'sessions', 'previous_30_days'),
+        this.countMetric(workspaceId, 'unique_visitors', 'previous_30_days'),
+        this.countMetric(workspaceId, 'sessions', 'previous_30_minutes'),
       ]);
       return {
-        active: last30d > 0,
-        sessions_30d: last30d,
+        active: sessions30d > 0,
+        sessions_30d: sessions30d,
+        visitors_30d: visitors30d,
         live: last30min > 0,
       };
     } catch (err) {
@@ -449,19 +459,25 @@ export class AdminPlatformService {
     }
   }
 
-  private async countSessions(
+  /**
+   * Count a single scalar metric on the `sessions` table over a preset window.
+   * Generic over the metric name so `sessions` and `unique_visitors` share one
+   * code path. Returns 0 on any non-finite/missing value.
+   */
+  private async countMetric(
     workspaceId: string,
+    metric: 'sessions' | 'unique_visitors',
     preset: 'previous_30_days' | 'previous_30_minutes',
   ): Promise<number> {
     const res = await this.analyticsService.query({
       workspace_id: workspaceId,
-      metrics: ['sessions'],
+      metrics: [metric],
       table: 'sessions',
       dateRange: { preset },
     } as AnalyticsQueryDto);
     const rows = Array.isArray(res.data) ? res.data : [];
     const first = rows[0] as Record<string, unknown> | undefined;
-    const raw = first?.sessions;
+    const raw = first?.[metric];
     const n = typeof raw === 'number' ? raw : Number(raw ?? 0);
     return Number.isFinite(n) ? n : 0;
   }
@@ -1109,6 +1125,10 @@ export class AdminPlatformService {
       exited_at: VERIFY_SENTINEL_TS,
       goal_timestamp: null,
       user_id: null,
+      // B2B identification columns (schema-complete synthetic event).
+      visitor_id: '__veridian_verify__',
+      fingerprint: '',
+      ip: '',
     };
 
     const start = Date.now();

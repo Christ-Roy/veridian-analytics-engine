@@ -273,6 +273,29 @@ describe('SessionState', () => {
       expect(payload.actions[2].type).toBe('pageview'); // dashboard
     });
 
+    it('includes visitor_id (B2B) in payload when provided in options', () => {
+      sessionState.addPageview('/home');
+
+      const payload = sessionState.buildPayload(mockAttributes, {
+        visitorId: 'visitor_b2b_123',
+      });
+
+      // Top-level identity alongside user_id, drives uniqExact(visitor_id).
+      expect(payload.visitor_id).toBe('visitor_b2b_123');
+    });
+
+    it('omits visitor_id when not provided or empty', () => {
+      sessionState.addPageview('/home');
+
+      const noOpt = sessionState.buildPayload(mockAttributes);
+      expect(noOpt.visitor_id).toBeUndefined();
+
+      const emptyOpt = sessionState.buildPayload(mockAttributes, {
+        visitorId: '',
+      });
+      expect(emptyOpt.visitor_id).toBeUndefined();
+    });
+
     it('does NOT include current_page field (page is in actions)', () => {
       sessionState.addPageview('/current');
       sessionState.updateScroll(30);

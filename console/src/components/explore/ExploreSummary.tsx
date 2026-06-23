@@ -95,8 +95,20 @@ export function ExploreSummary({
   // Build KPI items for rendering
   const kpiItems = [
     <Statistic
+      key="unique_visitors"
+      title="Visiteurs uniques"
+      value={formatNumber(totals.unique_visitors)}
+      styles={statisticStyles}
+      suffix={
+        <ChangeIndicator
+          value={totals.unique_visitors_change}
+          showComparison={showComparison}
+        />
+      }
+    />,
+    <Statistic
       key="sessions"
-      title="Visites uniques"
+      title="Visites"
       value={formatNumber(totals.sessions)}
       styles={statisticStyles}
       suffix={

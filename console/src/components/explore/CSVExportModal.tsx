@@ -42,11 +42,13 @@ function mergeComparisonDataForCSV(
     const key = dimensions.map(d => String(row[d] ?? '')).join('|||')
     const prevRow = prevMap.get(key)
 
+    const uniqueVisitors = Number(row.unique_visitors) || 0
     const sessions = Number(row.sessions) || 0
     const medianDuration = Number(row.median_duration) || 0
     const bounceRate = Number(row.bounce_rate) || 0
     const medianScroll = Number(row.median_scroll) || 0
 
+    const visitorsPrev = prevRow ? Number(prevRow.unique_visitors) || 0 : undefined
     const sessionsPrev = prevRow ? Number(prevRow.sessions) || 0 : undefined
     const durationPrev = prevRow ? Number(prevRow.median_duration) || 0 : undefined
     const bouncePrev = prevRow ? Number(prevRow.bounce_rate) || 0 : undefined
@@ -60,10 +62,12 @@ function mergeComparisonDataForCSV(
 
     return {
       ...row,
+      unique_visitors_prev: visitorsPrev,
       sessions_prev: sessionsPrev,
       median_duration_prev: durationPrev,
       bounce_rate_prev: bouncePrev,
       median_scroll_prev: scrollPrev,
+      unique_visitors_change: calcChange(uniqueVisitors, visitorsPrev),
       sessions_change: calcChange(sessions, sessionsPrev),
       median_duration_change: calcChange(medianDuration, durationPrev),
       bounce_rate_change: calcChange(bounceRate, bouncePrev),
@@ -93,7 +97,7 @@ export function CSVExportModal({
       // Fetch fresh data with all dimensions flattened
       const response = await api.analytics.query({
         workspace_id: workspaceId,
-        metrics: ['sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
+        metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
         dimensions,
         filters,
         dateRange,
@@ -114,11 +118,12 @@ export function CSVExportModal({
         rows = response.data as Record<string, unknown>[]
       }
 
-      // Calculate total sessions for percentage
+      // Calculate totals for percentage columns
       const totalSessions = rows.reduce((sum, row) => sum + (Number(row.sessions) || 0), 0)
+      const totalVisitors = rows.reduce((sum, row) => sum + (Number(row.unique_visitors) || 0), 0)
 
       // Generate and download CSV
-      const csv = generateCSV(rows, dimensions, totalSessions, showComparison, customDimensionLabels)
+      const csv = generateCSV(rows, dimensions, totalSessions, totalVisitors, showComparison, customDimensionLabels)
       downloadCSV(csv)
 
       message.success(`${rows.length} lignes exportées en CSV`)

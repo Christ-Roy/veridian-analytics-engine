@@ -172,6 +172,16 @@ export class SessionAttributesDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  /**
+   * Lightweight browser fingerprint from the SDK. Combined SERVER-SIDE with the
+   * captured client IP to distinguish visitors behind a shared company IP (B2B).
+   * Capped to avoid abuse — the real fingerprint is a short base36 hash.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  fingerprint?: string;
 }
 
 // === Session Payload DTO ===
@@ -225,6 +235,18 @@ export class SessionPayloadDto {
   @IsString()
   @MaxLength(256)
   user_id?: string | null;
+
+  /**
+   * Stable, long-lived visitor identifier (B2B). Top-level alongside user_id —
+   * it's an identity, not a device attribute. The handler writes it on every
+   * event row so `uniqExact(visitor_id)` yields the real unique-visitor count.
+   * NOTE: the client IP is captured SERVER-SIDE (@ClientIp), never trusted from
+   * the payload.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(256)
+  visitor_id?: string;
 
   @IsOptional()
   @IsObject()

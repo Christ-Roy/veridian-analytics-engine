@@ -425,6 +425,23 @@ function calculateDailySessionCounts(
   return counts;
 }
 
+/**
+ * Demo visitor_id allocator (feature #1 showcase). Models returning visitors so
+ * the demo shows `unique_visitors < sessions`: ~30% of sessions reuse a
+ * visitor_id drawn from the pool of already-seen visitors, the rest mint a new
+ * one. Module-level pool keeps it cheap and reproducible within a generation.
+ */
+const demoVisitorPool: string[] = [];
+function demoVisitorId(sessionIndex: number): string {
+  // First session always seeds the pool.
+  if (demoVisitorPool.length > 0 && Math.random() < 0.3) {
+    return demoVisitorPool[Math.floor(Math.random() * demoVisitorPool.length)];
+  }
+  const visitorId = `demo-visitor-${sessionIndex.toString().padStart(6, '0')}-${randomUUID().slice(0, 8)}`;
+  demoVisitorPool.push(visitorId);
+  return visitorId;
+}
+
 function generateSessionEvents(
   workspaceId: string,
   dayDate: Date,
@@ -582,6 +599,11 @@ function generateSessionEvents(
     connection_type: generateConnectionType() ?? '',
     sdk_version: SDK_VERSION,
     user_id: null,
+    // B2B identification (feature #1). Demo models returning visitors so
+    // unique_visitors < sessions: ~30% of sessions reuse an earlier visitor_id.
+    visitor_id: demoVisitorId(sessionIndex),
+    fingerprint: device.userAgent ? `demo_${device.device}_${device.os}` : '',
+    ip: `203.0.113.${(sessionIndex % 254) + 1}`, // TEST-NET-3 (RFC 5737)
   };
 
   // Event 1: screen_view (landing page)

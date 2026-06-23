@@ -99,12 +99,15 @@ export class SessionPayloadHandler {
       version,
     );
 
-    // 7. Build base event from session attributes (with skew correction)
+    // 7. Build base event from session attributes (with skew correction).
+    //    clientIp is captured SERVER-SIDE (never trusted from the payload) and
+    //    stored IN CLEAR for B2B identification (decision Robert 2026-06-23).
     const baseEvent = this.buildBaseEvent(
       payload,
       geo,
       version,
       needsCorrection ? skewMs : 0,
+      clientIp,
     );
 
     // 8. Deserialize actions to events
@@ -258,6 +261,7 @@ export class SessionPayloadHandler {
     geo: GeoLocation,
     version: number,
     skewMs: number,
+    clientIp: string | null,
   ): Partial<TrackingEvent> {
     const attrs = payload.attributes;
     const now = toClickHouseDateTime();
@@ -346,6 +350,13 @@ export class SessionPayloadHandler {
 
       // User identification (null if not provided or explicitly null)
       user_id: payload.user_id ?? null,
+
+      // B2B identification (decision Robert 2026-06-23). visitor_id =
+      // stable cross-session identity (SDK); fingerprint = device hash (SDK);
+      // ip = client IP captured server-side, stored IN CLEAR (no hash/salt).
+      visitor_id: payload.visitor_id ?? '',
+      fingerprint: attrs?.fingerprint ?? '',
+      ip: clientIp ?? '',
     };
   }
 

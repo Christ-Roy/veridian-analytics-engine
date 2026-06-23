@@ -138,6 +138,61 @@ describe('V3 Session Payload E2E', () => {
       });
     });
 
+    it('stores visitor_id + fingerprint + server-captured IP (B2B), propagated to sessions', async () => {
+      const sessionId = `sess-b2b-${Date.now()}`;
+      const payload = createSessionPayload({
+        session_id: sessionId,
+        actions: [createPageviewAction({ path: '/home', page_number: 1 })],
+        attributes: {
+          landing_page: 'https://example.com/',
+          fingerprint: 'fp_e2e_b2b',
+        },
+        visitor_id: 'visitor_e2e_b2b',
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        // A spoofed X-Forwarded-For MUST be ignored: without `trust proxy`
+        // (test app), getClientIp falls back to the real TCP socket address.
+        // This proves the IP is captured SERVER-SIDE and is non-spoofable.
+        .set('X-Forwarded-For', '1.2.3.4')
+        .send(payload)
+        .expect(200);
+
+      await eventBuffer.flushAll();
+      await waitForClickHouse();
+
+      // events row carries all three B2B columns.
+      const eventsRes = await workspaceClient.query({
+        query: `SELECT visitor_id, fingerprint, ip
+                FROM events WHERE session_id = {session_id:String} LIMIT 1`,
+        query_params: { session_id: sessionId },
+        format: 'JSONEachRow',
+      });
+      const event = (
+        await eventsRes.json<{
+          visitor_id: string;
+          fingerprint: string;
+          ip: string;
+        }>()
+      )[0];
+      expect(event?.visitor_id).toBe('visitor_e2e_b2b');
+      expect(event?.fingerprint).toBe('fp_e2e_b2b');
+      // IP is the real loopback socket address, NOT the spoofed XFF (1.2.3.4).
+      expect(event?.ip).not.toBe('1.2.3.4');
+      expect(event?.ip).toMatch(/127\.0\.0\.1|::1|::ffff:127\.0\.0\.1/);
+
+      // visitor_id fans out to the sessions table via sessions_mv.
+      const sessRes = await workspaceClient.query({
+        query: `SELECT visitor_id FROM sessions FINAL
+                WHERE id = {session_id:String} LIMIT 1`,
+        query_params: { session_id: sessionId },
+        format: 'JSONEachRow',
+      });
+      const session = (await sessRes.json<{ visitor_id: string }>())[0];
+      expect(session?.visitor_id).toBe('visitor_e2e_b2b');
+    });
+
     it('generates correct dedup_token for pageviews', async () => {
       const sessionId = 'sess-dedup-pv';
       const payload = createSessionPayload({

@@ -985,6 +985,79 @@ describe('SessionPayloadHandler', () => {
     });
   });
 
+  describe('B2B identification (visitor_id / fingerprint / ip)', () => {
+    it('maps visitor_id from payload onto every event', async () => {
+      const payload = createPayload({
+        actions: [
+          createPageviewAction({ page_number: 1 }),
+          createGoalAction({ name: 'signup' }),
+        ],
+        attributes: { landing_page: 'https://example.com/' },
+        visitor_id: 'visitor_abc',
+      }) as SessionPayloadDto & { visitor_id: string };
+
+      await handler.handle(payload, '8.8.8.8');
+
+      const events = bufferService.addBatch.mock.calls[0][0];
+      expect(events).toHaveLength(2);
+      for (const event of events) {
+        expect(event.visitor_id).toBe('visitor_abc');
+      }
+    });
+
+    it('defaults visitor_id to empty string when not provided', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+
+      await handler.handle(payload, '8.8.8.8');
+
+      const events = bufferService.addBatch.mock.calls[0][0];
+      expect(events[0].visitor_id).toBe('');
+    });
+
+    it('maps fingerprint from attributes onto every event', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: {
+          landing_page: 'https://example.com/',
+          fingerprint: 'fp_xyz123',
+        },
+      });
+
+      await handler.handle(payload, '8.8.8.8');
+
+      const events = bufferService.addBatch.mock.calls[0][0];
+      expect(events[0].fingerprint).toBe('fp_xyz123');
+    });
+
+    it('stores the SERVER-captured client IP in clear (not from payload)', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+        visitor_id: 'visitor_abc',
+      }) as SessionPayloadDto & { visitor_id: string };
+
+      await handler.handle(payload, '203.0.113.45');
+
+      const events = bufferService.addBatch.mock.calls[0][0];
+      expect(events[0].ip).toBe('203.0.113.45');
+    });
+
+    it('defaults ip to empty string when client IP is null', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+
+      await handler.handle(payload, null);
+
+      const events = bufferService.addBatch.mock.calls[0][0];
+      expect(events[0].ip).toBe('');
+    });
+  });
+
   describe('user_id handling', () => {
     it('sets user_id from payload when provided', async () => {
       const payload = createPayload({

@@ -2,7 +2,7 @@ import type { AnalyticsResponse } from '../types/analytics'
 import type { DimensionData } from '../types/dashboard'
 
 /** Default metrics for backward compatibility */
-const DEFAULT_METRICS = ['sessions', 'median_duration']
+const DEFAULT_METRICS = ['unique_visitors', 'sessions', 'median_duration']
 
 /**
  * Coerce a raw metric value into a number.

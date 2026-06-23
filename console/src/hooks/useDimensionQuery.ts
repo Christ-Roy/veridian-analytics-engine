@@ -44,9 +44,11 @@ export function useDimensionQuery(
     return [...globalFiltersFiltered, ...widgetFilters]
   }, [ctx.globalFilters, tabConfig.filters])
 
-  // Build the analytics query
+  // Build the analytics query. Default metrics now include unique_visitors
+  // (real B2B visitor count) alongside sessions so the default dimension-table
+  // columns ("Visiteurs" / "Visites" / TimeScore) all populate.
   const metrics = useMemo(
-    () => tabConfig.metrics ?? ['sessions', 'median_duration'],
+    () => tabConfig.metrics ?? ['unique_visitors', 'sessions', 'median_duration'],
     [tabConfig.metrics]
   )
   const query = useMemo<AnalyticsQuery>(

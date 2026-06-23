@@ -6,8 +6,14 @@ export class WorkspaceTrackingStatus {
   @ApiProperty({ description: 'True if any session was recorded in the last 30 days.' })
   active: boolean;
 
-  @ApiProperty({ description: 'Sessions in the last 30 days.' })
+  @ApiProperty({ description: 'Sessions (visites) in the last 30 days.' })
   sessions_30d: number;
+
+  @ApiProperty({
+    description:
+      'Unique visitors (B2B) in the last 30 days — distinct stable visitor_id, a returning visitor counts once.',
+  })
+  visitors_30d: number;
 
   @ApiProperty({ description: 'True if any session was recorded in the last 30 minutes (live).' })
   live: boolean;

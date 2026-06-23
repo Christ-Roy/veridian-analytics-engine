@@ -165,7 +165,7 @@ function Explore() {
   // Initial data query - fetch first dimension only
   const initialQuery = dimensions.length > 0 ? {
     workspace_id: workspaceId,
-    metrics: ['sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
+    metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
     dimensions: [dimensions[0]],
     filters,
     metricFilters: metricFilters.length > 0 ? metricFilters : undefined,
@@ -213,7 +213,7 @@ function Explore() {
     queryKey: ['explore', 'totals', workspaceId, dimensions, dateRange, filters, metricFilters, timezone, showComparison],
     queryFn: () => api.analytics.query({
       workspace_id: workspaceId,
-      metrics: ['sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
+      metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
       dimensions: [], // Empty = no grouping = totals
       filters,
       // When metricFilters exist, use totalsGroupBy to enable filtered totals
@@ -241,6 +241,8 @@ function Explore() {
       const curr = current[0] || {}
       const prev = previous[0] || {}
 
+      const currVisitors = Number(curr.unique_visitors) || 0
+      const prevVisitors = Number(prev.unique_visitors) || 0
       const currSessions = Number(curr.sessions) || 0
       const prevSessions = Number(prev.sessions) || 0
       const currDuration = Number(curr.median_duration) || 0
@@ -251,14 +253,17 @@ function Explore() {
       const prevMedianScroll = Number(prev.median_scroll) || 0
 
       return {
+        unique_visitors: currVisitors,
         sessions: currSessions,
         median_duration: currDuration,
         bounce_rate: currBounceRate,
         median_scroll: currMedianScroll,
+        unique_visitors_prev: prevVisitors,
         sessions_prev: prevSessions,
         median_duration_prev: prevDuration,
         bounce_rate_prev: prevBounceRate,
         median_scroll_prev: prevMedianScroll,
+        unique_visitors_change: prevVisitors > 0 ? ((currVisitors - prevVisitors) / prevVisitors) * 100 : undefined,
         sessions_change: prevSessions > 0 ? ((currSessions - prevSessions) / prevSessions) * 100 : undefined,
         median_duration_change: prevDuration > 0 ? ((currDuration - prevDuration) / prevDuration) * 100 : undefined,
         bounce_rate_change: prevBounceRate > 0 ? ((currBounceRate - prevBounceRate) / prevBounceRate) * 100 : undefined,
@@ -268,6 +273,7 @@ function Explore() {
 
     const row = (totalsResponse.data as Record<string, unknown>[])[0] || {}
     return {
+      unique_visitors: Number(row.unique_visitors) || 0,
       sessions: Number(row.sessions) || 0,
       median_duration: Number(row.median_duration) || 0,
       bounce_rate: Number(row.bounce_rate) || 0,
@@ -349,7 +355,7 @@ function Explore() {
 
         const query = {
           workspace_id: workspaceId,
-          metrics: ['sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
+          metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
           dimensions: dimensionsToFetch,
           filters: childFilters,
           metricFilters: metricFilters.length > 0 ? metricFilters : undefined,

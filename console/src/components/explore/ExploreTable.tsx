@@ -145,9 +145,9 @@ function MobileExploreCard({
         )}
       </div>
 
-      {/* Summary metrics (always visible) */}
+      {/* Summary metrics (always visible) — headline = unique visitors (B2B) */}
       <div className="flex items-center gap-2 mt-2 text-sm text-gray-600">
-        <span>{formatNumber(record.sessions)}</span>
+        <span>{formatNumber(record.unique_visitors)}</span>
         <span className="text-gray-300">•</span>
         <span className="inline-flex items-center gap-1">
           <span
@@ -163,7 +163,8 @@ function MobileExploreCard({
       {/* Expanded details */}
       {isExpanded && (
         <div className="mt-4 pt-4 border-t border-gray-100 space-y-2">
-          <MobileMetricRow label="Visites uniques" value={formatNumber(record.sessions)} change={record.sessions_change} showComparison={showComparison} />
+          <MobileMetricRow label="Visiteurs uniques" value={formatNumber(record.unique_visitors)} change={record.unique_visitors_change} showComparison={showComparison} />
+          <MobileMetricRow label="Visites" value={formatNumber(record.sessions)} change={record.sessions_change} showComparison={showComparison} />
           <div className="flex justify-between items-center">
             <span className="text-gray-500 text-sm">TimeScore</span>
             <div className="flex items-center">
@@ -309,7 +310,32 @@ export function ExploreTable({
         width: 300
       },
       {
-        title: 'Visites uniques',
+        title: 'Visiteurs uniques',
+        dataIndex: 'unique_visitors',
+        key: 'unique_visitors',
+        align: 'right',
+        render: (value, record) => {
+          // Only show percentage for top-level rows (parentDimensionIndex === 0)
+          const isTopLevel = record.parentDimensionIndex === 0
+          const showPercentage = isTopLevel && totals && totals.unique_visitors > 0
+          const percentage = showPercentage ? (value / totals.unique_visitors) * 100 : 0
+
+          return (
+            <div className="flex items-center justify-end">
+              <span>{formatNumber(value)}</span>
+              {showPercentage && (
+                <span className="ml-1 text-gray-400 text-xs">({percentage.toFixed(1)}%)</span>
+              )}
+              {showComparison && <ChangeIndicator value={record.unique_visitors_change} />}
+            </div>
+          )
+        },
+        sorter: (a, b) => a.unique_visitors - b.unique_visitors,
+        defaultSortOrder: 'descend',
+        width: 160
+      },
+      {
+        title: 'Visites',
         dataIndex: 'sessions',
         key: 'sessions',
         align: 'right',
@@ -330,7 +356,6 @@ export function ExploreTable({
           )
         },
         sorter: (a, b) => a.sessions - b.sessions,
-        defaultSortOrder: 'descend',
         width: 140
       },
       {
@@ -483,7 +508,7 @@ export function ExploreTable({
               // Show warning icon if children were filtered by min sessions
               if (expanded && record.childrenFilteredByMinSessions) {
                 return (
-                  <Tooltip title={`Tous les sous-éléments ont moins de ${minSessions} visites uniques. Abaissez le seuil pour les voir.`}>
+                  <Tooltip title={`Tous les sous-éléments ont moins de ${minSessions} visites. Abaissez le seuil pour les voir.`}>
                     <span className="mr-2 text-amber-500 cursor-help">
                       <TriangleAlert size={14} />
                     </span>

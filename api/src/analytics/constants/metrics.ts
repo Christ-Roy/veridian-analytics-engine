@@ -26,6 +26,16 @@ export const METRICS: Record<string, MetricDefinition> = {
     description: 'Total sessions',
     tables: ['sessions'],
   },
+  // Unique visitors (B2B). Distinct stable visitor_id across sessions — a
+  // returning visitor counts ONCE, unlike `sessions` (which the front used to
+  // mislabel "Visites uniques"). visitor_id is propagated into the sessions
+  // table by sessions_mv (any(e.visitor_id)).
+  unique_visitors: {
+    name: 'unique_visitors',
+    sql: 'uniqExact(visitor_id)',
+    description: 'Visiteurs uniques',
+    tables: ['sessions'],
+  },
   median_duration: {
     name: 'median_duration',
     sql: 'round(median(duration) / 1000, 1)',

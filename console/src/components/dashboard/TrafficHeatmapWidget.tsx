@@ -12,7 +12,7 @@ export interface HeatmapTab {
 }
 
 const DEFAULT_TABS: HeatmapTab[] = [
-  { key: 'sessions', label: 'Visites uniques' },
+  { key: 'sessions', label: 'Visites' },
   { key: 'median_duration', label: 'TimeScore' },
 ]
 

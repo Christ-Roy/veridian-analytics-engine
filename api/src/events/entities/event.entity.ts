@@ -66,12 +66,20 @@ export interface TrackingEvent {
   language: string;
   timezone: string;
 
-  // Geo location (derived from IP, IP never stored)
+  // Geo location (derived from IP)
   country: string;
   region: string;
   city: string;
   latitude: number | null;
   longitude: number | null;
+
+  // B2B identification (decision Robert 2026-06-23, RGPD assumed):
+  // IP stored IN CLEAR (no hash/salt), captured server-side via @ClientIp.
+  // Combined with `fingerprint` it separates visitors behind a shared company
+  // IP. `visitor_id` is the stable cross-session identity from the SDK.
+  visitor_id: string;
+  fingerprint: string;
+  ip: string;
 
   // Engagement
   max_scroll: number;

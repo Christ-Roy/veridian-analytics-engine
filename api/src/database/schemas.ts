@@ -395,9 +395,17 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       goal_timestamp Nullable(DateTime64(3)),
       -- User identification
       user_id Nullable(String),
+      -- B2B identification (Robert 2026-06-23): visitor_id = stable cross-session
+      -- identity (SDK); fingerprint = device hash (SDK); ip = client IP captured
+      -- server-side, stored IN CLEAR (no hash/salt). reserved place for a future
+      -- reverse-IP company column (phase 2) — schema ready, not implemented.
+      visitor_id String DEFAULT '',
+      fingerprint String DEFAULT '',
+      ip String DEFAULT '',
       INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
       INDEX idx_browser_type browser_type TYPE set(10) GRANULARITY 1,
-      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1
+      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1,
+      INDEX idx_visitor_id visitor_id TYPE bloom_filter GRANULARITY 1
     ) ENGINE = ReplacingMergeTree(_version)
     PARTITION BY toYYYYMMDD(received_at)
     ORDER BY (session_id, dedup_token)
@@ -469,8 +477,14 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       goal_value Float32 DEFAULT 0,
       sdk_version String DEFAULT '',
       user_id Nullable(String),
+      -- B2B identification (Robert 2026-06-23). visitor_id drives the
+      -- `unique_visitors` metric: uniqExact(visitor_id) over the sessions table.
+      visitor_id String DEFAULT '',
+      fingerprint String DEFAULT '',
+      ip String DEFAULT '',
       INDEX idx_created_at created_at TYPE minmax GRANULARITY 1,
-      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1
+      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1,
+      INDEX idx_visitor_id visitor_id TYPE bloom_filter GRANULARITY 1
     ) ENGINE = ReplacingMergeTree(updated_at)
     PARTITION BY toYYYYMM(created_at)
     ORDER BY (created_at, id)
@@ -548,7 +562,10 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       countIf(e.name = 'goal') as goal_count,
       sumIf(e.goal_value, e.name = 'goal') as goal_value,
       any(e.sdk_version) as sdk_version,
-      any(e.user_id) as user_id
+      any(e.user_id) as user_id,
+      any(e.visitor_id) as visitor_id,
+      any(e.fingerprint) as fingerprint,
+      any(e.ip) as ip
     FROM {database}.events e
     GROUP BY e.session_id, e.workspace_id
   `,
@@ -584,10 +601,16 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       -- User identification
       user_id Nullable(String),
 
+      -- B2B identification (Robert 2026-06-23)
+      visitor_id String DEFAULT '',
+      fingerprint String DEFAULT '',
+      ip String DEFAULT '',
+
       -- Technical
       received_at DateTime64(3) DEFAULT now64(3),
       _version UInt64 DEFAULT 0,
-      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1
+      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1,
+      INDEX idx_visitor_id visitor_id TYPE bloom_filter GRANULARITY 1
     ) ENGINE = ReplacingMergeTree(_version)
     PARTITION BY toYYYYMMDD(received_at)
     ORDER BY (session_id, page_number)
@@ -613,6 +636,9 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       0 as is_exit,
       if(e.page_number = 1, 'landing', 'navigation') as entry_type,
       e.user_id,
+      e.visitor_id,
+      e.fingerprint,
+      e.ip,
       now64(3) as received_at,
       e._version
     FROM {database}.events e
@@ -698,10 +724,16 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       -- User identification
       user_id Nullable(String),
 
+      -- B2B identification (Robert 2026-06-23)
+      visitor_id String DEFAULT '',
+      fingerprint String DEFAULT '',
+      ip String DEFAULT '',
+
       -- Technical
       _version UInt64 DEFAULT 0,
       INDEX idx_goal_timestamp goal_timestamp TYPE minmax GRANULARITY 1,
-      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1
+      INDEX idx_user_id user_id TYPE bloom_filter GRANULARITY 1,
+      INDEX idx_visitor_id visitor_id TYPE bloom_filter GRANULARITY 1
     ) ENGINE = ReplacingMergeTree(_version)
     PARTITION BY toYYYYMM(goal_timestamp)
     ORDER BY (goal_timestamp, session_id, goal_name)
@@ -782,6 +814,9 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       toDayOfWeek(assumeNotNull(e.goal_timestamp)) IN (6, 7) as is_weekend,
 
       e.user_id,
+      e.visitor_id,
+      e.fingerprint,
+      e.ip,
       e._version
     FROM {database}.events e
     WHERE e.name = 'goal'

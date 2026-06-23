@@ -545,9 +545,11 @@ describe('AdminPlatformService.provisionTenant', () => {
         status: 'active',
         timezone: 'Europe/Paris',
       });
-      // 30d window → 42 sessions, 30min live → 3 sessions.
+      // probeTracking fires 3 queries via Promise.all, in array order:
+      //   1) sessions / 30d → 42, 2) unique_visitors / 30d → 30, 3) sessions / 30min (live) → 3
       analyticsService.query
         .mockResolvedValueOnce({ data: [{ sessions: 42 }], meta: {} } as never)
+        .mockResolvedValueOnce({ data: [{ unique_visitors: 30 }], meta: {} } as never)
         .mockResolvedValueOnce({ data: [{ sessions: 3 }], meta: {} } as never);
       gscService.status.mockResolvedValue({
         connected: true,
@@ -598,6 +600,7 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(result.tracking).toEqual({
         active: true,
         sessions_30d: 42,
+        visitors_30d: 30,
         live: true,
       });
       expect(result.gsc).toEqual({
@@ -644,6 +647,7 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(result.tracking).toEqual({
         active: false,
         sessions_30d: 0,
+        visitors_30d: 0,
         live: false,
       });
     });
@@ -1136,9 +1140,11 @@ describe('AdminPlatformService.provisionTenant', () => {
       workspaceExists();
       ingestionVisible(true);
       // real_tracking: live traffic right now (30d>0, 30min>0).
+      // probeTracking order: sessions/30d, unique_visitors/30d, sessions/30min.
       analyticsService.query
-        .mockResolvedValueOnce({ data: [{ sessions: 120 }], meta: {} } as never) // 30d
-        .mockResolvedValueOnce({ data: [{ sessions: 3 }], meta: {} } as never); // 30min
+        .mockResolvedValueOnce({ data: [{ sessions: 120 }], meta: {} } as never) // 30d sessions
+        .mockResolvedValueOnce({ data: [{ unique_visitors: 90 }], meta: {} } as never) // 30d visitors
+        .mockResolvedValueOnce({ data: [{ sessions: 3 }], meta: {} } as never); // 30min live
       jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         status: 200,
@@ -1167,8 +1173,9 @@ describe('AdminPlatformService.provisionTenant', () => {
       ingestionVisible(true);
       // No real traffic at all.
       analyticsService.query
-        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never) // 30d
-        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never); // 30min
+        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never) // 30d sessions
+        .mockResolvedValueOnce({ data: [{ unique_visitors: 0 }], meta: {} } as never) // 30d visitors
+        .mockResolvedValueOnce({ data: [{ sessions: 0 }], meta: {} } as never); // 30min live
       jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         status: 200,
@@ -1189,9 +1196,11 @@ describe('AdminPlatformService.provisionTenant', () => {
     it('verdict=snippet_misconfigured even when traffic is live (actionable install bug is always reported)', async () => {
       workspaceExists();
       ingestionVisible(true);
+      // probeTracking order: sessions/30d, unique_visitors/30d, sessions/30min.
       analyticsService.query
-        .mockResolvedValueOnce({ data: [{ sessions: 50 }], meta: {} } as never)
-        .mockResolvedValueOnce({ data: [{ sessions: 2 }], meta: {} } as never);
+        .mockResolvedValueOnce({ data: [{ sessions: 50 }], meta: {} } as never) // 30d sessions
+        .mockResolvedValueOnce({ data: [{ unique_visitors: 40 }], meta: {} } as never) // 30d visitors
+        .mockResolvedValueOnce({ data: [{ sessions: 2 }], meta: {} } as never); // 30min live
       // Tag present but wrong workspace id — a real mistake worth surfacing
       // regardless of (possibly unrelated) live traffic.
       jest.spyOn(global, 'fetch').mockResolvedValue({
@@ -1265,10 +1274,12 @@ describe('AdminPlatformService.provisionTenant', () => {
     it('verdict=ok with a correctly-installed snippet, and surfaces real_tracking', async () => {
       workspaceExists();
       ingestionVisible(true);
-      // Real tracking already flowing: 42 sessions over 30d, live now.
+      // Real tracking already flowing. probeTracking order:
+      //   sessions/30d → 42, unique_visitors/30d → 28, sessions/30min (live) → 1
       analyticsService.query
-        .mockResolvedValueOnce({ data: [{ sessions: 42 }], meta: {} } as never) // 30d
-        .mockResolvedValueOnce({ data: [{ sessions: 1 }], meta: {} } as never); // 30min
+        .mockResolvedValueOnce({ data: [{ sessions: 42 }], meta: {} } as never) // 30d sessions
+        .mockResolvedValueOnce({ data: [{ unique_visitors: 28 }], meta: {} } as never) // 30d visitors
+        .mockResolvedValueOnce({ data: [{ sessions: 1 }], meta: {} } as never); // 30min live
       jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         status: 200,

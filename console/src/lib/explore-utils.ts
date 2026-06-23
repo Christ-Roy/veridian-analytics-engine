@@ -311,6 +311,7 @@ export function transformApiRowsToExploreRows(
       childrenLoaded: false,
       ...dimensionValues,
       // Current period metrics
+      unique_visitors: (row.unique_visitors as number) ?? 0,
       sessions: (row.sessions as number) ?? 0,
       median_duration: (row.median_duration as number) ?? 0,
       bounce_rate: (row.bounce_rate as number) ?? 0,
@@ -319,12 +320,16 @@ export function transformApiRowsToExploreRows(
 
     // Add previous period metrics if available
     if (hasPreviousPeriod) {
+      exploreRow.unique_visitors_prev = row.unique_visitors_prev as number | undefined
       exploreRow.sessions_prev = row.sessions_prev as number | undefined
       exploreRow.median_duration_prev = row.median_duration_prev as number | undefined
       exploreRow.bounce_rate_prev = row.bounce_rate_prev as number | undefined
       exploreRow.median_scroll_prev = row.median_scroll_prev as number | undefined
 
       // Calculate change percentages
+      if (exploreRow.unique_visitors_prev !== undefined && exploreRow.unique_visitors_prev > 0) {
+        exploreRow.unique_visitors_change = ((exploreRow.unique_visitors - exploreRow.unique_visitors_prev) / exploreRow.unique_visitors_prev) * 100
+      }
       if (exploreRow.sessions_prev !== undefined && exploreRow.sessions_prev > 0) {
         exploreRow.sessions_change = ((exploreRow.sessions - exploreRow.sessions_prev) / exploreRow.sessions_prev) * 100
       }
@@ -356,6 +361,7 @@ export function mergeComparisonData(
     const prevRow = previous?.find((p) => p[currentDimension] === dimValue)
     return {
       ...row,
+      unique_visitors_prev: prevRow?.unique_visitors,
       sessions_prev: prevRow?.sessions,
       median_duration_prev: prevRow?.median_duration,
       bounce_rate_prev: prevRow?.bounce_rate,

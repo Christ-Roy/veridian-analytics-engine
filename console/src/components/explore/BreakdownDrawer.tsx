@@ -51,7 +51,7 @@ export function BreakdownDrawer({
       queryFn: () =>
         api.analytics.query({
           workspace_id: workspaceId,
-          metrics: ['sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
+          metrics: ['unique_visitors', 'sessions', 'median_duration', 'bounce_rate', 'median_scroll'],
           dimensions: [dimension],
           filters: parentFilters,
           dateRange,

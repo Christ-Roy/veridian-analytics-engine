@@ -192,4 +192,8 @@ export const STORAGE_KEYS = {
   TAB_ID: 'tab_id',
   DIMENSIONS: 'dimensions',
   USER_ID: 'user_id',
+  // Stable visitor identifier (B2B). Auto-generated on first load, persisted
+  // long-term in localStorage, and — unlike SESSION — SURVIVES session expiry
+  // (30 min). One physical browser = one visitor_id across all its sessions.
+  VISITOR_ID: 'visitor_id',
 } as const;
