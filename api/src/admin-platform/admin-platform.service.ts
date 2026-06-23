@@ -48,9 +48,36 @@ import {
   AdsClickIdSource,
   AdsConversionsResponseDto,
 } from './dto/ads-conversions-response.dto';
+import { TrackingVerifyDto } from './dto/tracking-verify.dto';
+import {
+  TrackingVerifyResponseDto,
+  TrackingVerifySnippet,
+  TrackingVerifyVerdict,
+} from './dto/tracking-verify-response.dto';
 
 const PASSWORD_RESET_EXPIRY_HOURS = 24;
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
+
+// ─── tracking.verify (dry-run, zero-pollution) constants ────────────────────
+/**
+ * Far-past sentinel for the synthetic verify event's *reporting* timestamps
+ * (created_at / updated_at / entered_at). The tracking probe counts the
+ * `sessions` table by `created_at` over date-bounded windows (previous_30_days,
+ * previous_30_minutes) — a session anchored in the year 2000 is OUTSIDE every
+ * real window, so it can NEVER appear in a client's stats/dashboards/counters,
+ * even in the brief instant before the purge runs. This is the first of two
+ * non-pollution guarantees (the second is the explicit purge). `received_at`
+ * stays = now() so the event lands in today's partition and is reliably
+ * requeryable/purgeable; `received_at` feeds no client-facing count.
+ */
+const VERIFY_SENTINEL_TS = '2000-01-01 00:00:00.000';
+/** How long to poll for the synthetic event to become requeryable (ms). */
+const VERIFY_INGEST_TIMEOUT_MS = 8000;
+const VERIFY_INGEST_POLL_INTERVAL_MS = 250;
+/** Timeout for the optional client-site HTML fetch (snippet check). */
+const VERIFY_SITE_FETCH_TIMEOUT_MS = 5000;
+/** Cap on bytes read from the client site HTML (snippet lives in <head>). */
+const VERIFY_SITE_MAX_BYTES = 512 * 1024;
 
 /** Google Ads click-id types carried in `utm_id_from`. */
 const ADS_CLICK_ID_TYPES = ['gclid', 'gbraid', 'wbraid'] as const;
@@ -826,6 +853,414 @@ export class AdminPlatformService {
       truncated,
       conversions,
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lot G — tracking.verify (dry-run install check, ZERO pollution)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * One-call, IA-readable verification that a workspace's tracking is wired
+   * and functional — WITHOUT polluting the real analytics.
+   *
+   * Three independent, fail-soft probes (same pattern as getConsolidatedStatus
+   * — a failing sub-probe degrades to a safe default instead of failing the
+   * whole call):
+   *
+   *   1. ingestion (dry-run): inject ONE synthetic screen_view straight into
+   *      the real workspace `events` table (the exact table the live tracker
+   *      writes to, MV fan-out included), then read it back to prove the chain
+   *      events → sessions_mv/pages_mv/goals_mv works end-to-end, then PURGE it.
+   *
+   *   2. snippet (only if site_url supplied): fetch the page HTML (5s, fail-
+   *      soft) and confirm the tracker <script> is present, points at
+   *      /sdk/v1/tracker.js (NOT the bare /tracker.js SPA trap) and carries the
+   *      correct data-workspace-id.
+   *
+   *   3. real_tracking: reuse probeTracking (sessions_30d + live) so the IA
+   *      also sees whether REAL traffic is already flowing.
+   *
+   * ────────────────────────────────────────────────────────────────────────
+   * ZERO-POLLUTION GUARANTEE (why the synthetic event is invisible to the
+   * client's stats — approach (a): inject-then-purge, made airtight):
+   *
+   *   • Deterministic identity: session_id / dedup_token are derived from the
+   *     workspace_id + a reserved `__veridian_verify__` namespace (NO Date.now,
+   *     NO randomness) so a re-run reuses the same row (ReplacingMergeTree
+   *     dedup) and the purge can target it surgically and idempotently.
+   *
+   *   • Far-past sentinel: the event's reporting timestamps (created_at /
+   *     updated_at / entered_at) are anchored at VERIFY_SENTINEL_TS (year 2000).
+   *     Every client-facing count is date-bounded (probeTracking counts the
+   *     `sessions` table by created_at over previous_30_days / 30_minutes; all
+   *     dashboards/explore/goals filter on a date range). A session in the year
+   *     2000 is OUTSIDE every window → it can never appear in a counter, even
+   *     in the instant between insert and purge.
+   *
+   *   • Explicit purge: after the round trip we DELETE the synthetic row from
+   *     events AND the three MV targets it fans out into (sessions, pages,
+   *     goals) via parameterized ALTER TABLE … DELETE mutations.
+   *
+   * If the purge can't be confirmed we still never pollute (the sentinel keeps
+   * the row invisible), and we surface a warning in `detail` rather than fail.
+   */
+  async verifyTracking(
+    dto: TrackingVerifyDto,
+  ): Promise<TrackingVerifyResponseDto> {
+    const workspaceId = dto.workspace_id;
+
+    if (!(await this.workspaceExists(workspaceId))) {
+      return {
+        workspace_id: workspaceId,
+        workspace_exists: false,
+        ingestion: {
+          ok: false,
+          round_trip_ms: null,
+          detail: 'workspace does not exist; ingestion not attempted',
+        },
+        snippet: null,
+        real_tracking: { sessions_30d: 0, live: false },
+        verdict: 'workspace_not_found',
+      };
+    }
+
+    // Run the three probes concurrently — each is independently fail-soft.
+    const [ingestion, snippet, real] = await Promise.all([
+      this.probeIngestionRoundTrip(workspaceId),
+      dto.site_url
+        ? this.probeSnippet(workspaceId, dto.site_url)
+        : Promise.resolve(null),
+      this.probeTracking(workspaceId),
+    ]);
+
+    return {
+      workspace_id: workspaceId,
+      workspace_exists: true,
+      ingestion,
+      snippet,
+      real_tracking: { sessions_30d: real.sessions_30d, live: real.live },
+      verdict: this.computeVerifyVerdict(ingestion.ok, snippet),
+    };
+  }
+
+  /** Verdict precedence: ingestion failure first, then snippet problems. */
+  private computeVerifyVerdict(
+    ingestionOk: boolean,
+    snippet: TrackingVerifySnippet | null,
+  ): TrackingVerifyVerdict {
+    if (!ingestionOk) return 'ingestion_failed';
+    if (snippet) {
+      // `checked && !present` after a successful fetch ⇒ snippet absent.
+      // A failed fetch leaves present=false but detail says "could not fetch":
+      // we do NOT down-rank to snippet_missing on an unreachable site, since
+      // that's an availability issue, not a confirmed missing tag.
+      if (!snippet.present) {
+        return snippet.detail.startsWith('could not fetch')
+          ? 'ok'
+          : 'snippet_missing';
+      }
+      if (!snippet.src_correct || !snippet.workspace_id_match) {
+        return 'snippet_misconfigured';
+      }
+    }
+    return 'ok';
+  }
+
+  /**
+   * Synthetic dry-run ingestion round trip (zero-pollution — see
+   * verifyTracking header). Injects ONE synthetic screen_view via the real
+   * insert path, polls until it's requeryable, measures latency, then purges.
+   */
+  private async probeIngestionRoundTrip(workspaceId: string): Promise<{
+    ok: boolean;
+    round_trip_ms: number | null;
+    detail: string;
+  }> {
+    const sessionId = `__veridian_verify__${workspaceId}`;
+    const dedupToken = `${sessionId}_pv`;
+    const nowCh = toClickHouseDateTime();
+
+    // Minimal but schema-complete synthetic screen_view. Reporting timestamps
+    // anchored at the far-past sentinel so it's invisible to every date-bounded
+    // count; received_at = now() so it lands in today's partition and is
+    // reliably requeryable + purgeable.
+    const event = {
+      session_id: sessionId,
+      workspace_id: workspaceId,
+      received_at: nowCh,
+      created_at: VERIFY_SENTINEL_TS,
+      updated_at: VERIFY_SENTINEL_TS,
+      name: 'screen_view',
+      path: '/__veridian_verify__',
+      duration: 0,
+      page_duration: 0,
+      previous_path: '',
+      referrer: '',
+      referrer_domain: '',
+      referrer_path: '',
+      is_direct: true,
+      landing_page: '',
+      landing_domain: '',
+      landing_path: '',
+      utm_source: '',
+      utm_medium: '',
+      utm_campaign: '',
+      utm_term: '',
+      utm_content: '',
+      utm_id: '',
+      utm_id_from: '',
+      channel: '',
+      channel_group: '',
+      stm_1: '',
+      stm_2: '',
+      stm_3: '',
+      stm_4: '',
+      stm_5: '',
+      stm_6: '',
+      stm_7: '',
+      stm_8: '',
+      stm_9: '',
+      stm_10: '',
+      screen_width: 0,
+      screen_height: 0,
+      viewport_width: 0,
+      viewport_height: 0,
+      device: '',
+      browser: '',
+      browser_type: '',
+      os: '',
+      user_agent: 'veridian-tracking-verify',
+      connection_type: '',
+      language: '',
+      timezone: '',
+      country: '',
+      region: '',
+      city: '',
+      latitude: null,
+      longitude: null,
+      max_scroll: 0,
+      page_number: 1,
+      _version: Date.now(),
+      goal_name: '',
+      goal_value: 0,
+      dedup_token: dedupToken,
+      sdk_version: 'verify',
+      properties: { __veridian_verify__: '1' },
+      entered_at: VERIFY_SENTINEL_TS,
+      exited_at: VERIFY_SENTINEL_TS,
+      goal_timestamp: null,
+      user_id: null,
+    };
+
+    const start = Date.now();
+    try {
+      // Real insert path: exactly what EventBufferService.flush calls. This
+      // exercises the events table AND triggers sessions_mv/pages_mv (proving
+      // the full ingestion chain), not a side channel.
+      await this.clickhouse.insertWorkspace(workspaceId, 'events', [event]);
+
+      // Poll until the row is requeryable (insert → merge visibility).
+      const visible = await this.pollSyntheticEventVisible(
+        workspaceId,
+        sessionId,
+        dedupToken,
+      );
+      const roundTrip = Date.now() - start;
+
+      if (!visible) {
+        // Still purge whatever may have landed before reporting failure.
+        const purgeNote = await this.purgeSyntheticEvent(workspaceId, sessionId);
+        return {
+          ok: false,
+          round_trip_ms: null,
+          detail: `synthetic event inserted but not requeryable within ${VERIFY_INGEST_TIMEOUT_MS}ms${purgeNote}`,
+        };
+      }
+
+      const purgeNote = await this.purgeSyntheticEvent(workspaceId, sessionId);
+      return {
+        ok: true,
+        round_trip_ms: roundTrip,
+        detail: `synthetic event ingested and purged${purgeNote}`,
+      };
+    } catch (err) {
+      // Best-effort purge even on failure so we never leave a synthetic row.
+      const purgeNote = await this.purgeSyntheticEvent(
+        workspaceId,
+        sessionId,
+      ).catch(() => '');
+      this.logger.warn(
+        `[verify] ingestion probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return {
+        ok: false,
+        round_trip_ms: null,
+        detail: `ingestion failed: ${(err as Error).message}${purgeNote}`,
+      };
+    }
+  }
+
+  /** Poll the events table until the synthetic row is requeryable. */
+  private async pollSyntheticEventVisible(
+    workspaceId: string,
+    sessionId: string,
+    dedupToken: string,
+  ): Promise<boolean> {
+    const deadline = Date.now() + VERIFY_INGEST_TIMEOUT_MS;
+    do {
+      const rows = await this.clickhouse.queryWorkspace<{ c: number }>(
+        workspaceId,
+        `SELECT count() AS c FROM events
+         WHERE session_id = {sid:String} AND dedup_token = {tok:String}`,
+        { sid: sessionId, tok: dedupToken },
+      );
+      const c = Number(rows[0]?.c ?? 0);
+      if (c > 0) return true;
+      if (Date.now() >= deadline) return false;
+      await this.sleep(VERIFY_INGEST_POLL_INTERVAL_MS);
+    } while (Date.now() < deadline);
+    return false;
+  }
+
+  /**
+   * Purge the synthetic verify event from the events table AND the three MV
+   * targets it fans out into (sessions, pages, goals). Parameterized
+   * ALTER TABLE … DELETE (injection-safe). Best-effort: returns a suffix note
+   * for `detail` if a sub-purge errored — the far-past sentinel already keeps
+   * the row invisible, so a delayed purge never pollutes.
+   */
+  private async purgeSyntheticEvent(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<string> {
+    const targets: Array<{ table: string; col: string }> = [
+      { table: 'events', col: 'session_id' },
+      { table: 'sessions', col: 'id' }, // sessions_mv sets id = session_id
+      { table: 'pages', col: 'session_id' },
+      { table: 'goals', col: 'session_id' },
+    ];
+    const failed: string[] = [];
+    for (const t of targets) {
+      try {
+        await this.clickhouse.commandWorkspaceWithParams(
+          workspaceId,
+          `ALTER TABLE ${t.table} DELETE WHERE ${t.col} = {sid:String}`,
+          { sid: sessionId },
+        );
+      } catch (err) {
+        failed.push(t.table);
+        this.logger.warn(
+          `[verify] purge of ${t.table} failed for ${workspaceId}: ${(err as Error).message}`,
+        );
+      }
+    }
+    return failed.length
+      ? ` (purge warning: ${failed.join(', ')} — row stays invisible via sentinel ts)`
+      : '';
+  }
+
+  /**
+   * Fetch the client site HTML (fail-soft) and audit the tracker snippet:
+   * present? src points at /sdk/v1/tracker.js (not the SPA-trap /tracker.js)?
+   * data-workspace-id matches? A fetch failure (down site / timeout) returns
+   * present:false with an explanatory detail — it NEVER fails the endpoint.
+   */
+  private async probeSnippet(
+    workspaceId: string,
+    siteUrl: string,
+  ): Promise<TrackingVerifySnippet> {
+    let html: string;
+    try {
+      const res = await fetch(siteUrl, {
+        redirect: 'follow',
+        signal: AbortSignal.timeout(VERIFY_SITE_FETCH_TIMEOUT_MS),
+        headers: { 'User-Agent': 'veridian-tracking-verify/1.0' },
+      });
+      if (!res.ok) {
+        return {
+          checked: true,
+          present: false,
+          src_correct: false,
+          workspace_id_match: false,
+          detail: `could not fetch site (HTTP ${res.status})`,
+        };
+      }
+      html = (await res.text()).slice(0, VERIFY_SITE_MAX_BYTES);
+    } catch (err) {
+      return {
+        checked: true,
+        present: false,
+        src_correct: false,
+        workspace_id_match: false,
+        detail: `could not fetch site (${(err as Error).message})`,
+      };
+    }
+
+    return this.auditSnippetHtml(workspaceId, html);
+  }
+
+  /**
+   * Pure parser: find the tracker <script> in the page HTML and grade it.
+   * Extracted from probeSnippet so it is unit-testable without network I/O.
+   */
+  private auditSnippetHtml(
+    workspaceId: string,
+    html: string,
+  ): TrackingVerifySnippet {
+    // Find every <script ...> tag and pick the one that looks like the tracker
+    // (carries data-workspace-id and/or a tracker.js src). Tolerant of
+    // attribute order, quote style and async/defer noise.
+    const scriptTags = html.match(/<script\b[^>]*>/gi) ?? [];
+    const trackerTag = scriptTags.find(
+      (tag) =>
+        /tracker\.js/i.test(tag) || /data-workspace-id\s*=/i.test(tag),
+    );
+
+    if (!trackerTag) {
+      return {
+        checked: true,
+        present: false,
+        src_correct: false,
+        workspace_id_match: false,
+        detail: 'no tracker <script> found in page HTML',
+      };
+    }
+
+    const srcMatch = trackerTag.match(/\bsrc\s*=\s*["']([^"']+)["']/i);
+    const src = srcMatch?.[1] ?? '';
+    // The real bundle is served at /sdk/v1/tracker.js. The bare /tracker.js
+    // falls through to the SPA console HTML and tracks nothing (known trap,
+    // cf buildTrackerSnippet). Require the SDK path.
+    const srcCorrect = /\/sdk\/v1\/tracker\.js(?:[?#]|$)/i.test(src);
+
+    const wsMatch = trackerTag.match(
+      /\bdata-workspace-id\s*=\s*["']([^"']+)["']/i,
+    );
+    const foundWs = wsMatch?.[1] ?? '';
+    const workspaceIdMatch = foundWs === workspaceId;
+
+    let detail: string;
+    if (srcCorrect && workspaceIdMatch) {
+      detail = 'snippet found, src and workspace_id correct';
+    } else if (!srcCorrect && !workspaceIdMatch) {
+      detail = `snippet found but src is "${src || '(none)'}" (expected /sdk/v1/tracker.js) and data-workspace-id is "${foundWs || '(none)'}" (expected ${workspaceId})`;
+    } else if (!srcCorrect) {
+      detail = `snippet found but src is "${src || '(none)'}" — must point at /sdk/v1/tracker.js, not the bare /tracker.js SPA path`;
+    } else {
+      detail = `snippet found but data-workspace-id is "${foundWs || '(none)'}", expected ${workspaceId}`;
+    }
+
+    return {
+      checked: true,
+      present: true,
+      src_correct: srcCorrect,
+      workspace_id_match: workspaceIdMatch,
+      detail,
+    };
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   // ---------------------------------------------------------------------------

@@ -48,6 +48,8 @@ describe('AdminPlatformService.provisionTenant', () => {
             querySystem: jest.fn().mockResolvedValue([]),
             insertSystem: jest.fn().mockResolvedValue(undefined),
             queryWorkspace: jest.fn().mockResolvedValue([]),
+            insertWorkspace: jest.fn().mockResolvedValue(undefined),
+            commandWorkspaceWithParams: jest.fn().mockResolvedValue(undefined),
           },
         },
         {
@@ -174,6 +176,8 @@ describe('AdminPlatformService.provisionTenant', () => {
     clickhouse.querySystem.mockResolvedValue([]);
     clickhouse.insertSystem.mockResolvedValue(undefined);
     clickhouse.queryWorkspace.mockResolvedValue([]);
+    clickhouse.insertWorkspace.mockResolvedValue(undefined);
+    clickhouse.commandWorkspaceWithParams.mockResolvedValue(undefined);
     usersService.delete.mockResolvedValue(undefined);
     workspacesService.create.mockResolvedValue({} as never);
     mailService.sendPasswordReset.mockResolvedValue(undefined);
@@ -969,6 +973,242 @@ describe('AdminPlatformService.provisionTenant', () => {
       const paramsArg = (clickhouse.queryWorkspace as jest.Mock).mock
         .calls[0][2];
       expect(paramsArg.lim).toBe(3);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // tracking.verify (dry-run install check, zero-pollution)
+  // ───────────────────────────────────────────────────────────────────────
+  describe('verifyTracking', () => {
+    const WS = 'ws_verify';
+
+    /** Make workspaceExists() true (querySystem returns one row). */
+    function workspaceExists(): void {
+      clickhouse.querySystem.mockResolvedValue([{ id: WS }]);
+    }
+
+    /**
+     * Drive the ingestion round trip:
+     *   - the events count-back query (queryWorkspace) returns `visible`
+     *   - real_tracking probe (analyticsService.query) returns sessions count
+     * The service issues the events count-back via queryWorkspace and the
+     * sessions count via analyticsService.query (countSessions), so we wire
+     * them separately.
+     */
+    function ingestionVisible(visible: boolean): void {
+      clickhouse.queryWorkspace.mockResolvedValue(
+        (visible ? [{ c: 1 }] : [{ c: 0 }]) as never,
+      );
+    }
+
+    afterEach(() => {
+      // Restore any fetch stub between tests.
+      jest.restoreAllMocks();
+    });
+
+    it('returns workspace_not_found when the workspace does not exist', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+
+      const res = await service.verifyTracking({ workspace_id: 'nope' });
+
+      expect(res.workspace_exists).toBe(false);
+      expect(res.verdict).toBe('workspace_not_found');
+      expect(res.ingestion.ok).toBe(false);
+      // No synthetic event should ever be inserted for a missing workspace.
+      expect(clickhouse.insertWorkspace).not.toHaveBeenCalled();
+    });
+
+    it('verdict=ok and PURGES the synthetic event (no site_url)', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      // real_tracking probe → 0 sessions (irrelevant to verdict).
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+
+      const res = await service.verifyTracking({ workspace_id: WS });
+
+      expect(res.workspace_exists).toBe(true);
+      expect(res.ingestion.ok).toBe(true);
+      expect(res.ingestion.round_trip_ms).toEqual(expect.any(Number));
+      expect(res.ingestion.detail).toContain('ingested and purged');
+      expect(res.snippet).toBeNull();
+      expect(res.verdict).toBe('ok');
+
+      // Real insert path used (proves the real ingestion chain, not a mock).
+      expect(clickhouse.insertWorkspace).toHaveBeenCalledWith(
+        WS,
+        'events',
+        expect.arrayContaining([
+          expect.objectContaining({
+            session_id: `__veridian_verify__${WS}`,
+            dedup_token: `__veridian_verify__${WS}_pv`,
+            name: 'screen_view',
+            // Far-past sentinel keeps it out of every date-bounded report.
+            created_at: '2000-01-01 00:00:00.000',
+          }),
+        ]),
+      );
+
+      // Purge runs against events + the 3 MV targets (sessions/pages/goals).
+      const purgedTables = (
+        clickhouse.commandWorkspaceWithParams as jest.Mock
+      ).mock.calls.map((c) => c[1] as string);
+      expect(purgedTables.some((q) => /ALTER TABLE events DELETE/.test(q))).toBe(
+        true,
+      );
+      expect(
+        purgedTables.some((q) => /ALTER TABLE sessions DELETE/.test(q)),
+      ).toBe(true);
+      expect(purgedTables.some((q) => /ALTER TABLE pages DELETE/.test(q))).toBe(
+        true,
+      );
+      expect(purgedTables.some((q) => /ALTER TABLE goals DELETE/.test(q))).toBe(
+        true,
+      );
+    });
+
+    it('verdict=ingestion_failed when the synthetic event never becomes requeryable', async () => {
+      workspaceExists();
+      ingestionVisible(false); // count-back always 0 → not requeryable
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+
+      const res = await service.verifyTracking({ workspace_id: WS });
+
+      expect(res.ingestion.ok).toBe(false);
+      expect(res.ingestion.round_trip_ms).toBeNull();
+      expect(res.verdict).toBe('ingestion_failed');
+      // Even on failure we still purge (no orphan synthetic row).
+      expect(clickhouse.commandWorkspaceWithParams).toHaveBeenCalled();
+    });
+
+    it('verdict=snippet_missing when site_url HTML has no tracker script', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => '<html><head><title>no tracker here</title></head></html>',
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://client.example',
+      });
+
+      expect(res.ingestion.ok).toBe(true);
+      expect(res.snippet).not.toBeNull();
+      expect(res.snippet!.checked).toBe(true);
+      expect(res.snippet!.present).toBe(false);
+      expect(res.verdict).toBe('snippet_missing');
+    });
+
+    it('verdict=snippet_misconfigured when src points at the bare /tracker.js SPA trap', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+      // Wrong src (root /tracker.js = SPA HTML, tracks nothing) but right ws id.
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          `<html><head><script async src="https://t.example/tracker.js" data-workspace-id="${WS}"></script></head></html>`,
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://client.example',
+      });
+
+      expect(res.snippet!.present).toBe(true);
+      expect(res.snippet!.src_correct).toBe(false);
+      expect(res.snippet!.workspace_id_match).toBe(true);
+      expect(res.verdict).toBe('snippet_misconfigured');
+    });
+
+    it('verdict=snippet_misconfigured when data-workspace-id does not match', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          `<html><head><script async src="https://t.example/sdk/v1/tracker.js" data-workspace-id="some_other_ws"></script></head></html>`,
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://client.example',
+      });
+
+      expect(res.snippet!.present).toBe(true);
+      expect(res.snippet!.src_correct).toBe(true);
+      expect(res.snippet!.workspace_id_match).toBe(false);
+      expect(res.verdict).toBe('snippet_misconfigured');
+    });
+
+    it('verdict=ok with a correctly-installed snippet, and surfaces real_tracking', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      // Real tracking already flowing: 42 sessions over 30d, live now.
+      analyticsService.query
+        .mockResolvedValueOnce({ data: [{ sessions: 42 }], meta: {} } as never) // 30d
+        .mockResolvedValueOnce({ data: [{ sessions: 1 }], meta: {} } as never); // 30min
+      jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          `<html><head><script async src="https://t.example/sdk/v1/tracker.js" data-workspace-id="${WS}"></script></head></html>`,
+      } as never);
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://client.example',
+      });
+
+      expect(res.snippet!.present).toBe(true);
+      expect(res.snippet!.src_correct).toBe(true);
+      expect(res.snippet!.workspace_id_match).toBe(true);
+      expect(res.real_tracking.sessions_30d).toBe(42);
+      expect(res.real_tracking.live).toBe(true);
+      expect(res.verdict).toBe('ok');
+    });
+
+    it('does not down-rank to snippet_missing when the site is unreachable (fail-soft)', async () => {
+      workspaceExists();
+      ingestionVisible(true);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+      jest
+        .spyOn(global, 'fetch')
+        .mockRejectedValue(new Error('ETIMEDOUT'));
+
+      const res = await service.verifyTracking({
+        workspace_id: WS,
+        site_url: 'https://down.example',
+      });
+
+      expect(res.snippet!.present).toBe(false);
+      expect(res.snippet!.detail).toContain('could not fetch site');
+      // Unreachable site is an availability issue, not a confirmed missing tag.
+      expect(res.verdict).toBe('ok');
     });
   });
 });

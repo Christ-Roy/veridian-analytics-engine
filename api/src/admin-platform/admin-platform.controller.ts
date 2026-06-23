@@ -19,6 +19,8 @@ import { GscResyncDto, GscStatusDto } from './dto/gsc-admin.dto';
 import { UpdateWorkspaceSettingsM2MDto } from './dto/update-workspace-settings.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import { AdsConversionsResponseDto } from './dto/ads-conversions-response.dto';
+import { TrackingVerifyDto } from './dto/tracking-verify.dto';
+import { TrackingVerifyResponseDto } from './dto/tracking-verify-response.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
@@ -288,5 +290,26 @@ export class AdminPlatformController {
     @Body() dto: AdsConversionsDto,
   ): Promise<AdsConversionsResponseDto> {
     return this.adminPlatformService.getAdsConversions(dto);
+  }
+
+  // ─── Lot G — tracking.verify (dry-run install check, zero pollution) ───
+
+  @Post('tracking.verify')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Verify in ONE M2M call that a workspace’s tracking is wired & working. ' +
+      'DRY-RUN: injects a synthetic event through the real ingestion chain to ' +
+      'prove the round trip, then PURGES it — it never pollutes the workspace ' +
+      'stats (anchored at a far-past sentinel timestamp, excluded from every ' +
+      'date-bounded report). If site_url is supplied, the page HTML is fetched ' +
+      '(5s, fail-soft) to confirm the snippet is present, points at ' +
+      '/sdk/v1/tracker.js, and carries the right workspace id. Returns a ' +
+      'single verdict an IA can branch on after installing the snippet.',
+  })
+  trackingVerify(
+    @Body() dto: TrackingVerifyDto,
+  ): Promise<TrackingVerifyResponseDto> {
+    return this.adminPlatformService.verifyTracking(dto);
   }
 }

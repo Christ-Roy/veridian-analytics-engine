@@ -539,6 +539,74 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
       expect(res.body).toHaveProperty('meta');
     });
   });
+
+  describe('POST /api/admin/platform/tracking.verify (dry-run, zero pollution)', () => {
+    it('returns 200 + workspace_not_found verdict for an unknown workspace', async () => {
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tracking.verify')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: 'ws_does_not_exist_verify' })
+        .expect(200);
+      expect(res.body.workspace_exists).toBe(false);
+      expect(res.body.verdict).toBe('workspace_not_found');
+      expect(res.body.ingestion.ok).toBe(false);
+    });
+
+    it('returns 400 when workspace_id is missing', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tracking.verify')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({})
+        .expect(400);
+    });
+
+    it('round-trips a synthetic event end-to-end AND leaves sessions_30d UNCHANGED (zero pollution)', async () => {
+      // Provision a real workspace (creates its ClickHouse db + tables).
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Verify Probe Co',
+          email: `verify-${Date.now()}@test.com`,
+          siteUrl: 'https://verify.test',
+        })
+        .expect(201);
+      const wsId: string = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      // Baseline real tracking BEFORE the verify call.
+      const before = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.status')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId })
+        .expect(200);
+      const sessionsBefore = before.body.tracking?.sessions_30d ?? 0;
+
+      // Verify (injects + purges a synthetic event through the real chain).
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tracking.verify')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId })
+        .expect(200);
+
+      expect(res.body.workspace_exists).toBe(true);
+      expect(res.body.ingestion.ok).toBe(true);
+      expect(res.body.ingestion.round_trip_ms).toEqual(expect.any(Number));
+      expect(res.body.ingestion.detail).toContain('ingested and purged');
+      expect(res.body.snippet).toBeNull();
+      expect(res.body.verdict).toBe('ok');
+
+      // ZERO POLLUTION: real sessions_30d must be identical (synthetic event
+      // anchored at the year-2000 sentinel + purged → never counted).
+      const after = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.status')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId })
+        .expect(200);
+      const sessionsAfter = after.body.tracking?.sessions_30d ?? 0;
+      expect(sessionsAfter).toBe(sessionsBefore);
+    });
+  });
 });
 
 // Surface M2M IA-first (workspaces.status, voip.*, gsc.*, webhooks.*,
@@ -575,6 +643,7 @@ describe('Admin Platform — surface M2M IA-first : auth gate', () => {
     'webhooks.delete',
     'webhooks.test',
     'ads.conversions',
+    'tracking.verify',
   ];
 
   it.each(M2M_ENDPOINTS)(
