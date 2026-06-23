@@ -50,8 +50,13 @@ export class WebhookTransformEngine {
     }
     if (transform.type === 'template') {
       try {
+        // noEscape: true — the output context is JSON, NOT HTML. HTML-escaping
+        // a JSON body turns `&`/`<`/`>`/`'`/`"` into `&amp;` etc. and corrupts
+        // the payload (e.g. `{"email":"{{email}}"}` breaks on a `&` in a UTM).
+        // Correct JSON escaping is the author's job via the `{{json ...}}`
+        // helper (which JSON.stringifies into a SafeString).
         const compiled = this.handlebars.compile(transform.template, {
-          noEscape: false,
+          noEscape: true,
           strict: false,
         });
         return compiled(event);

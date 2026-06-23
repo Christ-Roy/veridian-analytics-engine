@@ -122,4 +122,102 @@ describe('SsrfGuard', () => {
       }
     });
   });
+
+  describe('isPrivateIp', () => {
+    it.each([
+      '127.0.0.1',
+      '10.1.2.3',
+      '172.16.5.5',
+      '192.168.1.1',
+      '169.254.169.254',
+      '0.0.0.0',
+      '100.64.0.1', // CGNAT
+      '::1',
+      'fc00::1',
+      'fe80::1',
+      '::ffff:127.0.0.1', // IPv4-mapped loopback
+      '::ffff:10.0.0.1', // IPv4-mapped private
+    ])('flags %s', (ip) => {
+      expect(SsrfGuard.isPrivateIp(ip)).toBe(true);
+    });
+
+    it.each(['8.8.8.8', '1.1.1.1', '93.184.216.34', '2001:db8::1', '::ffff:8.8.8.8'])(
+      'lets public %s through',
+      (ip) => {
+        expect(SsrfGuard.isPrivateIp(ip)).toBe(false);
+      },
+    );
+
+    it('returns false for a non-IP string', () => {
+      expect(SsrfGuard.isPrivateIp('example.com')).toBe(false);
+    });
+  });
+
+  describe('assertSafeUrlResolved (DNS-aware pre-fetch guard)', () => {
+    const guardWith = (resolver: (h: string) => Promise<Array<{ address: string }>>) =>
+      new SsrfGuard(async (h) => (await resolver(h)).map((a) => ({ ...a, family: 4 })));
+
+    it('accepts a hostname that resolves to a public IP', async () => {
+      const g = guardWith(async () => [{ address: '93.184.216.34' }]);
+      await expect(g.assertSafeUrlResolved('https://api.example.com/hook')).resolves.toBeUndefined();
+    });
+
+    it('rejects a hostname that resolves to loopback (DNS post-validation)', async () => {
+      const g = guardWith(async () => [{ address: '127.0.0.1' }]);
+      await expect(g.assertSafeUrlResolved('https://evil.example/hook')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('rejects a hostname that resolves to the cloud-metadata IP', async () => {
+      const g = guardWith(async () => [{ address: '169.254.169.254' }]);
+      await expect(g.assertSafeUrlResolved('https://evil.example/hook')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('rejects if ANY resolved IP is private (mixed A records)', async () => {
+      const g = guardWith(async () => [{ address: '93.184.216.34' }, { address: '10.0.0.1' }]);
+      await expect(g.assertSafeUrlResolved('https://evil.example/hook')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('still rejects a literal private IP without resolving', async () => {
+      const resolver = jest.fn(async () => [{ address: '8.8.8.8', family: 4 }]);
+      const g = new SsrfGuard(resolver);
+      await expect(g.assertSafeUrlResolved('https://127.0.0.1/x')).rejects.toThrow(ForbiddenException);
+      expect(resolver).not.toHaveBeenCalled(); // literal IP → no DNS
+    });
+
+    it('does not resolve a literal public IP (short-circuit)', async () => {
+      const resolver = jest.fn(async () => [{ address: '10.0.0.1', family: 4 }]);
+      const g = new SsrfGuard(resolver);
+      await expect(g.assertSafeUrlResolved('https://8.8.8.8/x')).resolves.toBeUndefined();
+      expect(resolver).not.toHaveBeenCalled();
+    });
+
+    it('raises DNS_RESOLUTION_FAILED when the name cannot be resolved', async () => {
+      const g = new SsrfGuard(async () => {
+        throw new Error('ENOTFOUND');
+      });
+      try {
+        await g.assertSafeUrlResolved('https://nope.example/hook');
+        fail('should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ForbiddenException);
+        const body = (err as ForbiddenException).getResponse() as { code?: string };
+        expect(body.code).toBe('DNS_RESOLUTION_FAILED');
+      }
+    });
+
+    it('skips DNS resolution when allowPrivate is set (test/staging escape hatch)', async () => {
+      const resolver = jest.fn(async () => [{ address: '10.0.0.1', family: 4 }]);
+      const g = new SsrfGuard(resolver);
+      await expect(
+        g.assertSafeUrlResolved('http://localhost:9000/x', { allowHttp: true, allowPrivate: true }),
+      ).resolves.toBeUndefined();
+      expect(resolver).not.toHaveBeenCalled();
+    });
+  });
 });

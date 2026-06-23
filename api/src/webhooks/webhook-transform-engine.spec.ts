@@ -56,6 +56,29 @@ describe('WebhookTransformEngine', () => {
       const broken = { type: 'template' as const, template: '{{unclosed' };
       expect(() => engine.render(broken, {})).toThrow(BadRequestException);
     });
+
+    it('does NOT HTML-escape values in a JSON body (noEscape:true)', () => {
+      // A value with &, <, >, ', " must survive verbatim — the output is JSON,
+      // not HTML. With HTML-escaping ON this would become &amp; &lt; &#x27; etc.
+      // and corrupt the payload for the destination.
+      const out = engine.render(
+        { type: 'template', template: '{"email":"{{email}}","note":"{{note}}"}' },
+        { email: "a&b'<c>@x.com", note: 'tom & jerry "quote"' },
+      );
+      const parsed = JSON.parse(out);
+      expect(parsed.email).toBe("a&b'<c>@x.com");
+      expect(parsed.note).toBe('tom & jerry "quote"');
+      expect(out).not.toContain('&amp;');
+      expect(out).not.toContain('&#x27;');
+    });
+
+    it('json helper still produces valid JSON for special-char data', () => {
+      const out = engine.render(
+        { type: 'template', template: '{{json this}}' },
+        { email: 'a&b@x.com', tag: '<script>' },
+      );
+      expect(JSON.parse(out)).toEqual({ email: 'a&b@x.com', tag: '<script>' });
+    });
   });
 
   describe('assertCompilable', () => {

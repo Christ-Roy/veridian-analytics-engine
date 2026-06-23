@@ -2,6 +2,18 @@ import { Injectable } from '@nestjs/common';
 import type { WebhookFilter } from './entities/webhook-definition.entity';
 
 /**
+ * ReDoS hardening for the `matches` operator. The regex is operator-supplied
+ * and runs on the shared event loop (hot ingestion path), so a catastrophic
+ * pattern like `(a+)+$` against a long input could pin the loop and DoS
+ * ingestion for ALL tenants. We have no native re2 dep, so we cap both sides:
+ *   - the pattern source length (a tiny pattern can't blow up much)
+ *   - the input length fed to .test() (backtracking cost scales with input)
+ * Anything over the cap fails closed (never matches) rather than running.
+ */
+const MAX_REGEX_PATTERN_LENGTH = 512;
+const MAX_REGEX_INPUT_LENGTH = 4_096;
+
+/**
  * WebhookFilterEngine — pure stateless evaluator.
  *
  * Operators (Phase 1):
@@ -40,6 +52,11 @@ export class WebhookFilterEngine {
       case 'matches': {
         if (typeof fieldValue !== 'string') return false;
         if (typeof filter.value !== 'string') return false;
+        // ReDoS guard: cap pattern + input length. An over-long pattern or an
+        // over-long input fails closed (never matches) instead of risking
+        // catastrophic backtracking on the shared event loop.
+        if (filter.value.length > MAX_REGEX_PATTERN_LENGTH) return false;
+        if (fieldValue.length > MAX_REGEX_INPUT_LENGTH) return false;
         try {
           return new RegExp(filter.value).test(fieldValue);
         } catch {

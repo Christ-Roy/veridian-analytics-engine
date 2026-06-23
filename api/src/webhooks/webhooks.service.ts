@@ -335,6 +335,19 @@ export class WebhooksService {
     return delivery;
   }
 
+  /**
+   * Read the ready (pending/retrying) deliveries due now.
+   *
+   * ⚠️ NOT an atomic claim. ClickHouse has no SELECT…FOR UPDATE / transactions,
+   * so two workers reading concurrently would BOTH pick up the same row and
+   * double-POST. The only guard today is the per-process `running` flag in the
+   * delivery worker → this is correct ONLY in a single-instance deployment
+   * (current prod: no `replicas` in any compose). Scaling to 2+ replicas (or a
+   * deploy overlap) requires a real claim (worker_id + lease_until column +
+   * read-back verification) — tracked in
+   * todo/2026-06-23-webhooks-claim-delivery-non-atomique-multi-instance.md.
+   * Until then, DO NOT scale the engine to >1 replica without that fix.
+   */
   async findReadyDeliveries(limit = 50): Promise<WebhookDelivery[]> {
     const rows = await this.clickhouse.querySystem<DeliveryRow>(
       `SELECT * FROM ${DELIVERIES_TABLE} FINAL

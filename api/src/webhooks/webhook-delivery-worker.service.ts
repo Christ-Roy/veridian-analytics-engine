@@ -141,9 +141,10 @@ export class WebhookDeliveryWorker {
       return;
     }
 
-    // Anti-loop + scheme guard on the Twenty base URL (same as generic path).
+    // Anti-loop + scheme + resolved-IP guard on the Twenty base URL (same guard
+    // as the generic path: resolve the hostname's IPs before any outbound call).
     try {
-      this.ssrf.assertSafeUrl(webhook.url, {
+      await this.ssrf.assertSafeUrlResolved(webhook.url, {
         allowHttp: this.httpAllowed(),
         allowPrivate: this.privateAllowed(),
       });
@@ -265,20 +266,9 @@ export class WebhookDeliveryWorker {
       return;
     }
 
-    try {
-      this.ssrf.assertSafeUrl(webhook.url, {
-        allowHttp: this.httpAllowed(),
-        allowPrivate: this.privateAllowed(),
-      });
-    } catch (err) {
-      await this.webhooks.updateDelivery({
-        ...delivery,
-        status: 'failed',
-        error_message: `ssrf: ${(err as Error).message}`,
-      });
-      return;
-    }
-
+    // SSRF is enforced inside sendOne() (single guard for delivery + test):
+    // it resolves the hostname's IPs before the fetch and returns an
+    // `ssrf:`-prefixed failure recorded as terminal by recordOutcome().
     const result = await this.sendOne(webhook, delivery);
     await this.recordOutcome(webhook, delivery, result);
   }
@@ -287,6 +277,24 @@ export class WebhookDeliveryWorker {
     webhook: WebhookDefinition,
     delivery: WebhookDelivery,
   ): Promise<DeliveryAttemptResult> {
+    // SSRF guard for EVERY outbound path (async delivery AND webhooks.test).
+    // Centralised here so no caller can bypass it — the worker resolves the
+    // hostname's IPs before the fetch, closing the literal-only hole.
+    try {
+      await this.ssrf.assertSafeUrlResolved(webhook.url, {
+        allowHttp: this.httpAllowed(),
+        allowPrivate: this.privateAllowed(),
+      });
+    } catch (err) {
+      return {
+        success: false,
+        http_status: null,
+        latency_ms: 0,
+        response_body: '',
+        error_message: `ssrf: ${(err as Error).message}`,
+      };
+    }
+
     const payload = this.parsePayload(delivery.request_body);
     let body: string;
     try {
@@ -311,8 +319,23 @@ export class WebhookDeliveryWorker {
         headers,
         body,
         signal: controller.signal,
+        // Do NOT auto-follow redirects: a public endpoint could 302 → an
+        // internal IP (169.254.169.254 / 127.0.0.1) that bypasses the guard.
+        // We treat any 3xx as a terminal client error (see recordOutcome).
+        redirect: 'manual',
       });
       const latency = Date.now() - start;
+      // A 3xx with redirect:'manual' is an opaque/filtered response — reject it
+      // rather than chase an unvalidated Location.
+      if (res.status >= 300 && res.status < 400) {
+        return {
+          success: false,
+          http_status: res.status,
+          latency_ms: latency,
+          response_body: '',
+          error_message: `redirect_blocked: HTTP ${res.status} to ${res.headers.get('location') ?? '(no location)'} not followed (SSRF guard)`,
+        };
+      }
       const text = await this.readBodySafely(res);
       return {
         success: res.ok,
@@ -356,9 +379,17 @@ export class WebhookDeliveryWorker {
       return;
     }
 
+    // Terminal misconfiguration failures — never retried (the target is unsafe
+    // or misbehaving regardless of attempt count): SSRF rejection, blocked
+    // redirect, transform compile error.
+    const isTerminalConfig =
+      result.error_message.startsWith('ssrf:') ||
+      result.error_message.startsWith('redirect_blocked:') ||
+      result.error_message.startsWith('transform_failed:');
+
     const status = result.http_status;
     const isClient4xx = status !== null && status >= 400 && status < 500 && status !== 429;
-    if (isClient4xx) {
+    if (isTerminalConfig || isClient4xx) {
       await this.webhooks.updateDelivery({
         ...delivery,
         status: 'failed',

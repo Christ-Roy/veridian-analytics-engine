@@ -58,6 +58,29 @@ describe('WebhookFilterEngine', () => {
       const filters: WebhookFilter[] = [{ field: 'path', op: 'matches', value: '(' }];
       expect(engine.matches(filters, { path: '/anything' })).toBe(false);
     });
+
+    it('fails closed (no catastrophic backtracking) on a ReDoS pattern + long input', () => {
+      // (a+)+$ is the textbook catastrophic pattern. Input is over the input
+      // cap so the engine refuses to run the regex (returns false) rather than
+      // pinning the event loop. Must return fast.
+      const filters: WebhookFilter[] = [{ field: 'v', op: 'matches', value: '(a+)+$' }];
+      const evil = 'a'.repeat(10_000) + '!'; // > MAX_REGEX_INPUT_LENGTH, no match
+      const start = Date.now();
+      expect(engine.matches(filters, { v: evil })).toBe(false);
+      expect(Date.now() - start).toBeLessThan(50); // would be seconds if it ran
+    });
+
+    it('refuses an over-long regex pattern (fails closed)', () => {
+      const filters: WebhookFilter[] = [
+        { field: 'v', op: 'matches', value: 'a'.repeat(600) }, // > MAX_REGEX_PATTERN_LENGTH
+      ];
+      expect(engine.matches(filters, { v: 'a'.repeat(600) })).toBe(false);
+    });
+
+    it('still matches a normal pattern on a normal-length input', () => {
+      const filters: WebhookFilter[] = [{ field: 'path', op: 'matches', value: '^/blog/' }];
+      expect(engine.matches(filters, { path: '/blog/post-1' })).toBe(true);
+    });
   });
 
   describe('in operator', () => {

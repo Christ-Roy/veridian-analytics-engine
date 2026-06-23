@@ -69,7 +69,21 @@ describe('WebhookDeliveryWorker', () => {
         WebhookDeliveryWorker,
         { provide: WebhooksService, useValue: webhooks },
         WebhookTransformEngine,
-        SsrfGuard,
+        // Inject a stub DNS resolver so the pre-fetch SSRF guard never hits the
+        // network: real names resolve to a public IP, the well-known internal
+        // hostnames used in the SSRF tests resolve to private/metadata IPs.
+        {
+          provide: SsrfGuard,
+          useValue: new SsrfGuard(async (hostname: string) => {
+            if (hostname === 'rebind.evil.example') {
+              return [{ address: '169.254.169.254', family: 4 }];
+            }
+            if (hostname === 'internal.evil.example') {
+              return [{ address: '10.0.0.5', family: 4 }];
+            }
+            return [{ address: '93.184.216.34', family: 4 }]; // public (example.com)
+          }),
+        },
         TwentyEventMapper,
         TwentyConnectorService,
         {
@@ -147,6 +161,101 @@ describe('WebhookDeliveryWorker', () => {
       fetchMock.mockRejectedValueOnce(abort);
       const result = await worker.sendOne(baseWebhook, baseDelivery);
       expect(result.error_message).toBe('timeout');
+    });
+  });
+
+  // ─── SSRF guard runs INSIDE sendOne → covers delivery AND webhooks.test ──
+  describe('sendOne SSRF guard (single choke point)', () => {
+    it('rejects a literal loopback URL before any fetch', async () => {
+      const wh = { ...baseWebhook, url: 'https://127.0.0.1/internal' };
+      const result = await worker.sendOne(wh, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^ssrf:/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a literal cloud-metadata IP before any fetch', async () => {
+      const wh = { ...baseWebhook, url: 'https://169.254.169.254/latest/meta-data/' };
+      const result = await worker.sendOne(wh, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^ssrf:/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a literal RFC1918 private IP before any fetch', async () => {
+      const wh = { ...baseWebhook, url: 'https://10.0.0.5/admin' };
+      const result = await worker.sendOne(wh, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^ssrf:/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a hostname that RESOLVES to a private IP (DNS post-validation / rebinding)', async () => {
+      // Literal check passes (public-looking name) but it resolves to 10.0.0.5.
+      const wh = { ...baseWebhook, url: 'https://internal.evil.example/hook' };
+      const result = await worker.sendOne(wh, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^ssrf:/);
+      expect(result.error_message).toMatch(/private/i);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('rejects a hostname that resolves to the cloud-metadata IP', async () => {
+      const wh = { ...baseWebhook, url: 'https://rebind.evil.example/steal' };
+      const result = await worker.sendOne(wh, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^ssrf:/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('does NOT follow a 3xx redirect (could point at an internal IP)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 302,
+        headers: { get: (h: string) => (h === 'location' ? 'http://169.254.169.254/' : null) },
+        text: async () => '',
+      });
+      const result = await worker.sendOne(baseWebhook, baseDelivery);
+      expect(result.success).toBe(false);
+      expect(result.error_message).toMatch(/^redirect_blocked:/);
+      // fetch was called exactly once with redirect:'manual' — never re-issued.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+    });
+
+    it('lets a public hostname through to the fetch', async () => {
+      fetchMock.mockResolvedValueOnce({ ok: true, status: 200, text: async () => 'OK' });
+      const result = await worker.sendOne(baseWebhook, baseDelivery);
+      expect(result.success).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // recordOutcome must NOT retry an SSRF / redirect rejection — they are terminal.
+  describe('SSRF / redirect failures are terminal (no retry)', () => {
+    it('marks an SSRF-resolved rejection as failed, not retrying', async () => {
+      webhooks.findByIdInternal = jest.fn(async () => ({
+        ...baseWebhook,
+        url: 'https://internal.evil.example/hook',
+      }));
+      await worker.deliverOne(baseDelivery);
+      const updated = webhooks.updateDelivery.mock.calls[0][0] as WebhookDelivery;
+      expect(updated.status).toBe('failed');
+      expect(updated.error_message).toMatch(/^ssrf:/);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('marks a blocked redirect as failed, not retrying', async () => {
+      fetchMock.mockResolvedValueOnce({
+        ok: false,
+        status: 301,
+        headers: { get: () => 'http://10.0.0.1/' },
+        text: async () => '',
+      });
+      await worker.deliverOne(baseDelivery);
+      const updated = webhooks.updateDelivery.mock.calls[0][0] as WebhookDelivery;
+      expect(updated.status).toBe('failed');
+      expect(updated.error_message).toMatch(/^redirect_blocked:/);
     });
   });
 

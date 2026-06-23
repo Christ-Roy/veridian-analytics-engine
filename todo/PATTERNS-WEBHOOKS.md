@@ -318,25 +318,31 @@ refusera sinon).
 
 ## 9. SSRF allowlist
 
-Helper `webhook-ssrf-guard.ts` (pur, testable) qui REFUSE :
+Helper `common/ssrf-guard.ts` (`SsrfGuard`, pur + testable) qui REFUSE :
 - `localhost`, `127.0.0.0/8`, `0.0.0.0`
-- Private IPs : `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- Private IPs : `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, CGNAT `100.64.0.0/10`
 - Link-local : `169.254.0.0/16` (metadata cloud !)
-- `::1`, `fc00::/7`, `fe80::/10`
+- `::1`, `fc00::/7`, `fe80::/10`, IPv4-mapped `::ffff:<privée>`
 - Schemes non-https en prod (sauf flag `WEBHOOK_ALLOW_HTTP=true` staging)
 - URLs vers l'engine lui-même (pattern `analytics-engine.*\.veridian\.site`)
   → anti-boucle infinie
 
-**Vérifier l'IP RÉSOLUE**, pas juste le hostname. Un attaquant peut
-faire un DNS rebinding `evil.com → 127.0.0.1`. Donc :
-1. resolve hostname
-2. check chaque IP retournée
-3. au moment du POST, force la connexion sur l'IP résolue (via `lookup`
-   custom dans `http.Agent`)
+**Deux couches (implémenté 2026-06-23, tickets SSRF clos)** :
+1. `assertSafeUrl()` — SYNC, check littéral du hostname. Au CRUD (create/update),
+   feedback immédiat, zéro DNS.
+2. `assertSafeUrlResolved()` — ASYNC, **résout le hostname et rejette si UNE IP
+   résolue est privée/loopback/link-local/metadata**. Appelé AVANT chaque fetch
+   sortant (delivery + `webhooks.test` + Twenty) depuis `sendOne()` (point de
+   passage unique). Ferme le trou "evil.com passe le check littéral puis pointe
+   sur 127.0.0.1" + le DNS-rebinding post-création.
 
-C'est pénible à tester sans pourrir le CI. Modèle accepté V1 : check au
-moment du `create/update` + check à chaque delivery. Documenter la
-limite "TOCTOU subsiste" et ouvrir ticket suivi.
+Le worker fetch en `redirect: 'manual'` et **rejette tout 3xx** (un endpoint
+public peut sinon 302 → IP interne). Rejets SSRF/redirect = terminaux (no retry).
+
+**Résiduel TOCTOU** : un rebinding sub-seconde entre notre resolve et le connect
+d'undici n'est pas pinné (le `fetch` global Node n'accepte pas de `lookup`
+custom sans dispatcher undici externe — pas de dep ajoutée). Fenêtre étroite,
+neutralisée en pratique par le check toutes-IP + `redirect: 'manual'`.
 
 ---
 
