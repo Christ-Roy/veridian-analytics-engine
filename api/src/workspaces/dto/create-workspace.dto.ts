@@ -15,6 +15,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { AnnotationDto } from './update-workspace.dto';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 
 export class CreateWorkspaceSettingsDto {
   @IsOptional()
@@ -68,7 +69,7 @@ export class CreateWorkspaceDto {
   @IsUrl()
   website: string;
 
-  @IsString()
+  @IsIanaTimezone()
   timezone: string;
 
   @IsString()

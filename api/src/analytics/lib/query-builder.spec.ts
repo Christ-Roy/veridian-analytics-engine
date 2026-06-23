@@ -1070,3 +1070,70 @@ describe('buildExtremesQuery', () => {
     });
   });
 });
+
+describe('buildAnalyticsQuery — SQL injection defense-in-depth', () => {
+  const base: AnalyticsQueryDto = {
+    workspace_id: 'test-ws',
+    metrics: ['sessions'],
+    dateRange: { start: '2025-12-01', end: '2025-12-28', granularity: 'day' },
+  };
+
+  describe('timezone (OWASP A03, P0)', () => {
+    it('throws instead of interpolating a malicious timezone', () => {
+      expect(() =>
+        buildAnalyticsQuery(base, "UTC') OR 1=1 -- "),
+      ).toThrow(/Invalid IANA timezone/);
+    });
+
+    it('throws on a malformed timezone', () => {
+      expect(() => buildAnalyticsQuery(base, 'Foo/Bar')).toThrow(
+        /Invalid IANA timezone/,
+      );
+    });
+
+    it('builds normally for a valid IANA timezone', () => {
+      const { sql } = buildAnalyticsQuery(base, 'Europe/Paris');
+      expect(sql).toContain("toDate(created_at, 'Europe/Paris')");
+    });
+
+    it('does not apply timezone literal for UTC', () => {
+      const { sql } = buildAnalyticsQuery(base, 'UTC');
+      // UTC short-circuits to no tz arg, so no injected literal
+      expect(sql).not.toContain("toDate(created_at, 'UTC')");
+    });
+  });
+
+  describe('order direction (OWASP A03, P1)', () => {
+    const noGranBase: AnalyticsQueryDto = {
+      workspace_id: 'test-ws',
+      metrics: ['sessions'],
+      dateRange: { start: '2025-12-01', end: '2025-12-28' },
+    };
+
+    it('throws instead of interpolating an injected direction (simple order)', () => {
+      expect(() =>
+        buildAnalyticsQuery({
+          ...noGranBase,
+          order: { sessions: 'ASC, (SELECT 1)' } as never,
+        }),
+      ).toThrow(/Invalid order direction/);
+    });
+
+    it('throws instead of interpolating an injected direction (granularity order)', () => {
+      expect(() =>
+        buildAnalyticsQuery({
+          ...base,
+          order: { sessions: 'desc; DROP TABLE sessions' } as never,
+        }),
+      ).toThrow(/Invalid order direction/);
+    });
+
+    it('normalizes valid directions to ASC/DESC literals', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...noGranBase,
+        order: { sessions: 'asc' },
+      });
+      expect(sql).toContain('ORDER BY sessions ASC');
+    });
+  });
+});

@@ -11,6 +11,7 @@ import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 import { UpdateWorkspaceSettingsDto } from '../../workspaces/dto/update-workspace.dto';
 import type { WorkspaceStatus } from '../../workspaces/entities/workspace.entity';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 
 /**
  * Body for POST /api/admin/platform/workspaces.updateSettings (M2M).
@@ -43,7 +44,7 @@ export class UpdateWorkspaceSettingsM2MDto {
 
   @ApiProperty({ required: false, example: 'Europe/Paris' })
   @IsOptional()
-  @IsString()
+  @IsIanaTimezone()
   timezone?: string;
 
   @ApiProperty({ required: false, example: 'EUR' })

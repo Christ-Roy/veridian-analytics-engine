@@ -2,7 +2,6 @@ import {
   IsString,
   IsArray,
   IsOptional,
-  IsObject,
   ValidateNested,
   IsIn,
   IsNumber,
@@ -16,6 +15,8 @@ import {
 import { Type } from 'class-transformer';
 import type { AnalyticsTable } from '../constants/tables';
 import { ANALYTICS_TABLES } from '../constants/tables';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
+import { IsOrderDirectionMap } from '../../common/validators/order-direction.validator';
 
 export const FILTER_OPERATORS = [
   'equals',
@@ -182,11 +183,11 @@ export class AnalyticsQueryDto {
   compareDateRange?: DateRangeDto;
 
   @IsOptional()
-  @IsString()
+  @IsIanaTimezone()
   timezone?: string;
 
   @IsOptional()
-  @IsObject()
+  @IsOrderDirectionMap()
   order?: Record<string, 'asc' | 'desc'>;
 
   @IsOptional()

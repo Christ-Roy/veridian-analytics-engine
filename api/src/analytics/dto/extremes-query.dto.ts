@@ -18,6 +18,7 @@ import {
 } from './analytics-query.dto';
 import type { AnalyticsTable } from '../constants/tables';
 import { ANALYTICS_TABLES } from '../constants/tables';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 
 export class ExtremesQueryDto {
   @IsString()
@@ -49,7 +50,7 @@ export class ExtremesQueryDto {
   metricFilters?: MetricFilterDto[];
 
   @IsOptional()
-  @IsString()
+  @IsIanaTimezone()
   timezone?: string;
 
   @IsOptional()

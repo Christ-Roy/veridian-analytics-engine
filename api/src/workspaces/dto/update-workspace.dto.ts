@@ -19,6 +19,7 @@ import { Type } from 'class-transformer';
 import { FilterDefinition } from '../../filters/entities/filter.entity';
 import { Integration } from '../entities/integration.entity';
 import type { WorkspaceStatus } from '../entities/workspace.entity';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 
 export class AnnotationDto {
   @IsString()
@@ -162,7 +163,7 @@ export class UpdateWorkspaceDto {
   website?: string;
 
   @IsOptional()
-  @IsString()
+  @IsIanaTimezone()
   timezone?: string;
 
   @IsOptional()

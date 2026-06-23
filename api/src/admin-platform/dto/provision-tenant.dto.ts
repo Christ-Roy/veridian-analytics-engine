@@ -9,6 +9,7 @@ import {
   IsIn,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 
 /**
  * Phone source dimension — tracks WHERE a phone call lead originated.
@@ -86,7 +87,7 @@ export class ProvisionTenantDto {
    * IANA timezone (default: Europe/Paris if omitted).
    */
   @IsOptional()
-  @IsString()
+  @IsIanaTimezone()
   timezone?: string;
 
   /**

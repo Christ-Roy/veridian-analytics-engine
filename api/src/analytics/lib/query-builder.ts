@@ -4,6 +4,8 @@ import { METRICS, getMetricSql, MetricContext } from '../constants/metrics';
 import { DIMENSIONS } from '../constants/dimensions';
 import { TABLE_CONFIGS, AnalyticsTable } from '../constants/tables';
 import { buildFilters, buildMetricFilters } from './filter-builder';
+import { assertValidTimezone } from '../../common/utils/timezone.util';
+import { normalizeOrderDirection } from '../../common/utils/order-direction.util';
 
 export interface BuiltQuery {
   sql: string;
@@ -275,6 +277,12 @@ export function buildAnalyticsQuery(
     const g = GRANULARITY_SQL[granularity];
     // Apply timezone to granularity grouping (not filtering) for non-UTC users
     const tz = timezone && timezone !== 'UTC' ? timezone : undefined;
+    // SECURITY (defense-in-depth, OWASP A03): `tz` is interpolated raw into a
+    // ClickHouse SQL string literal (`toDate(col, '${tz}')`). ClickHouse can't
+    // bind a timezone name as a parameter, so we hard-fail on any value that is
+    // not a valid IANA identifier — even if it somehow bypassed DTO validation
+    // (internal caller, corrupted workspace.timezone). No injection can pass.
+    if (tz) assertValidTimezone(tz);
     granularitySelect = `${g.expr(tableConfig.dateColumn, tz)} as ${g.column}`;
     granularityColumn = g.column;
   }
@@ -318,9 +326,12 @@ export function buildAnalyticsQuery(
     const additionalOrder = query.order
       ? Object.entries(query.order)
           .map(([field, dir]) => {
-            if (METRICS[field]) return `${field} ${dir.toUpperCase()}`;
+            // SECURITY (defense-in-depth, OWASP A03): never interpolate `dir`
+            // raw — normalize to one of exactly two literals (ASC/DESC) or throw.
+            const sqlDir = normalizeOrderDirection(dir);
+            if (METRICS[field]) return `${field} ${sqlDir}`;
             if (DIMENSIONS[field])
-              return `${DIMENSIONS[field].column} ${dir.toUpperCase()}`;
+              return `${DIMENSIONS[field].column} ${sqlDir}`;
             throw new Error(`Unknown order field: ${field}`);
           })
           .join(', ')
@@ -328,9 +339,10 @@ export function buildAnalyticsQuery(
     orderBy = `ORDER BY ${granularityColumn} ASC${additionalOrder ? ', ' + additionalOrder : ''}`;
   } else if (query.order) {
     const orderClauses = Object.entries(query.order).map(([field, dir]) => {
-      if (METRICS[field]) return `${field} ${dir.toUpperCase()}`;
-      if (DIMENSIONS[field])
-        return `${DIMENSIONS[field].column} ${dir.toUpperCase()}`;
+      // SECURITY (defense-in-depth, OWASP A03): normalize direction, never raw.
+      const sqlDir = normalizeOrderDirection(dir);
+      if (METRICS[field]) return `${field} ${sqlDir}`;
+      if (DIMENSIONS[field]) return `${DIMENSIONS[field].column} ${sqlDir}`;
       throw new Error(`Unknown order field: ${field}`);
     });
     orderBy = `ORDER BY ${orderClauses.join(', ')}`;
