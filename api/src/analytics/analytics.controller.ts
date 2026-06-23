@@ -11,6 +11,8 @@ import { ApiOperation, ApiSecurity, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ExtremesQueryDto, ExtremesResponse } from './dto/extremes-query.dto';
+import { FunnelQueryDto, FunnelResponse } from './dto/funnel-query.dto';
+import { ConversionsByChannelDto } from './dto/conversions-by-channel.dto';
 import type { AnalyticsTable } from './constants/tables';
 import { ANALYTICS_TABLES } from './constants/tables';
 import { WorkspaceAuthGuard } from '../common/guards/workspace.guard';
@@ -39,6 +41,28 @@ export class AnalyticsController {
   })
   async extremes(@Body() dto: ExtremesQueryDto): Promise<ExtremesResponse> {
     return this.analyticsService.extremes(dto);
+  }
+
+  @Post('analytics.funnel')
+  @HttpCode(200)
+  @UseGuards(WorkspaceAuthGuard)
+  @ApiOperation({
+    summary:
+      'Compute a conversion funnel over an ordered list of goal steps. Filterable by channel/channel_group. Uses ClickHouse windowFunnel over the durable goals table.',
+  })
+  async funnel(@Body() dto: FunnelQueryDto): Promise<FunnelResponse> {
+    return this.analyticsService.funnel(dto);
+  }
+
+  @Post('analytics.conversionsByChannel')
+  @HttpCode(200)
+  @UseGuards(WorkspaceAuthGuard)
+  @ApiOperation({
+    summary:
+      'Conversion rate broken down by channel_group × app (create→convert). Denominator = sessions of the same channel.',
+  })
+  async conversionsByChannel(@Body() dto: ConversionsByChannelDto) {
+    return this.analyticsService.conversionsByChannel(dto);
   }
 
   @Get('analytics.metrics')

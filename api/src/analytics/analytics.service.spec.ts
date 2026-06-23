@@ -276,4 +276,125 @@ describe('AnalyticsService', () => {
       expect(cacheManager.del).not.toHaveBeenCalled();
     });
   });
+
+  describe('funnel', () => {
+    it('computes step counts, per-step and overall conversion rates', async () => {
+      // windowFunnel aggregate row: s0=100 reach step1, s1=40 reach step2, s2=10 reach step3
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { s0: 100, s1: 40, s2: 10 },
+      ]);
+
+      const res = await service.funnel({
+        workspace_id: 'ws-1',
+        steps: [
+          { goal_name: 'view', label: 'Vue' },
+          { goal_name: 'add_to_cart' },
+          { goal_name: 'signup' },
+        ],
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+      });
+
+      expect(res.unit).toBe('session');
+      expect(res.entered).toBe(100);
+      expect(res.steps).toHaveLength(3);
+      expect(res.steps[0]).toMatchObject({
+        step: 1,
+        count: 100,
+        conversion_from_previous: null,
+        conversion_from_start: 100,
+        dropoff_from_previous: 0,
+        label: 'Vue',
+      });
+      expect(res.steps[1]).toMatchObject({
+        step: 2,
+        count: 40,
+        conversion_from_previous: 40, // 40/100
+        conversion_from_start: 40,
+        dropoff_from_previous: 60,
+        label: 'add_to_cart', // defaults to goal_name
+      });
+      expect(res.steps[2]).toMatchObject({
+        step: 3,
+        count: 10,
+        conversion_from_previous: 25, // 10/40
+        conversion_from_start: 10,
+        dropoff_from_previous: 30,
+      });
+      expect(res.overall_conversion).toBe(10); // 10/100
+    });
+
+    it('handles an empty result (no sessions in funnel)', async () => {
+      clickhouse.queryWorkspace.mockResolvedValueOnce([]);
+      const res = await service.funnel({
+        workspace_id: 'ws-1',
+        steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
+        dateRange: { preset: 'previous_7_days' },
+      });
+      expect(res.entered).toBe(0);
+      expect(res.overall_conversion).toBe(0);
+      expect(res.steps.every((s) => s.count === 0)).toBe(true);
+    });
+
+    it('passes a channel filter through to ClickHouse', async () => {
+      clickhouse.queryWorkspace.mockResolvedValueOnce([{ s0: 5, s1: 2 }]);
+      await service.funnel({
+        workspace_id: 'ws-1',
+        steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+        filters: [
+          { dimension: 'channel_group', operator: 'equals', values: ['ads'] },
+        ],
+      });
+      const [, sql] = clickhouse.queryWorkspace.mock.calls[0];
+      expect(sql).toContain('channel_group =');
+    });
+  });
+
+  describe('conversionsByChannel', () => {
+    it('computes conversion rate per channel × app using same-channel sessions', async () => {
+      // 1st call: conversions per (channel_group, app)
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'ads', app: 'prospection', conversions: 20 },
+        { channel_group: 'seo', app: 'prospection', conversions: 5 },
+      ]);
+      // 2nd call: sessions per channel_group
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'ads', sessions: 200 },
+        { channel_group: 'seo', sessions: 100 },
+      ]);
+
+      const res = await service.conversionsByChannel({
+        workspace_id: 'ws-1',
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+      });
+
+      expect(res.conversion_goals).toEqual(['signup', 'app_started']);
+      const ads = res.rows.find((r) => r.channel_group === 'ads')!;
+      expect(ads).toMatchObject({
+        app: 'prospection',
+        conversions: 20,
+        sessions: 200,
+        conversion_rate: 10, // 20/200
+      });
+      const seo = res.rows.find((r) => r.channel_group === 'seo')!;
+      expect(seo.conversion_rate).toBe(5); // 5/100
+    });
+
+    it('labels missing app and tolerates channel with no sessions', async () => {
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'direct', app: '', conversions: 3 },
+      ]);
+      clickhouse.queryWorkspace.mockResolvedValueOnce([]); // no sessions rows
+      const res = await service.conversionsByChannel({
+        workspace_id: 'ws-1',
+        dateRange: { preset: 'previous_30_days' },
+      });
+      expect(res.rows[0]).toMatchObject({
+        app: '(non renseigné)',
+        conversions: 3,
+        sessions: 0,
+        conversion_rate: 0,
+      });
+    });
+  });
 });

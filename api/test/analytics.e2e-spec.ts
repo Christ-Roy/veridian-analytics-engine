@@ -2243,4 +2243,94 @@ describe('Analytics E2E', () => {
       });
     });
   });
+
+  describe('POST /api/analytics.funnel', () => {
+    it('computes a 2-step funnel over the goals table', async () => {
+      // Seed: session_id = session-floor(i/2), goal cycles
+      // add_to_cart/checkout_start/purchase. Sessions where both add_to_cart and
+      // checkout_start happen exist (e.g. session-0: i=0 add_to_cart, i=1 checkout_start).
+      const response = await request(ctx.app.getHttpServer())
+        .post('/api/analytics.funnel')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          workspace_id: workspaceId,
+          steps: [
+            { goal_name: 'add_to_cart', label: 'Panier' },
+            { goal_name: 'checkout_start' },
+          ],
+          dateRange: { start: '2025-12-01', end: '2025-12-31' },
+        })
+        .expect(200);
+
+      expect(response.body.unit).toBe('session');
+      expect(response.body.steps).toHaveLength(2);
+      expect(response.body.steps[0].step).toBe(1);
+      expect(response.body.steps[0].label).toBe('Panier');
+      expect(response.body.steps[0].conversion_from_previous).toBeNull();
+      // Step 1 must have at least as many as step 2 (monotonic).
+      expect(response.body.steps[0].count).toBeGreaterThanOrEqual(
+        response.body.steps[1].count,
+      );
+      expect(response.body.entered).toBe(response.body.steps[0].count);
+      expect(typeof response.body.overall_conversion).toBe('number');
+    });
+
+    it('rejects a funnel with fewer than 2 steps', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/analytics.funnel')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          workspace_id: workspaceId,
+          steps: [{ goal_name: 'add_to_cart' }],
+          dateRange: { start: '2025-12-01', end: '2025-12-31' },
+        })
+        .expect(400);
+    });
+
+    it('accepts a channel_group filter', async () => {
+      const response = await request(ctx.app.getHttpServer())
+        .post('/api/analytics.funnel')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          workspace_id: workspaceId,
+          steps: [
+            { goal_name: 'add_to_cart' },
+            { goal_name: 'checkout_start' },
+          ],
+          dateRange: { start: '2025-12-01', end: '2025-12-31' },
+          filters: [
+            {
+              dimension: 'channel_group',
+              operator: 'equals',
+              values: ['direct'],
+            },
+          ],
+        })
+        .expect(200);
+      expect(response.body.steps).toHaveLength(2);
+    });
+  });
+
+  describe('POST /api/analytics.conversionsByChannel', () => {
+    it('returns conversion rate rows grouped by channel_group × app', async () => {
+      const response = await request(ctx.app.getHttpServer())
+        .post('/api/analytics.conversionsByChannel')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          workspace_id: workspaceId,
+          dateRange: { start: '2025-12-01', end: '2025-12-31' },
+          // Use seeded goal names as "conversions" so we get non-empty rows.
+          conversion_goals: ['purchase'],
+        })
+        .expect(200);
+
+      expect(response.body.conversion_goals).toEqual(['purchase']);
+      expect(Array.isArray(response.body.rows)).toBe(true);
+      for (const row of response.body.rows) {
+        expect(typeof row.channel_group).toBe('string');
+        expect(typeof row.conversions).toBe('number');
+        expect(typeof row.conversion_rate).toBe('number');
+      }
+    });
+  });
 });

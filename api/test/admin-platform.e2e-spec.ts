@@ -540,6 +540,76 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     });
   });
 
+  describe('POST /api/admin/platform/analytics.funnel + conversionsByChannel', () => {
+    it('runs a funnel for a provisioned workspace (M2M)', async () => {
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Funnel Probe Co',
+          email: `fn-${Date.now()}@test.com`,
+          siteUrl: 'https://fn.test',
+        })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.funnel')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: wsId,
+          steps: [{ goal_name: 'view' }, { goal_name: 'signup' }],
+          dateRange: { preset: 'previous_30_days' },
+        })
+        .expect(200);
+
+      // Empty workspace → entered 0, steps echoed back.
+      expect(res.body).toHaveProperty('entered');
+      expect(res.body.steps).toHaveLength(2);
+      expect(res.body.unit).toBe('session');
+    });
+
+    it('rejects a funnel with < 2 steps (400)', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.funnel')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: 'ws_x',
+          steps: [{ goal_name: 'only_one' }],
+          dateRange: { preset: 'previous_30_days' },
+        })
+        .expect(400);
+    });
+
+    it('runs conversionsByChannel for a provisioned workspace (M2M)', async () => {
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'Conv Probe Co',
+          email: `cv-${Date.now()}@test.com`,
+          siteUrl: 'https://cv.test',
+        })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.conversionsByChannel')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: wsId,
+          dateRange: { preset: 'previous_30_days' },
+        })
+        .expect(200);
+
+      expect(res.body).toHaveProperty('rows');
+      expect(Array.isArray(res.body.rows)).toBe(true);
+      expect(res.body.conversion_goals).toEqual(['signup', 'app_started']);
+    });
+  });
+
   describe('POST /api/admin/platform/tracking.verify (dry-run, zero pollution)', () => {
     it('returns 200 + workspace_not_found verdict for an unknown workspace', async () => {
       const res = await request(ctx.app.getHttpServer())
@@ -738,6 +808,9 @@ describe('Admin Platform — surface M2M IA-first : auth gate', () => {
     'workspaces.setLayout',
     'crm.setMapping',
     'crm.getMapping',
+    // Attribution M2M (funnel + conversions par canal)
+    'analytics.funnel',
+    'analytics.conversionsByChannel',
   ];
 
   it.each(M2M_ENDPOINTS)(

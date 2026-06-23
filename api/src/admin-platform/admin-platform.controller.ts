@@ -32,6 +32,8 @@ import { TrackingVerifyResponseDto } from './dto/tracking-verify-response.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
+import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
+import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
 import {
   CreateWebhookDto,
   DeleteWebhookDto,
@@ -122,6 +124,26 @@ export class AdminPlatformController {
   })
   analyticsQuery(@Body() dto: AnalyticsQueryDto) {
     return this.adminPlatformService.analyticsQuery(dto);
+  }
+
+  @Post('analytics.funnel')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Compute a workspace funnel (M2M). Ordered goal steps, filterable by channel/channel_group. Same contract as POST /api/analytics.funnel, gated by the platform admin key.',
+  })
+  analyticsFunnel(@Body() dto: FunnelQueryDto) {
+    return this.adminPlatformService.analyticsFunnel(dto);
+  }
+
+  @Post('analytics.conversionsByChannel')
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Conversion rate by channel_group × app for a workspace (M2M). Same contract as POST /api/analytics.conversionsByChannel, gated by the platform admin key.',
+  })
+  analyticsConversionsByChannel(@Body() dto: ConversionsByChannelDto) {
+    return this.adminPlatformService.analyticsConversionsByChannel(dto);
   }
 
   // ─── Lot A — Consolidated workspace status ────────────────────────────

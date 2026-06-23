@@ -7,7 +7,14 @@ import { ClickHouseService } from '../database/clickhouse.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ExtremesQueryDto, ExtremesResponse } from './dto/extremes-query.dto';
+import {
+  FunnelQueryDto,
+  FunnelResponse,
+  FunnelStepResult,
+} from './dto/funnel-query.dto';
+import { ConversionsByChannelDto } from './dto/conversions-by-channel.dto';
 import { buildAnalyticsQuery, buildExtremesQuery } from './lib/query-builder';
+import { buildFunnelQuery } from './lib/funnel-builder';
 import {
   resolveDatePreset,
   fillGaps,
@@ -26,6 +33,11 @@ const GRANULARITY_COLUMNS: Record<string, string> = {
   month: 'date_month',
   year: 'date_year',
 };
+
+/** Round to 2 decimals (percentages). */
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
 
 export interface AnalyticsResponse {
   data:
@@ -450,6 +462,190 @@ export class AnalyticsService {
           end: resolvedDateRange.end!,
         },
       },
+    };
+  }
+
+  /**
+   * Funnel (tunnel de vente) : combien de sessions/visiteurs franchissent une
+   * séquence ordonnée d'étapes (objectifs), avec les taux de passage N→N+1 et le
+   * taux global. Filtrable par canal (channel/channel_group) via `filters`.
+   * S'appuie sur ClickHouse `windowFunnel` sur la table durable `goals`.
+   */
+  async funnel(dto: FunnelQueryDto): Promise<FunnelResponse> {
+    const workspace = await this.workspacesService.get(dto.workspace_id);
+    const tz = dto.timezone || workspace.timezone || 'UTC';
+    const unit = dto.unit === 'visitor' ? 'visitor' : 'session';
+
+    // Resolve date range (preset → absolute) and normalize to ClickHouse format.
+    const resolved = dto.dateRange.preset
+      ? resolveDatePreset(dto.dateRange.preset, tz)
+      : { start: dto.dateRange.start!, end: dto.dateRange.end! };
+    const startCh = resolved.start.includes('T')
+      ? isoToClickHouseDateTime(resolved.start)!
+      : resolved.start;
+    const endCh = resolved.end.includes('T')
+      ? isoToClickHouseDateTime(resolved.end)!
+      : resolved.end;
+
+    // windowFunnel window: default = full span (steps may span the whole range).
+    const spanSeconds = Math.max(
+      1,
+      Math.ceil(
+        (new Date(resolved.end).getTime() -
+          new Date(resolved.start).getTime()) /
+          1000,
+      ),
+    );
+    const windowSeconds = dto.window_seconds ?? spanSeconds;
+
+    const { sql, params } = buildFunnelQuery({
+      steps: dto.steps,
+      start: startCh,
+      end: endCh,
+      unit,
+      windowSeconds,
+      filters: dto.filters,
+    });
+
+    const rows = await this.clickhouse.queryWorkspace<Record<string, unknown>>(
+      dto.workspace_id,
+      sql,
+      params,
+    );
+    const row = rows[0] ?? {};
+
+    // Coerce step counts (ClickHouse returns aggregates as strings).
+    const counts = dto.steps.map((_, i) => {
+      const v = row[`s${i}`];
+      const n = typeof v === 'number' ? v : Number(v ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    });
+
+    const entered = counts[0] ?? 0;
+    const steps: FunnelStepResult[] = dto.steps.map((s, i) => {
+      const count = counts[i] ?? 0;
+      const prev = i === 0 ? null : (counts[i - 1] ?? 0);
+      const convFromPrev =
+        prev === null ? null : prev > 0 ? round2((count / prev) * 100) : 0;
+      const convFromStart = entered > 0 ? round2((count / entered) * 100) : 0;
+      const dropoff = prev === null ? 0 : Math.max(0, prev - count);
+      return {
+        step: i + 1,
+        goal_name: s.goal_name,
+        label: s.label || s.goal_name,
+        count,
+        conversion_from_previous: convFromPrev,
+        conversion_from_start: convFromStart,
+        dropoff_from_previous: dropoff,
+      };
+    });
+
+    const last = counts[counts.length - 1] ?? 0;
+    const overall = entered > 0 ? round2((last / entered) * 100) : 0;
+
+    return {
+      workspace_id: dto.workspace_id,
+      unit,
+      dateRange: { start: startCh, end: endCh },
+      entered,
+      overall_conversion: overall,
+      steps,
+    };
+  }
+
+  /**
+   * Taux de conversion par app × canal : pour chaque (channel_group, app), le
+   * nombre de conversions (goals du type ciblé) et le taux vs les sessions du
+   * MÊME canal. `app` provient de `properties['app']` porté par les goals
+   * d'inscription (signup/app_started). Différenciateur "d'où viennent mes
+   * clients, et sur quelle app".
+   */
+  async conversionsByChannel(dto: ConversionsByChannelDto): Promise<{
+    workspace_id: string;
+    dateRange: { start: string; end: string };
+    conversion_goals: string[];
+    rows: Array<{
+      channel_group: string;
+      app: string;
+      conversions: number;
+      sessions: number;
+      conversion_rate: number;
+    }>;
+  }> {
+    const workspace = await this.workspacesService.get(dto.workspace_id);
+    const tz = dto.timezone || workspace.timezone || 'UTC';
+
+    const resolved = dto.dateRange.preset
+      ? resolveDatePreset(dto.dateRange.preset, tz)
+      : { start: dto.dateRange.start!, end: dto.dateRange.end! };
+    const startCh = resolved.start.includes('T')
+      ? isoToClickHouseDateTime(resolved.start)!
+      : resolved.start;
+    const endCh = resolved.end.includes('T')
+      ? isoToClickHouseDateTime(resolved.end)!
+      : resolved.end;
+
+    const goals =
+      dto.conversion_goals && dto.conversion_goals.length > 0
+        ? dto.conversion_goals
+        : ['signup', 'app_started'];
+
+    // Conversions per (channel_group, app) from the goals table.
+    const convRows = await this.clickhouse.queryWorkspace<{
+      channel_group: string;
+      app: string;
+      conversions: string | number;
+    }>(
+      dto.workspace_id,
+      `SELECT
+         channel_group,
+         properties['app'] AS app,
+         uniqExact(session_id) AS conversions
+       FROM goals
+       WHERE goal_timestamp >= {start:DateTime64(3)}
+         AND goal_timestamp <= {end:DateTime64(3)}
+         AND goal_name IN ({goals:Array(String)})
+       GROUP BY channel_group, app`,
+      { start: startCh, end: endCh, goals },
+    );
+
+    // Sessions per channel_group (denominator).
+    const sessRows = await this.clickhouse.queryWorkspace<{
+      channel_group: string;
+      sessions: string | number;
+    }>(
+      dto.workspace_id,
+      `SELECT channel_group, count() AS sessions
+       FROM sessions FINAL
+       WHERE created_at >= {start:DateTime64(3)}
+         AND created_at <= {end:DateTime64(3)}
+       GROUP BY channel_group`,
+      { start: startCh, end: endCh },
+    );
+
+    const sessionsByChannel = new Map<string, number>();
+    for (const r of sessRows) {
+      sessionsByChannel.set(r.channel_group, Number(r.sessions ?? 0));
+    }
+
+    const rows = convRows.map((r) => {
+      const conversions = Number(r.conversions ?? 0);
+      const sessions = sessionsByChannel.get(r.channel_group) ?? 0;
+      return {
+        channel_group: r.channel_group,
+        app: r.app || '(non renseigné)',
+        conversions,
+        sessions,
+        conversion_rate:
+          sessions > 0 ? round2((conversions / sessions) * 100) : 0,
+      };
+    });
+
+    return {
+      workspace_id: dto.workspace_id,
+      dateRange: { start: startCh, end: endCh },
+      conversion_goals: goals,
+      rows,
     };
   }
 

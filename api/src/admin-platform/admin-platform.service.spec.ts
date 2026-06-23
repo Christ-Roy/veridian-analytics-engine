@@ -102,6 +102,8 @@ describe('AdminPlatformService.provisionTenant', () => {
           provide: AnalyticsService,
           useValue: {
             query: jest.fn().mockResolvedValue({ data: [], meta: {} }),
+            funnel: jest.fn().mockResolvedValue({ steps: [] }),
+            conversionsByChannel: jest.fn().mockResolvedValue({ rows: [] }),
           },
         },
         {
@@ -1394,6 +1396,37 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(res.snippet!.detail).toContain('could not fetch site');
       // Unreachable site is an availability issue, not a confirmed missing tag.
       expect(res.verdict).toBe('ok');
+    });
+  });
+
+  describe('analytics delegation (funnel / conversionsByChannel)', () => {
+    it('delegates analyticsFunnel to AnalyticsService.funnel', async () => {
+      const dto = {
+        workspace_id: 'ws_funnel_probe',
+        steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
+        dateRange: { preset: 'previous_7_days' as const },
+      };
+      const out = { entered: 5, steps: [] };
+      analyticsService.funnel.mockResolvedValue(out as never);
+
+      const res = await service.analyticsFunnel(dto as never);
+
+      expect(analyticsService.funnel).toHaveBeenCalledWith(dto);
+      expect(res).toBe(out);
+    });
+
+    it('delegates analyticsConversionsByChannel to AnalyticsService.conversionsByChannel', async () => {
+      const dto = {
+        workspace_id: 'ws_conv_probe',
+        dateRange: { preset: 'previous_30_days' as const },
+      };
+      const out = { rows: [{ channel_group: 'ads' }] };
+      analyticsService.conversionsByChannel.mockResolvedValue(out as never);
+
+      const res = await service.analyticsConversionsByChannel(dto as never);
+
+      expect(analyticsService.conversionsByChannel).toHaveBeenCalledWith(dto);
+      expect(res).toBe(out);
     });
   });
 });

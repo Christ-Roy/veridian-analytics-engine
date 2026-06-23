@@ -14,6 +14,8 @@ import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
+import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
+import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
 import { VoipService } from '../voip/voip.service';
 import { VoipSyncService } from '../voip/voip-sync.service';
 import type { PhoneSource } from '../voip/voip.types';
@@ -374,6 +376,23 @@ export class AdminPlatformService {
    */
   async analyticsQuery(dto: AnalyticsQueryDto) {
     return this.analyticsService.query(dto);
+  }
+
+  /**
+   * M2M funnel (tunnel de vente). Same contract as POST /api/analytics.funnel
+   * but gated by the platform admin key. Lets an IA read a tenant's funnel
+   * (filterable by channel) without a workspace-scoped key.
+   */
+  async analyticsFunnel(dto: FunnelQueryDto) {
+    return this.analyticsService.funnel(dto);
+  }
+
+  /**
+   * M2M conversions by channel × app. Same contract as
+   * POST /api/analytics.conversionsByChannel, gated by the platform admin key.
+   */
+  async analyticsConversionsByChannel(dto: ConversionsByChannelDto) {
+    return this.analyticsService.conversionsByChannel(dto);
   }
 
   // ---------------------------------------------------------------------------
