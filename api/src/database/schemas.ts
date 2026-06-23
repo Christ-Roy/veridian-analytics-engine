@@ -478,7 +478,7 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       sdk_version String DEFAULT '',
       user_id Nullable(String),
       -- B2B identification (Robert 2026-06-23). visitor_id drives the
-      -- `unique_visitors` metric: uniqExact(visitor_id) over the sessions table.
+      -- unique_visitors metric: uniqExact(visitor_id) over the sessions table.
       visitor_id String DEFAULT '',
       fingerprint String DEFAULT '',
       ip String DEFAULT '',
