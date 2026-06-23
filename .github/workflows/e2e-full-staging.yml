@@ -62,20 +62,23 @@ jobs:
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD_STAGING }}
           E2E_TEST_SITE_KEY: ${{ secrets.E2E_TEST_SITE_KEY_STAGING }}
           HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
+          PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
         run: |
+          # Specs mortes retirées (vision 2026-05-23 + bridge décommissionné) :
+          # 03-forms-leads, 04-push-pwa, 13-cross-app-inbound. Le parcours
+          # métier réel est désormais couvert par le GATE 00-gate-onpremise
+          # (workflow e2e-gate-onpremise, bloquant sur push staging).
           npx playwright test \
+            00-gate-onpremise/ \
             01-smoke/ \
             02-bugs-regression/ \
             02-tracker-to-dashboard/ \
-            03-forms-leads/ \
-            04-push-pwa/ \
             05-gsc-oauth/ \
             07-settings-credentials/ \
             08-voip-calls/ \
             09-dashboard-ui/ \
             10-onboarding-wizard/ \
             12-auth-flow/ \
-            13-cross-app-inbound/ \
             18-api-contract/ \
             19-sdk-tracker/ \
             --project=chromium-desktop || true
