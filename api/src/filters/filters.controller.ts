@@ -17,11 +17,16 @@ import {
 } from '@nestjs/swagger';
 import { FiltersService } from './filters.service';
 import { FilterBackfillService } from './backfill/backfill.service';
+import {
+  ChannelBackfillService,
+  ChannelBackfillSummary,
+} from './backfill/channel-backfill.service';
 import { FilterDefinition } from './entities/filter.entity';
 import { CreateFilterDto } from './dto/create-filter.dto';
 import { UpdateFilterDto } from './dto/update-filter.dto';
 import { ReorderFiltersDto } from './dto/reorder-filters.dto';
 import { StartBackfillDto } from './backfill/dto/start-backfill.dto';
+import { ChannelBackfillDto } from './backfill/dto/channel-backfill.dto';
 import {
   BackfillSuccessResponseDto,
   BackfillStartResponseDto,
@@ -39,6 +44,7 @@ export class FiltersController {
   constructor(
     private readonly service: FiltersService,
     private readonly backfillService: FilterBackfillService,
+    private readonly channelBackfillService: ChannelBackfillService,
   ) {}
 
   @Get('filters.list')
@@ -185,5 +191,28 @@ export class FiltersController {
     @Query('workspace_id') workspaceId: string,
   ): Promise<BackfillSummary> {
     return this.backfillService.getBackfillSummary(workspaceId);
+  }
+
+  /**
+   * Re-derive channel/channel_group on the workspace's HISTORICAL sessions +
+   * goals using the SAME pure `deriveChannel()` as ingestion. Synchronous,
+   * idempotent, scoped to the workspace database, total-preserving. Fixes rows
+   * ingested before the S1 attribution chantier (channel/channel_group empty).
+   * Returns a summary (scanned / updated / before→after changes).
+   */
+  @Post('filters.channelBackfill')
+  @HttpCode(200)
+  @UseGuards(WorkspaceAuthGuard)
+  @DemoRestricted()
+  @RequirePermission('filters.manage')
+  @ApiOperation({
+    summary:
+      'Re-derive channel/channel_group on historical sessions+goals (idempotent)',
+  })
+  @ApiResponse({ status: 200, description: 'Channel backfill summary' })
+  async channelBackfill(
+    @Body() dto: ChannelBackfillDto,
+  ): Promise<ChannelBackfillSummary> {
+    return this.channelBackfillService.backfillChannel(dto.workspace_id);
   }
 }
