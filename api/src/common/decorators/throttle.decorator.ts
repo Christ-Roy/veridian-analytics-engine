@@ -1,3 +1,4 @@
+import { applyDecorators } from '@nestjs/common';
 import { SkipThrottle, Throttle } from '@nestjs/throttler';
 
 /**

@@ -538,6 +538,50 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
       expect(Array.isArray(res.body.data)).toBe(true);
       expect(res.body).toHaveProperty('meta');
     });
+
+    it('NEVER leaks raw ClickHouse SQL/params in the M2M response (no-SQL-leak contract)', async () => {
+      // Garde-fou de contrat (ticket leak-sql 2026-06-24, OWASP — fuite de
+      // structure interne) : AnalyticsResponse exposait `query.sql` (SQL CH
+      // brut + noms de tables internes) dans CHAQUE 200 de analytics.query,
+      // y compris cette route M2M plateforme consommée par le Hub/la skill.
+      // Le champ a été retiré du contrat. Ce test rougit si on le réintroduit.
+      const tenant = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          name: 'NoLeak Probe Co',
+          email: `noleak-${Date.now()}@test.com`,
+          siteUrl: 'https://noleak.test',
+        })
+        .expect(201);
+      const wsId = tenant.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/analytics.query')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          workspace_id: wsId,
+          metrics: ['page_count'],
+          dimensions: [],
+          dateRange: { preset: 'previous_30_days' },
+          table: 'pages',
+        })
+        .expect(200);
+
+      // Le champ `query` (qui portait { sql, params }) ne doit plus exister,
+      // ni à la racine ni imbriqué dans `meta`.
+      expect(res.body).not.toHaveProperty('query');
+      expect(res.body.meta).not.toHaveProperty('query');
+
+      // Défense en profondeur : AUCUN fragment de SQL ClickHouse brut ni de nom
+      // de table interne ne doit transparaître nulle part dans le payload, quel
+      // que soit le ré-emballage futur de la réponse.
+      const serialized = JSON.stringify(res.body);
+      expect(serialized).not.toMatch(/\bSELECT\b/i);
+      expect(serialized).not.toMatch(/\bFROM\b/i);
+      expect(serialized).not.toContain('countIf');
+    });
   });
 
   describe('POST /api/admin/platform/analytics.funnel + conversionsByChannel', () => {
