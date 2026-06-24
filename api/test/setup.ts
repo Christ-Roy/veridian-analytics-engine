@@ -26,6 +26,10 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_tunnel_other_ws',
   // P0 initializing→active transition e2e (initializing-activation.e2e-spec.ts)
   'staminads_ws_test_ws_init_activate',
+  // Channel re-derivation backfill e2e (channel-backfill.e2e-spec.ts)
+  'staminads_ws_channel_backfill_ws',
+  // Funnel vs conversions parity e2e (funnel-conversions-parity.e2e-spec.ts)
+  'staminads_ws_funnel_conv_parity_ws',
 ];
 
 let client: ClickHouseClient;
