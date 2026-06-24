@@ -47,3 +47,30 @@ Note : sur staging la plupart des sessions vides sont des fixtures E2E sans UA/g
 - Endpoints : toute `query`/`conversions`/`funnel` filtrée ou groupée par `channel_group` → résultats vides/faux pour l'historique.
 - Feature commerciale « conversions par canal » et comparaison web↔appel (`phone_source` ↔ `channel_group`) inexploitable tant que l'historique n'est pas backfillé.
 - Pas de risque de régression : la dérivation d'ingestion (nouvelles sessions) fonctionne déjà ; c'est uniquement le rattrapage de l'historique.
+
+## Résolution — 2026-06-25 (agent attribution)
+
+Reproduit : 142 sessions channel_group='' + 1 session utm_medium=email mal
+classée. Cause confirmée (canal figé à l'ingestion, backfill jamais lancé).
+
+**Fix** : nouveau `ChannelBackfillService` (`POST /api/filters.channelBackfill`)
+qui re-dérive channel/channel_group sur l'historique sessions+goals via la MÊME
+`deriveChannel()` que l'ingestion (zéro SQL parallèle), par ALTER UPDATE scopé,
+parameterisé, mutations_sync=2, émet `backfill.completed`. Idempotent +
+total-préservant.
+
+**Validé staging** `vrd_veridian_site_staging` (via la vraie logique deriveChannel
++ les ALTER UPDATEs exacts du service) :
+- sessions → direct 153 / referral 3 / email 1 ; uniqExact(id) **157 inchangé**,
+  somme par canal == total.
+- goals → direct 148 / referral 10 / email 1 ; total **159 inchangé**.
+- la session utm_medium=email passe bien à channel_group=email (incohérence
+  prouvée → disparue).
+- idempotence : aucun row channel_group='' restant ; un 2e run = 0 mutation.
+
+e2e réel `api/test/channel-backfill.e2e-spec.ts` (classification + total +
+idempotence + sabotage). Commit `feat(filters): channel re-derivation backfill
+for historical rows`.
+
+**PROD EN ATTENTE** : le backfill prod (sur les vraies données client) doit être
+déclenché par Robert après promo, via le même endpoint par workspace.

@@ -56,3 +56,23 @@ Recommandation : ajouter `AND session_id != ''` à `conversionsByChannel` pour a
 
 - Le client qui compare le compteur de conversions du funnel et celui du tableau « conversions par canal » voit deux chiffres → perte de confiance.
 - Lié aux tickets `2026-06-24-channel-group-vide-sessions-historiques.md` (channel vide) et `2026-06-24-conversions-denominateur-partage-par-app.md` (dénominateur). Les trois pointent vers la qualité d'attribution des goals.
+
+## Résolution — 2026-06-25 (agent attribution)
+
+Reproduit en réel sur staging : la divergence du ticket (116 vs 127) était
+**latente** au moment du fix (les données ont bougé, plus aucun goal à
+session_id vide). Query directe confirmée : `empty_sid=0` partout, 12 workspaces.
+
+Cause structurelle réelle : le funnel applique `AND session_id != ''` (mode
+session), `conversionsByChannel` non → divergence dès qu'un goal orphelin
+(session_id vide) existe. Question produit tranchée : les goals S2S (phone_call
+VoIP) synthétisent un session_id non vide (`voip:ovh:<id>`) → ils sont comptés
+identiquement par les deux surfaces. Le seul cas de divergence = un goal
+orphelin, qui ne doit PAS compter comme conversion.
+
+**Fix** : `AND session_id != ''` ajouté à `conversionsByChannel`
+(analytics.service.ts) → invariant `funnel == sum(conversions)` garanti quel que
+soit l'état des données. Prouvé sur vrai ClickHouse avec un orphelin contrôlé :
+pré-fix conversions=6 vs funnel=5, post-fix conversions=5 == funnel=5. e2e réel
+(`api/test/funnel-conversions-parity.e2e-spec.ts`) + unit guard SQL. Commit
+`fix(analytics): align conversionsByChannel session_id with funnel`.
