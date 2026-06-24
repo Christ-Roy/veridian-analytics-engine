@@ -67,6 +67,15 @@ DECLARED="$(node -e '
 # Builtins Node (avec ou sans préfixe node:). Liste figée suffisante ici.
 NODE_BUILTINS="assert async_hooks buffer child_process cluster console constants crypto dgram diagnostics_channel dns domain events fs http http2 https inspector module net os path perf_hooks process punycode querystring readline repl stream string_decoder timers tls trace_events tty url util v8 vm worker_threads zlib"
 
+# Packages TOUJOURS présents en node_modules car dépendance DIRECTE d'un package
+# déclaré (framework). Différent du cas "dep absente" (le bug zod 2026-06-17) :
+# ici le module se résout au 'npm ci' propre, donc PAS de 'Cannot find module'.
+#   - express : dépendance directe de @nestjs/platform-express (déclaré) ; importé
+#     en type-only (`import type { Request/Response }`) dans 13 fichiers api/src.
+# Si tu ajoutes ici, vérifie que le provider est bien déclaré dans api/package.json
+# ET tire le package dans api/package-lock.json (sinon ce n'est PAS transitif sûr).
+KNOWN_TRANSITIVE="express"
+
 missing=""
 # Récupère les specifiers d'import/require non-relatifs des fichiers touchés.
 # - `from '<x>'` (ES import) et `require('<x>')`
@@ -88,6 +97,8 @@ for f in $CHANGED_API_TS; do
     esac
     # Builtin Node sans préfixe ?
     case " $NODE_BUILTINS " in *" $root "*) continue ;; esac
+    # Transitif sûr fourni par un package déclaré (ex: express via platform-express) ?
+    case " $KNOWN_TRANSITIVE " in *" $root "*) continue ;; esac
     # Path alias internes (tsconfig paths) — aucun dans api/ aujourd'hui,
     # mais on tolère les specifiers qui matchent un répertoire src connu.
     # Déclaré dans package.json ?
