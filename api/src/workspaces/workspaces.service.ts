@@ -16,7 +16,10 @@ import {
 } from './entities/workspace.entity';
 import { Integration } from './entities/integration.entity';
 import { encryptApiKey, generateId } from '../common/crypto';
-import { toClickHouseDateTime } from '../common/utils/datetime.util';
+import {
+  toClickHouseDateTime,
+  parseClickHouseDateTime,
+} from '../common/utils/datetime.util';
 import { getDefaultFilters } from './fixtures/default-filters';
 import { BackfillTask } from '../filters/backfill/backfill-task.entity';
 
@@ -29,6 +32,17 @@ interface CurrentUser {
 
 interface WorkspaceRow extends Omit<Workspace, 'settings'> {
   settings: string; // JSON string from ClickHouse
+}
+
+/**
+ * Return a ClickHouse DateTime64(3) string exactly 1ms after the given one.
+ * Used to guarantee a strictly-increasing `updated_at` when two updates land
+ * within the same millisecond, so the ReplacingMergeTree(updated_at) never
+ * ties and keeps the newer version.
+ */
+function bumpMillis(datetime: string): string {
+  const next = new Date(parseClickHouseDateTime(datetime).getTime() + 1);
+  return toClickHouseDateTime(next);
 }
 
 function parseWorkspace(row: WorkspaceRow): Workspace {
@@ -79,27 +93,32 @@ export class WorkspacesService {
   ) {}
 
   async list(user: CurrentUser): Promise<Workspace[]> {
-    // Super admins see all workspaces
+    // Super admins see all workspaces.
+    // The inner `ORDER BY updated_at DESC … LIMIT 1 BY id` collapses any
+    // transient duplicate rows the ReplacingMergeTree may still hold before its
+    // background merge — we always surface the freshest version per workspace.
     if (user.isSuperAdmin) {
       const rows = await this.clickhouse.querySystem<WorkspaceRow>(
-        `SELECT * FROM workspaces
-         WHERE (id, updated_at) IN (
-           SELECT id, max(updated_at) FROM workspaces GROUP BY id
+        `SELECT * FROM (
+           SELECT * FROM workspaces
+           ORDER BY updated_at DESC
+           LIMIT 1 BY id
          )
          ORDER BY created_at DESC`,
       );
       return rows.map(parseWorkspace);
     }
 
-    // Regular users only see workspaces they are members of
+    // Regular users only see workspaces they are members of.
     const rows = await this.clickhouse.querySystem<WorkspaceRow>(
-      `SELECT * FROM workspaces
-       WHERE id IN (
-         SELECT workspace_id FROM workspace_memberships FINAL
-         WHERE user_id = {userId:String}
-       )
-       AND (id, updated_at) IN (
-         SELECT id, max(updated_at) FROM workspaces GROUP BY id
+      `SELECT * FROM (
+         SELECT * FROM workspaces
+         WHERE id IN (
+           SELECT workspace_id FROM workspace_memberships FINAL
+           WHERE user_id = {userId:String}
+         )
+         ORDER BY updated_at DESC
+         LIMIT 1 BY id
        )
        ORDER BY created_at DESC`,
       { userId: user.id },
@@ -244,6 +263,14 @@ export class WorkspacesService {
       };
     }
 
+    // Strictly-increasing updated_at so the ReplacingMergeTree (keyed on
+    // updated_at) always picks THIS version over the row we just read. Two
+    // updates within the same millisecond would otherwise tie on updated_at and
+    // the engine could keep the older row → silent data loss. We clamp the new
+    // timestamp to be > the row we merged from.
+    const now = toClickHouseDateTime();
+    const nextUpdatedAt = now > workspace.updated_at ? now : bumpMillis(workspace.updated_at);
+
     const updated: Workspace = {
       id: workspace.id,
       name: dto.name ?? workspace.name,
@@ -253,14 +280,19 @@ export class WorkspacesService {
       logo_url: dto.logo_url ?? workspace.logo_url,
       status: dto.status ?? workspace.status,
       created_at: workspace.created_at,
-      updated_at: toClickHouseDateTime(),
+      updated_at: nextUpdatedAt,
       settings: updatedSettings,
     };
 
-    // ClickHouse uses ALTER TABLE for updates, but for simplicity we delete and re-insert
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE workspaces DELETE WHERE id = '${dto.id}'`,
-    );
+    // INSERT-only update (no async DELETE). The `workspaces` table is a
+    // ReplacingMergeTree(updated_at): inserting a new row with a newer
+    // updated_at supersedes the previous version. Reads dedup on the freshest
+    // row — `ORDER BY updated_at DESC LIMIT 1` (get) and `ORDER BY updated_at
+    // DESC … LIMIT 1 BY id` (list) — so the fresh version is visible
+    // IMMEDIATELY: no waiting for an async mutation, no transient window where
+    // the row reads empty. This kills the DELETE-then-INSERT race that silently
+    // dropped settings on rapid, back-to-back updates (e.g. setFeatures
+    // off-then-on losing the off flags).
     await this.clickhouse.insertSystem('workspaces', [
       serializeWorkspace(updated),
     ]);
@@ -313,32 +345,41 @@ export class WorkspacesService {
       throw new NotFoundException(`Workspace ${id} not found`);
     }
 
+    // All DELETEs below are parameterized ({id:String}) — never interpolate the
+    // workspace id into raw SQL, even though it is validated upstream. Defense
+    // in depth against SQL injection on the ClickHouse system DB.
+
     // 1. Delete workspace memberships
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE workspace_memberships DELETE WHERE workspace_id = '${id}'`,
+    await this.clickhouse.commandSystemWithParams(
+      `ALTER TABLE workspace_memberships DELETE WHERE workspace_id = {id:String}`,
+      { id },
     );
 
     // 2. Delete invitations
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE invitations DELETE WHERE workspace_id = '${id}'`,
+    await this.clickhouse.commandSystemWithParams(
+      `ALTER TABLE invitations DELETE WHERE workspace_id = {id:String}`,
+      { id },
     );
 
     // 3. Delete workspace-scoped API keys
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE api_keys DELETE WHERE workspace_id = '${id}'`,
+    await this.clickhouse.commandSystemWithParams(
+      `ALTER TABLE api_keys DELETE WHERE workspace_id = {id:String}`,
+      { id },
     );
 
     // 4. Delete backfill tasks
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE backfill_tasks DELETE WHERE workspace_id = '${id}'`,
+    await this.clickhouse.commandSystemWithParams(
+      `ALTER TABLE backfill_tasks DELETE WHERE workspace_id = {id:String}`,
+      { id },
     );
 
     // 5. Drop workspace database (cascades to all tables)
     await this.clickhouse.dropWorkspaceDatabase(id);
 
     // 6. Delete workspace row from system database
-    await this.clickhouse.commandSystem(
-      `ALTER TABLE workspaces DELETE WHERE id = '${id}'`,
+    await this.clickhouse.commandSystemWithParams(
+      `ALTER TABLE workspaces DELETE WHERE id = {id:String}`,
+      { id },
     );
   }
 }

@@ -58,6 +58,7 @@ describe('WorkspacesService', () => {
             querySystem: jest.fn(),
             insertSystem: jest.fn(),
             commandSystem: jest.fn(),
+            commandSystemWithParams: jest.fn(),
             createWorkspaceDatabase: jest.fn(),
             dropWorkspaceDatabase: jest.fn(),
           },
@@ -406,9 +407,8 @@ describe('WorkspacesService', () => {
       ).rejects.toThrow(NotFoundException);
     });
 
-    it('deletes old row and inserts updated row', async () => {
+    it('updates via INSERT-only (no async DELETE) — ReplacingMergeTree', async () => {
       clickhouse.querySystem.mockResolvedValue([mockWorkspaceRow]);
-      clickhouse.commandSystem.mockResolvedValue(undefined);
       clickhouse.insertSystem.mockResolvedValue(undefined);
 
       await service.update({
@@ -416,55 +416,166 @@ describe('WorkspacesService', () => {
         name: 'Updated',
       });
 
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
-        expect.stringContaining("DELETE WHERE id = 'ws-test-001'"),
-      );
+      // The old DELETE-then-INSERT race is gone: we must NOT emit any
+      // `ALTER TABLE … DELETE` on update. A single INSERT supersedes the
+      // previous version via the ReplacingMergeTree(updated_at) engine.
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+      expect(clickhouse.commandSystemWithParams).not.toHaveBeenCalled();
       expect(clickhouse.insertSystem).toHaveBeenCalledWith(
         'workspaces',
         expect.any(Array),
       );
     });
+
+    it('writes a strictly-newer updated_at than the row it merged from', async () => {
+      // Same-millisecond updates must not tie on updated_at (the Replacing
+      // sort key) — otherwise the engine could keep the OLD version.
+      const frozen = '2025-01-01 00:00:00.000';
+      const row = {
+        ...mockWorkspace,
+        updated_at: frozen,
+        settings: JSON.stringify(mockWorkspace.settings),
+      };
+      clickhouse.querySystem.mockResolvedValue([row]);
+      clickhouse.insertSystem.mockResolvedValue(undefined);
+
+      const result = await service.update({ id: 'ws-test-001', name: 'X' });
+
+      // New updated_at strictly greater than what we read.
+      expect(result.updated_at > frozen).toBe(true);
+      const inserted = clickhouse.insertSystem.mock
+        .calls[0][1][0] as { updated_at: string };
+      expect(inserted.updated_at > frozen).toBe(true);
+    });
+
+    // ── Anti-régression P0 : perte de données silencieuse (deep-merge) ──
+    // Deux updates rapprochés (off flags puis on un flag) doivent PRÉSERVER
+    // l'état du premier. On modélise le ReplacingMergeTree : chaque lecture
+    // (`get` → `querySystem`) renvoie la DERNIÈRE version écrite par
+    // `insertSystem`. Si on réintroduisait le DELETE+INSERT async, l'état réel
+    // serait transitoirement vide et le merge repartirait de {} → ce test
+    // (et le flow setFeatures qui s'appuie dessus) casserait.
+    it('preserves prior settings across rapid back-to-back updates', async () => {
+      // End-to-end contract guard for the setFeatures flow: read state →
+      // deep-merge one flag → write must PRESERVE the other flags. Models the
+      // store as "last INSERT wins" (ReplacingMergeTree). The async-DELETE race
+      // itself can't be reproduced with synchronous mocks (it stems from the
+      // mutation being applied lazily after the HTTP 200) — that is locked down
+      // by the sibling test asserting update() emits NO DELETE at all. Together:
+      // this test proves the merge contract, that one proves the mechanism.
+      let visible: typeof mockWorkspaceRow | null = {
+        ...mockWorkspace,
+        settings: JSON.stringify({
+          ...mockWorkspace.settings,
+          features: { voip: false, gsc: false, connectors: false },
+        }),
+      };
+
+      clickhouse.querySystem.mockImplementation((sql: string) => {
+        // get() reads the workspace row; other reads (memberships, etc.) n/a here
+        if (sql.includes('FROM workspaces')) {
+          return Promise.resolve(visible ? [visible] : []);
+        }
+        return Promise.resolve([]);
+      });
+      // Model the async DELETE: row becomes invisible to subsequent reads.
+      clickhouse.commandSystem.mockImplementation((sql: string) => {
+        if (sql.includes('DELETE')) {
+          visible = null;
+        }
+        return Promise.resolve(undefined);
+      });
+      clickhouse.commandSystemWithParams.mockResolvedValue(undefined);
+      // INSERT publishes the new version.
+      clickhouse.insertSystem.mockImplementation(
+        (_table: string, values: unknown[]) => {
+          visible = values[0] as typeof mockWorkspaceRow;
+          return Promise.resolve(undefined);
+        },
+      );
+
+      // Update #1: assert the three flags are persisted false.
+      const first = await service.update({
+        id: 'ws-test-001',
+        settings: {
+          features: { voip: false, gsc: false, connectors: false },
+        },
+      });
+      expect(first.settings.features).toEqual({
+        voip: false,
+        gsc: false,
+        connectors: false,
+      });
+
+      // Update #2 (rapid, the setFeatures flow): read state, deep-merge voip on,
+      // write. The read MUST surface the persisted flags — not an empty window.
+      const wsBefore2 = await service.get('ws-test-001');
+      const merged = {
+        ...(wsBefore2.settings.features ?? {}),
+        voip: true,
+      };
+      const second = await service.update({
+        id: 'ws-test-001',
+        settings: { features: merged },
+      });
+
+      // voip flipped on, gsc + connectors PRESERVED (not wiped).
+      expect(second.settings.features).toEqual({
+        voip: true,
+        gsc: false,
+        connectors: false,
+      });
+    });
   });
 
   describe('delete', () => {
-    it('deletes workspace and all related data', async () => {
+    it('deletes workspace and all related data (parameterized, injection-safe)', async () => {
       clickhouse.querySystem.mockResolvedValue([{ id: 'ws-test-001' }]);
       clickhouse.dropWorkspaceDatabase.mockResolvedValue(undefined);
-      clickhouse.commandSystem.mockResolvedValue(undefined);
+      clickhouse.commandSystemWithParams.mockResolvedValue(undefined);
 
       await service.delete('ws-test-001');
 
+      // All cleanups must be parameterized ({id:String}) — never interpolate
+      // the id into raw SQL (SQL-injection defense on the system DB).
+      expect(clickhouse.commandSystem).not.toHaveBeenCalled();
+
       // Verify memberships cleanup
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
+      expect(clickhouse.commandSystemWithParams).toHaveBeenCalledWith(
         expect.stringContaining(
-          "workspace_memberships DELETE WHERE workspace_id = 'ws-test-001'",
+          'workspace_memberships DELETE WHERE workspace_id = {id:String}',
         ),
+        { id: 'ws-test-001' },
       );
       // Verify invitations cleanup
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
+      expect(clickhouse.commandSystemWithParams).toHaveBeenCalledWith(
         expect.stringContaining(
-          "invitations DELETE WHERE workspace_id = 'ws-test-001'",
+          'invitations DELETE WHERE workspace_id = {id:String}',
         ),
+        { id: 'ws-test-001' },
       );
       // Verify API keys cleanup
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
+      expect(clickhouse.commandSystemWithParams).toHaveBeenCalledWith(
         expect.stringContaining(
-          "api_keys DELETE WHERE workspace_id = 'ws-test-001'",
+          'api_keys DELETE WHERE workspace_id = {id:String}',
         ),
+        { id: 'ws-test-001' },
       );
       // Verify backfill tasks cleanup
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
+      expect(clickhouse.commandSystemWithParams).toHaveBeenCalledWith(
         expect.stringContaining(
-          "backfill_tasks DELETE WHERE workspace_id = 'ws-test-001'",
+          'backfill_tasks DELETE WHERE workspace_id = {id:String}',
         ),
+        { id: 'ws-test-001' },
       );
       // Verify database dropped
       expect(clickhouse.dropWorkspaceDatabase).toHaveBeenCalledWith(
         'ws-test-001',
       );
       // Verify workspace row deleted
-      expect(clickhouse.commandSystem).toHaveBeenCalledWith(
-        expect.stringContaining("workspaces DELETE WHERE id = 'ws-test-001'"),
+      expect(clickhouse.commandSystemWithParams).toHaveBeenCalledWith(
+        expect.stringContaining('workspaces DELETE WHERE id = {id:String}'),
+        { id: 'ws-test-001' },
       );
     });
 

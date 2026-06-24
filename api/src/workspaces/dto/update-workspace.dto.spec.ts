@@ -1,7 +1,44 @@
 import 'reflect-metadata';
 import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
-import { UpdateWorkspaceSettingsDto } from './update-workspace.dto';
+import {
+  UpdateWorkspaceDto,
+  UpdateWorkspaceSettingsDto,
+} from './update-workspace.dto';
+
+describe('UpdateWorkspaceDto id validation (SQL-injection defense)', () => {
+  const validateId = async (id: unknown) => {
+    const dto = plainToInstance(UpdateWorkspaceDto, { id });
+    return validate(dto);
+  };
+
+  it.each([
+    ['abc', 'simple slug'],
+    ['ws_test_001', 'underscores'],
+    ['vrd_veridian_site_prod', 'real prod id'],
+    ['a1b2c3', 'alphanumeric'],
+  ])('accepts %s (%s)', async (id) => {
+    const errors = await validateId(id);
+    const idErr = errors.find((e) => e.property === 'id');
+    expect(idErr).toBeUndefined();
+  });
+
+  it.each([
+    ["x'; DROP TABLE workspaces; --", 'classic SQL injection'],
+    ['Abc', 'uppercase first letter'],
+    ['1abc', 'starts with a digit'],
+    ['ws-test', 'hyphen (not allowed)'],
+    ['ws test', 'space'],
+    ['a', 'too short (< 2)'],
+    ['a'.repeat(51), 'too long (> 50)'],
+    ['', 'empty'],
+    ["a' OR '1'='1", 'boolean injection'],
+  ])('rejects %s (%s)', async (id) => {
+    const errors = await validateId(id);
+    const idErr = errors.find((e) => e.property === 'id');
+    expect(idErr).toBeDefined();
+  });
+});
 
 describe('UpdateWorkspaceSettingsDto', () => {
   describe('allowed_domains validation', () => {

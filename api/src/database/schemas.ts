@@ -33,7 +33,7 @@ export const SYSTEM_SCHEMAS: Record<string, string> = {
       status Enum8('initializing' = 1, 'active' = 2, 'inactive' = 3, 'error' = 4),
       created_at DateTime64(3) DEFAULT now64(3),
       updated_at DateTime64(3) DEFAULT now64(3)
-    ) ENGINE = MergeTree()
+    ) ENGINE = ReplacingMergeTree(updated_at)
     ORDER BY id
   `,
 

@@ -11,6 +11,7 @@ import {
   IsDateString,
   Min,
   Max,
+  MinLength,
   MaxLength,
   Matches,
   ValidateNested,
@@ -257,7 +258,16 @@ export class UpdateWorkspaceSettingsDto {
 }
 
 export class UpdateWorkspaceDto {
+  // Strictly validated (same rule as CreateWorkspaceDto) — defends against
+  // SQL injection on the ClickHouse system DB, since `id` reaches raw
+  // `ALTER TABLE … WHERE id = '…'` statements in WorkspacesService.delete().
   @IsString()
+  @MinLength(2)
+  @MaxLength(50)
+  @Matches(/^[a-z][a-z0-9_]*$/, {
+    message:
+      'ID must start with a letter and contain only lowercase letters, numbers, and underscores',
+  })
   id: string;
 
   @IsOptional()
