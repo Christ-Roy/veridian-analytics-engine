@@ -7,9 +7,15 @@ import {
   ValidateNested,
   Length,
   IsIn,
+  Matches,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { IsIanaTimezone } from '../../common/validators/timezone.validator';
+import { IsIso4217Currency } from '../../common/validators/currency.validator';
+import { IsE164 } from '../../common/validators/e164.validator';
+
+/** Workspace id slug regex — must match CreateWorkspaceDto (`^[a-z][a-z0-9_]*$`). */
+export const WORKSPACE_ID_REGEX = /^[a-z][a-z0-9_]*$/;
 
 /**
  * Phone source dimension — tracks WHERE a phone call lead originated.
@@ -41,7 +47,7 @@ export class PhoneNumberDto {
    * where Telnyx/OVH integration normalizes the value.
    */
   @IsString()
-  @Length(8, 20)
+  @IsE164()
   e164: string;
 
   @IsString()
@@ -74,13 +80,22 @@ export class ProvisionTenantDto {
    * OPTIONAL explicit workspace_id (e.g. legacy id adopted during the D2
    * migration of existing clients). When provided, it is used verbatim
    * instead of slugifying `name` — so a migrated workspace keeps its legacy
-   * id. Must match the workspace id regex `^[a-z][a-z0-9_]*$` (2..50). If a
-   * workspace already exists with this id → 409. When omitted, the id is
+   * id.
+   *
+   * VALIDATION (here, at the DTO layer — not the service): the id must match
+   * the workspace slug regex `^[a-z][a-z0-9_]*$` and be 2..50 chars. A malformed
+   * id is an INPUT error → 400 VALIDATION_ERROR, NOT a 409. The 409
+   * (WORKSPACE_ALREADY_EXISTS) is reserved EXCLUSIVELY for the genuine conflict
+   * "this id is already taken" (checked in the service). When omitted, the id is
    * slugified from `name` (default flow).
    */
   @IsOptional()
   @IsString()
   @Length(2, 50)
+  @Matches(WORKSPACE_ID_REGEX, {
+    message:
+      'workspace_id must match ^[a-z][a-z0-9_]*$ (lowercase letter, then lowercase letters/digits/underscores)',
+  })
   workspace_id?: string;
 
   /**
@@ -91,11 +106,13 @@ export class ProvisionTenantDto {
   timezone?: string;
 
   /**
-   * ISO 4217 currency code (default: EUR if omitted).
+   * ISO 4217 currency code (default: EUR if omitted). Validated against the
+   * closed ISO-4217 list (same as workspaces.updateSettings) so a bogus code
+   * (e.g. "BANANABUCKS") never reaches WorkspacesService.create and later
+   * breaks `Intl.NumberFormat` in the console.
    */
   @IsOptional()
-  @IsString()
-  @Length(3, 3)
+  @IsIso4217Currency()
   currency?: string;
 
   /**

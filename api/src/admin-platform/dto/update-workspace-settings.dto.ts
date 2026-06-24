@@ -12,6 +12,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { UpdateWorkspaceSettingsDto } from '../../workspaces/dto/update-workspace.dto';
 import type { WorkspaceStatus } from '../../workspaces/entities/workspace.entity';
 import { IsIanaTimezone } from '../../common/validators/timezone.validator';
+import { IsIso4217Currency } from '../../common/validators/currency.validator';
 
 /**
  * Body for POST /api/admin/platform/workspaces.updateSettings (M2M).
@@ -47,9 +48,13 @@ export class UpdateWorkspaceSettingsM2MDto {
   @IsIanaTimezone()
   timezone?: string;
 
+  // ISO-4217 validated (closed list), exactly like `timezone` above is
+  // IANA-validated in this same command. Before: bare @IsString() let
+  // "BANANABUCKS" / single chars persist → RangeError in Intl.NumberFormat
+  // console-side (ticket 2026-06-24-validation-currency-e164-layout-trous).
   @ApiProperty({ required: false, example: 'EUR' })
   @IsOptional()
-  @IsString()
+  @IsIso4217Currency()
   currency?: string;
 
   @ApiProperty({ required: false })

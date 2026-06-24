@@ -1,6 +1,14 @@
-import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  HttpCode,
+  Post,
+  UseFilters,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminPlatformService } from './admin-platform.service';
+import { AdminPlatformExceptionFilter } from './admin-platform-exception.filter';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { ProvisionTenantResponseDto } from './dto/provision-tenant-response.dto';
 import { ProvisionApiKeyDto } from './dto/provision-api-key.dto';
@@ -63,6 +71,12 @@ import {
 @Controller('api/admin/platform')
 @Public()
 @UseGuards(PlatformAdminGuard)
+// Canonical error contract for THIS surface only (scoped to the controller, NOT
+// global — zero impact on /api/track, the console, or any other route). Every
+// error from these 31 routes is normalised to {statusCode, error, message, code}
+// (ticket 2026-06-24-m2m-cinq-formats-erreur-incoherents). See the filter for the
+// full code table + CLI-compat note.
+@UseFilters(AdminPlatformExceptionFilter)
 // Rate-limit M2M : CHAQUE route est décorée explicitement (pas de défaut au
 // niveau classe — sinon, à cause de `Reflector.getAllAndOverride([handler,
 // class])`, un SkipThrottle de classe sur un throttler non re-déclaré par la

@@ -9,6 +9,7 @@ import {
 import { ApiProperty } from '@nestjs/swagger';
 import { PHONE_NUMBER_SOURCES } from '../../voip/voip.types';
 import type { PhoneSource, VoipCredentialKind } from '../../voip/voip.types';
+import { IsE164 } from '../../common/validators/e164.validator';
 
 /**
  * VoIP M2M admin DTOs.
@@ -72,10 +73,14 @@ export class VoipAddPhoneNumberDto {
   @IsNotEmpty()
   workspace_id: string;
 
+  // Single shared phone-number contract with tenants.provision' PhoneNumberDto
+  // (was @MaxLength(32)+@IsNotEmpty here vs @Length(8,20) there — same number
+  // could be accepted by one route, rejected by the other). @IsE164 accepts
+  // E.164 + the FR formats the service auto-normalises (0…/00…), so it does NOT
+  // break that normalisation.
   @ApiProperty({ example: '+33177123456' })
   @IsString()
-  @IsNotEmpty()
-  @MaxLength(32)
+  @IsE164()
   e164: string;
 
   @ApiProperty({ enum: SOURCES })

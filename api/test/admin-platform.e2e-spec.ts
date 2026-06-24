@@ -238,9 +238,12 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
       })
       .expect(409);
 
-    expect(dup.body.message?.error || dup.body.error).toBe(
-      'email_already_exists',
-    );
+    // Canonical M2M error contract (ticket 2026-06-24-m2m-cinq-formats): every
+    // error is {statusCode, error (HTTP label), message, code (machine-stable)}.
+    expect(dup.body.code).toBe('EMAIL_ALREADY_EXISTS');
+    expect(dup.body.statusCode).toBe(409);
+    expect(dup.body.error).toBe('Conflict');
+    expect(typeof dup.body.message).toBe('string');
   });
 
   it('accepts phoneNumbers payload and marks them skipped when bridge unset', async () => {

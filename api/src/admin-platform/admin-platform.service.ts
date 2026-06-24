@@ -910,6 +910,12 @@ export class AdminPlatformService {
    * existing mapping, dropping the undefined keys the transformer materialised so
    * a partial update never clobbers a sibling key it didn't mention. To fully
    * clear a key, send it as `null` (a deliberate value, preserved by the merge).
+   *
+   * Returns the FULL customization snapshot (same shape as setBranding /
+   * setFeatures / setLayout / getCustomization) — NOT the reduced
+   * `{workspace_id, crm_mapping}` it used to. A consumer that re-reads state
+   * after each `set*` now gets a uniform object across all four sibling routes
+   * (ticket 2026-06-24-set-routes-shape-incoherent §1).
    */
   async setCrmMapping(dto: SetCrmMappingDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
@@ -922,7 +928,7 @@ export class AdminPlatformService {
       id: dto.workspace_id,
       settings: { crm_mapping: merged },
     });
-    return this.getCrmMapping({ workspace_id: dto.workspace_id });
+    return this.getCustomization({ workspace_id: dto.workspace_id });
   }
 
   /** Read a workspace's CRM mapping (audit / IA introspection). */
@@ -1964,19 +1970,17 @@ export class AdminPlatformService {
   }
 
   /**
-   * Validate + reserve an explicit workspace_id (D2 migration path). The id
-   * must match the same regex `CreateWorkspaceDto` enforces (`^[a-z][a-z0-9_]*$`,
-   * 2..50) and must not already exist (→ 409, the caller adopts an id, not
-   * overwrites a live workspace).
+   * Reserve an explicit workspace_id (D2 migration path). FORMAT validation
+   * (regex `^[a-z][a-z0-9_]*$`, length 2..50) is enforced UPSTREAM at the DTO
+   * layer (`ProvisionTenantDto.workspace_id` via @Matches + @Length) so a
+   * malformed id is rejected as a 400 VALIDATION_ERROR — consistent with every
+   * other format constraint on the surface. The ONLY responsibility left here is
+   * the genuine CONFLICT: the id is already taken → 409 (the caller adopts a free
+   * id, it does not overwrite a live workspace). The DTO regex is mirrored in a
+   * cheap defense-in-depth assert (this path is also reachable from tests that
+   * bypass the pipe).
    */
   private async useExplicitWorkspaceId(id: string): Promise<string> {
-    if (!/^[a-z][a-z0-9_]*$/.test(id) || id.length < 2 || id.length > 50) {
-      throw new ConflictException({
-        error: 'invalid_workspace_id',
-        message:
-          'Explicit workspace_id must match ^[a-z][a-z0-9_]*$ and be 2..50 chars.',
-      });
-    }
     if (await this.workspaceExists(id)) {
       throw new ConflictException({
         error: 'workspace_already_exists',

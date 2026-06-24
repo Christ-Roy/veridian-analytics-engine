@@ -1,8 +1,10 @@
 import {
+  IsArray,
   IsNotEmpty,
   IsObject,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -10,9 +12,51 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   BrandingDto,
   CrmMappingDto,
-  DashboardLayoutDto,
   FeaturesDto,
 } from '../../workspaces/dto/update-workspace.dto';
+import { IsKnownDashboardWidget } from '../../common/validators/dashboard-widget.validator';
+
+/**
+ * M2M dashboard layout body. Stricter sibling of the console-shared
+ * `DashboardLayoutDto`: every widget key in `order` / `hidden_widgets` is
+ * validated against the closed list of native widgets (IsKnownDashboardWidget),
+ * so a typo'd key is a 400 instead of a silently-broken layout (ticket
+ * 2026-06-24-validation-currency-e164-layout-trous §3). The shared DTO stays
+ * permissive for the console path; the M2M surface is the strict one.
+ *
+ * FULL-REPLACE semantics: the engine merges this object over the existing
+ * `dashboard_layout`, but each FIELD is replaced wholesale. Sending only
+ * `order` leaves `hidden_widgets` untouched (and vice-versa); sending `order`
+ * REPLACES the entire previous order array (it is NOT appended). To clear a
+ * field, send it as an empty array.
+ */
+export class DashboardLayoutM2MDto {
+  @ApiProperty({
+    required: false,
+    type: [String],
+    description:
+      'Widgets to hide (full-replace). Each must be a known native widget key.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  @IsKnownDashboardWidget({ each: true })
+  hidden_widgets?: string[];
+
+  @ApiProperty({
+    required: false,
+    type: [String],
+    description:
+      'Widget display order (full-replace, not appended). Each must be a known native widget key.',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  @MaxLength(64, { each: true })
+  @IsKnownDashboardWidget({ each: true })
+  order?: string[];
+}
 
 /**
  * Dedicated M2M bodies for the per-workspace customization surface (white-label
@@ -48,11 +92,11 @@ export class SetFeaturesDto extends WorkspaceKeyedDto {
 
 /** POST /workspaces.setLayout — native dashboard widget order/visibility. */
 export class SetLayoutDto extends WorkspaceKeyedDto {
-  @ApiProperty({ type: DashboardLayoutDto })
+  @ApiProperty({ type: DashboardLayoutM2MDto })
   @IsObject()
   @ValidateNested()
-  @Type(() => DashboardLayoutDto)
-  dashboard_layout: DashboardLayoutDto;
+  @Type(() => DashboardLayoutM2MDto)
+  dashboard_layout: DashboardLayoutM2MDto;
 }
 
 /** POST /crm.setMapping — configurable analytics→CRM semantics (N4 + S4). */

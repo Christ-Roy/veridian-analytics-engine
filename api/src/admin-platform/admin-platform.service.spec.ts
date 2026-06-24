@@ -967,7 +967,7 @@ describe('AdminPlatformService.provisionTenant', () => {
       );
     });
 
-    it('setCrmMapping replaces the mapping and getCrmMapping reads it back', async () => {
+    it('setCrmMapping replaces the mapping and returns the FULL customization snapshot', async () => {
       const mapping = {
         identity_resolver: 'field' as const,
         identity_field: 'supabaseId',
@@ -985,7 +985,18 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(workspacesService.update).toHaveBeenCalledWith(
         expect.objectContaining({ settings: { crm_mapping: mapping } }),
       );
-      expect(res).toEqual({ workspace_id: 'ws1', crm_mapping: mapping });
+      // T3a: setCrmMapping now returns the SAME full snapshot as its sibling
+      // set* routes (setBranding/setFeatures/setLayout/getCustomization), not the
+      // reduced {workspace_id, crm_mapping} it used to.
+      expect(res).toEqual({
+        workspace_id: 'ws1',
+        name: 'Yoga',
+        logo_url: null,
+        branding: null,
+        features: null,
+        dashboard_layout: null,
+        crm_mapping: mapping,
+      });
     });
 
     it('getCustomization 404s on a missing workspace', async () => {
