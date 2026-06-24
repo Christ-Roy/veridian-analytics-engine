@@ -853,4 +853,133 @@ describe('Migrations E2E', () => {
       expect(V9GscMigration.hasWorkspaceMigration()).toBe(false);
     });
   });
+
+  describe('V11 Workspaces ReplacingMergeTree Migration', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const {
+      V11WorkspacesReplacingMigration,
+    } = require('../src/migrations/v11-workspaces-replacing-migration');
+
+    /**
+     * Build a `workspaces` system table with the OLD plain MergeTree engine and
+     * a duplicate row for the same id (two versions, older + newer) — exactly
+     * the v10 state V11 must convert and dedup.
+     */
+    async function buildPreV11Workspaces(): Promise<void> {
+      await systemClient.command({
+        query: `DROP TABLE IF EXISTS ${TEST_SYSTEM_DATABASE}.workspaces`,
+      });
+      await systemClient.command({
+        query: `
+          CREATE TABLE ${TEST_SYSTEM_DATABASE}.workspaces (
+            id String, name String, website String, timezone String,
+            currency String, logo_url Nullable(String),
+            settings String DEFAULT '{}',
+            status Enum8('initializing'=1,'active'=2,'inactive'=3,'error'=4),
+            created_at DateTime64(3) DEFAULT now64(3),
+            updated_at DateTime64(3) DEFAULT now64(3)
+          ) ENGINE = MergeTree() ORDER BY id
+        `,
+      });
+      // Older version (settings A) then newer version (settings B) of one id.
+      await systemClient.insert({
+        table: `${TEST_SYSTEM_DATABASE}.workspaces`,
+        values: [
+          {
+            id: 'ws_v11',
+            name: 'V11',
+            website: 'https://v11.example.com',
+            timezone: 'Europe/Paris',
+            currency: 'EUR',
+            logo_url: null,
+            settings: '{"features":{"voip":false}}',
+            status: 'active',
+            created_at: '2025-01-01 00:00:00.000',
+            updated_at: '2025-01-01 00:00:00.000',
+          },
+          {
+            id: 'ws_v11',
+            name: 'V11',
+            website: 'https://v11.example.com',
+            timezone: 'Europe/Paris',
+            currency: 'EUR',
+            logo_url: null,
+            settings: '{"features":{"voip":true,"gsc":true}}',
+            status: 'active',
+            created_at: '2025-01-01 00:00:00.000',
+            updated_at: '2025-01-02 00:00:00.000',
+          },
+        ],
+        format: 'JSONEachRow',
+      });
+      await waitForClickHouse();
+    }
+
+    it('declares system-only migration to version 11', () => {
+      expect(V11WorkspacesReplacingMigration.majorVersion).toBe(11);
+      expect(V11WorkspacesReplacingMigration.hasSystemMigration()).toBe(true);
+      expect(V11WorkspacesReplacingMigration.hasWorkspaceMigration()).toBe(
+        false,
+      );
+    });
+
+    it('converts workspaces MergeTree → ReplacingMergeTree and dedups', async () => {
+      await buildPreV11Workspaces();
+
+      // Sanity: pre-migration engine is plain MergeTree with 2 rows for the id.
+      const before = await systemClient.query({
+        query: `SELECT engine FROM system.tables
+                WHERE database = {db:String} AND name = 'workspaces'`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      expect((await before.json<{ engine: string }>())[0].engine).toBe(
+        'MergeTree',
+      );
+
+      await V11WorkspacesReplacingMigration.migrateSystem(
+        systemClient,
+        TEST_SYSTEM_DATABASE,
+      );
+      await waitForClickHouse();
+
+      // Engine is now ReplacingMergeTree.
+      const after = await systemClient.query({
+        query: `SELECT engine FROM system.tables
+                WHERE database = {db:String} AND name = 'workspaces'`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      expect((await after.json<{ engine: string }>())[0].engine).toBe(
+        'ReplacingMergeTree',
+      );
+
+      // Exactly one row survives, and it is the NEWEST version (settings B).
+      const rows = await systemClient.query({
+        query: `SELECT settings FROM ${TEST_SYSTEM_DATABASE}.workspaces
+                WHERE id = 'ws_v11'`,
+        format: 'JSONEachRow',
+      });
+      const settings = (await rows.json<{ settings: string }>()).map(
+        (r) => r.settings,
+      );
+      expect(settings).toHaveLength(1);
+      expect(settings[0]).toContain('"gsc":true');
+
+      // The temporary swap table must be gone.
+      const tmp = await systemClient.query({
+        query: `SELECT count() AS c FROM system.tables
+                WHERE database = {db:String} AND name = 'workspaces_v11'`,
+        query_params: { db: TEST_SYSTEM_DATABASE },
+        format: 'JSONEachRow',
+      });
+      expect((await tmp.json<{ c: string }>())[0].c).toBe('0');
+    });
+
+    it('no-op workspace migration resolves without error', async () => {
+      await expect(
+        V11WorkspacesReplacingMigration.migrateWorkspace(),
+      ).resolves.toBeUndefined();
+    });
+  });
 });
