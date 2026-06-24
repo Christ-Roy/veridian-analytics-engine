@@ -60,12 +60,37 @@ export interface AnalyticsResponse {
   // côté serveur, pas la renvoyer au consommateur (Hub/IA/console).
 }
 
+/**
+ * Hard cap on the number of tracked cache keys PER workspace. The cache key
+ * embeds every query-shaping parameter (dimensions × filters × dates × metrics
+ * × granularity × …), so the set of distinct keys a single workspace can
+ * produce is effectively unbounded. `cacheManager` expires entries by TTL
+ * (1-5 min) but `workspaceCacheKeys` only ever shrinks on a `backfill.completed`
+ * event — which may NEVER fire for a workspace that never runs a backfill. Left
+ * uncapped, the per-workspace Set grows forever → slow OOM on the long-running
+ * NestJS process. We evict oldest-first (Set preserves insertion order) once the
+ * cap is hit, same bounded-cache pattern as TwentyConnector.personCache /
+ * GeoService. Overridable via ANALYTICS_CACHE_KEYS_MAX_PER_WORKSPACE.
+ */
+const DEFAULT_CACHE_KEYS_MAX_PER_WORKSPACE = 10_000;
+
 @Injectable()
 export class AnalyticsService {
   private readonly CACHE_TTL_HISTORICAL = 5 * 60 * 1000; // 5 min for historical
   private readonly CACHE_TTL_LIVE = 60 * 1000; // 1 min for queries including today
   private pendingQueries = new Map<string, Promise<AnalyticsResponse>>();
   private workspaceCacheKeys = new Map<string, Set<string>>();
+
+  /** Hard size cap for each workspace's tracked-key Set (ENV-overridable). */
+  private readonly cacheKeysMaxPerWorkspace: number = (() => {
+    const raw = parseInt(
+      process.env.ANALYTICS_CACHE_KEYS_MAX_PER_WORKSPACE || '',
+      10,
+    );
+    return Number.isFinite(raw) && raw > 0
+      ? raw
+      : DEFAULT_CACHE_KEYS_MAX_PER_WORKSPACE;
+  })();
 
   constructor(
     private readonly clickhouse: ClickHouseService,
@@ -727,13 +752,38 @@ export class AnalyticsService {
       .slice(0, 16);
     const key = `analytics:${dto.workspace_id}:${hash}`;
 
-    // Track key for invalidation
-    if (!this.workspaceCacheKeys.has(dto.workspace_id)) {
-      this.workspaceCacheKeys.set(dto.workspace_id, new Set());
-    }
-    this.workspaceCacheKeys.get(dto.workspace_id)!.add(key);
+    // Track key for invalidation, with a hard per-workspace cap (oldest-first
+    // eviction) so the Set never grows without bound — see
+    // DEFAULT_CACHE_KEYS_MAX_PER_WORKSPACE.
+    this.trackCacheKey(dto.workspace_id, key);
 
     return key;
+  }
+
+  /**
+   * Record a cache key for later workspace-wide invalidation, bounded by a hard
+   * per-workspace size cap. A Set preserves insertion order, so its first
+   * element is the oldest. When the cap is reached we evict the oldest tracked
+   * key AND drop its `cacheManager` entry, so the tracker and the cache stay
+   * consistent (evicting from the Set alone would leave an entry that
+   * `backfill.completed` could no longer invalidate — it would only expire by
+   * TTL). The `cacheManager.del` is fire-and-forget: it must not block or throw
+   * inside the synchronous query path.
+   */
+  private trackCacheKey(workspaceId: string, key: string): void {
+    let keys = this.workspaceCacheKeys.get(workspaceId);
+    if (!keys) {
+      keys = new Set();
+      this.workspaceCacheKeys.set(workspaceId, keys);
+    }
+    if (keys.size >= this.cacheKeysMaxPerWorkspace && !keys.has(key)) {
+      const oldest = keys.values().next().value;
+      if (oldest !== undefined) {
+        keys.delete(oldest);
+        void this.cacheManager.del(oldest).catch(() => undefined);
+      }
+    }
+    keys.add(key);
   }
 
   /**

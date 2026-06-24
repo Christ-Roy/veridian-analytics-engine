@@ -426,6 +426,22 @@ describe('AnalyticsService', () => {
       expect(seo.conversion_rate).toBe(5); // 5/100
     });
 
+    it('guards conversions with session_id != \'\' to align with the funnel', async () => {
+      // The funnel (session mode) excludes goals with empty session_id; the
+      // conversions query MUST apply the same guard so funnel == conversions for
+      // any data state (ticket funnel-vs-conversions-divergent). Assert the
+      // load-bearing clause is present in the emitted SQL.
+      clickhouse.queryWorkspace.mockResolvedValueOnce([]);
+      clickhouse.queryWorkspace.mockResolvedValueOnce([]);
+      await service.conversionsByChannel({
+        workspace_id: 'ws-1',
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+      });
+      // 1st queryWorkspace call = the conversions (goals) query.
+      const convSql = clickhouse.queryWorkspace.mock.calls[0][1] as string;
+      expect(convSql).toContain("session_id != ''");
+    });
+
     it('labels missing app and tolerates channel with no sessions', async () => {
       clickhouse.queryWorkspace.mockResolvedValueOnce([
         { channel_group: 'direct', app: '', conversions: 3 },
@@ -489,3 +505,111 @@ describe('AnalyticsService', () => {
     });
   });
 });
+
+/**
+ * Memory-leak guard: the per-workspace tracked-key Set is bounded (oldest-first
+ * eviction). `cacheManager` expires entries by TTL, but the tracking Set only
+ * shrank on `backfill.completed` — which may never fire — so without a cap it
+ * grew forever (slow OOM on the long-running process). This suite drives more
+ * distinct queries than the cap and asserts the Set never exceeds it, and that
+ * eviction also drops the evicted key from the cache (consistency).
+ *
+ * Built in its OWN module so the small cap ENV is read at construction time.
+ */
+describe('AnalyticsService cache-key tracking is bounded (no leak)', () => {
+  const CAP = 5;
+  let service: AnalyticsService;
+  let cacheManager: { get: jest.Mock; set: jest.Mock; del: jest.Mock };
+  let prevEnv: string | undefined;
+
+  const mockWorkspace = {
+    id: 'ws-leak',
+    name: 'Leak WS',
+    website: 'https://example.com',
+    timezone: 'UTC',
+    currency: 'USD',
+    status: 'active',
+    created_at: '2025-01-01 00:00:00',
+    updated_at: '2025-01-01 00:00:00',
+    settings: {
+      timescore_reference: 180,
+      bounce_threshold: 10,
+      custom_dimensions: {},
+      filters: [],
+      integrations: [],
+      geo_enabled: true,
+      geo_store_city: true,
+      geo_store_region: true,
+      geo_coordinates_precision: 2,
+    },
+  } as unknown as Workspace;
+
+  beforeAll(async () => {
+    prevEnv = process.env.ANALYTICS_CACHE_KEYS_MAX_PER_WORKSPACE;
+    process.env.ANALYTICS_CACHE_KEYS_MAX_PER_WORKSPACE = String(CAP);
+
+    cacheManager = {
+      get: jest.fn().mockResolvedValue(undefined),
+      set: jest.fn(),
+      del: jest.fn().mockResolvedValue(undefined),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        AnalyticsService,
+        {
+          provide: ClickHouseService,
+          useValue: { queryWorkspace: jest.fn().mockResolvedValue([]) },
+        },
+        {
+          provide: WorkspacesService,
+          useValue: { get: jest.fn().mockResolvedValue(mockWorkspace) },
+        },
+        { provide: CACHE_MANAGER, useValue: cacheManager },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile();
+
+    service = module.get<AnalyticsService>(AnalyticsService);
+  });
+
+  afterAll(() => {
+    process.env.ANALYTICS_CACHE_KEYS_MAX_PER_WORKSPACE = prevEnv;
+  });
+
+  it('caps the tracked-key Set at the configured max and evicts oldest from cache', async () => {
+    const N = CAP * 4; // 20 distinct queries, cap is 5
+    for (let i = 0; i < N; i++) {
+      await service.query({
+        workspace_id: 'ws-leak',
+        metrics: ['sessions'],
+        // `limit` is part of the cache key → each i yields a distinct key.
+        limit: 100 + i,
+        dateRange: {
+          start: '2025-01-01 00:00:00',
+          end: '2025-01-02 23:59:59',
+          granularity: 'day',
+        },
+      } as AnalyticsQueryDtoLike);
+    }
+
+    // Inspect the private tracking Map via a typed accessor (real state, no mock).
+    const keys = (
+      service as unknown as {
+        workspaceCacheKeys: Map<string, Set<string>>;
+      }
+    ).workspaceCacheKeys.get('ws-leak');
+
+    expect(keys).toBeDefined();
+    expect(keys!.size).toBe(CAP); // never grows past the cap
+    expect(keys!.size).toBeLessThanOrEqual(CAP);
+
+    // Each eviction past the cap dropped the oldest key from the cache too.
+    // N distinct keys, cap CAP → N - CAP evictions.
+    expect(cacheManager.del).toHaveBeenCalledTimes(N - CAP);
+  });
+});
+
+// Minimal structural alias to satisfy the query() signature in this suite
+// without importing the full DTO class (avoids class-validator noise in a unit).
+type AnalyticsQueryDtoLike = Parameters<AnalyticsService['query']>[0];
