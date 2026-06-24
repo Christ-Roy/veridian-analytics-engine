@@ -208,7 +208,19 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
 
   it('re-derives channel/channel_group on historical sessions + goals', async () => {
     await seed();
+    // DEBUG: dump raw goals signals as actually stored, pre-backfill.
+    {
+      const dbg = await workspaceClient.query({
+        query: `SELECT session_id, utm_medium, utm_source, referrer_domain, referrer, channel_group
+                FROM staminads_ws_${workspaceId}.goals FINAL ORDER BY session_id`,
+        format: 'JSONEachRow',
+      });
+      // eslint-disable-next-line no-console
+      console.log('DEBUG goals signals pre-backfill:', JSON.stringify(await dbg.json()));
+    }
     const summary = await service.backfillChannel(workspaceId);
+    // eslint-disable-next-line no-console
+    console.log('DEBUG backfill summary:', JSON.stringify(summary));
     await settle();
 
     // 3 sessions + 3 goals all moved off the empty bucket.
