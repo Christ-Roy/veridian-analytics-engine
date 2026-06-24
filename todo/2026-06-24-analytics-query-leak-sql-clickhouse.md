@@ -34,10 +34,10 @@ Réponse (extrait réel) :
 ## Pourquoi c'est un problème
 
 - **Surface d'attaque / divulgation** : exposer le SQL et le schéma interne
-  (`sessions`, `events`, MV…) à tout détenteur d'une clé — y compris une clé
-  workspace-scoped sur la route `/api/analytics.query` consommée par le
-  front/clients — donne gratuitement la cartographie de la DB analytique. Standard
-  OWASP : ne pas leaker la structure interne dans les réponses applicatives.
+  (`sessions`, `events`, MV…) au détenteur de la clé plateforme donne gratuitement
+  la cartographie de la DB analytique dans la réponse applicative. Standard OWASP :
+  ne pas leaker la structure interne. (Limité au Hub — la route client ne leake pas,
+  cf « Portée vérifiée » — d'où 🟡 et non 🔴.)
 - **Contrat non documenté** : ni le SKILL.md ni le `AnalyticsQueryDto` n'annoncent
   ce champ `meta.query.sql`. C'est un champ « en plus » non documenté que des
   consommateurs pourraient se mettre à parser (couplage involontaire au SQL interne).
@@ -49,9 +49,12 @@ Réponse (extrait réel) :
 - **Route M2M `/api/admin/platform/analytics.query` (clé plateforme)** : leake le
   SQL. Détenteur = Hub uniquement → c'est pourquoi la sévérité reste 🟡 (et pas 🔴) :
   le SQL n'est exposé qu'au consommateur de confiance, pas aux clients.
-- Reste à vérifier côté code : `meta.query.sql` est-il conditionné par un flag debug
-  ou inconditionnel sur la branche M2M ? (le test montre qu'il est présent par défaut
-  sur staging).
+- **Présent en PROD aussi (confirmé 2026-06-24)** : le comparatif staging↔prod montre
+  `meta.query.sql` dans la réponse 200 de la route M2M `analytics.query` sur les DEUX
+  envs (shapes identiques). Ce n'est PAS un artefact staging — c'est inconditionnel
+  en production.
+- Côté code : `analytics.service.ts:227,349` construit `query:{sql,params}` dans la
+  réponse → pas de flag debug, c'est par défaut (confirmé par revue team-lead).
 
 ## Correctif proposé
 
