@@ -398,4 +398,39 @@ describe('TwentyConnectorService', () => {
       });
     });
   });
+
+  describe('personCache bounded (scale / OOM guard)', () => {
+    it('never grows past the cap, evicting oldest-first', async () => {
+      // Tiny cap so we exercise eviction with a handful of identities. The key
+      // embeds the visitor identity, so without this cap the Map grows forever.
+      const cappedConfig = {
+        get: (k: string) =>
+          k === 'TWENTY_PERSON_CACHE_MAX_SIZE' ? '3' : undefined,
+      } as unknown as ConfigService;
+      const capped = new TwentyConnectorService(
+        new TwentyEventMapper(),
+        cappedConfig,
+        fakeWorkspaces(),
+      );
+
+      // Resolve 10 DISTINCT identities in one flush → 10 cache inserts, cap 3.
+      const { client } = fakeClient(async (identity) => ({
+        id: `p_${identity}`,
+        doNotContact: false,
+      }));
+      const budget = new TwentyBudget(1000, () => 0);
+      const deliveries = Array.from({ length: 10 }, (_, i) =>
+        delivery(`d${i}`, {
+          event_type: 'goal',
+          goal_name: 'rdv_booked',
+          user_id: `u${i}@x.com`,
+        }),
+      );
+
+      await capped.flushBatch(twentyWebhook(), deliveries, client, budget);
+
+      // The cache is bounded regardless of how many distinct visitors flowed.
+      expect(capped.getPersonCacheSize()).toBeLessThanOrEqual(3);
+    });
+  });
 });

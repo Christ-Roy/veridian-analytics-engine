@@ -423,12 +423,20 @@ export class ToolsService {
    * forbid any silent redirect (`redirect: 'error'`). Used for non-image
    * fetches (HTML page, manifest, HEAD probe) where following a redirect to a
    * private target must NOT happen.
+   *
+   * Uses `assertSafeUrlResolved` (async, DNS-resolved) — NOT the sync literal
+   * check — so a public hostname that resolves to 127.0.0.1 / 169.254.169.254 /
+   * an RFC1918 address is rejected. The literal check alone let `evil.com →
+   * 127.0.0.1` (and DNS-rebinding) slip through on this @Public() anonymous
+   * surface. Same guard the webhook worker uses before every outbound fetch.
    */
   private async safeFetch(
     url: string,
     init: RequestInit = {},
   ): Promise<Response> {
-    this.ssrf.assertSafeUrl(url, { allowHttp: this.httpAllowed() });
+    await this.ssrf.assertSafeUrlResolved(url, {
+      allowHttp: this.httpAllowed(),
+    });
     return fetch(url, { ...init, redirect: 'error' });
   }
 
@@ -436,7 +444,7 @@ export class ToolsService {
    * Fetch with manual redirect following, re-validating every hop against the
    * SSRF guard. A public favicon URL could 302 toward 169.254.169.254; with
    * `redirect: 'follow'` that hop would be invisible, so we resolve hops
-   * ourselves and re-check each one. Caps at MAX_REDIRECTS.
+   * ourselves and re-check each one (DNS-resolved). Caps at MAX_REDIRECTS.
    */
   private async fetchFollowingRedirects(
     url: string,
@@ -444,7 +452,9 @@ export class ToolsService {
   ): Promise<Response> {
     let current = url;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      this.ssrf.assertSafeUrl(current, { allowHttp: this.httpAllowed() });
+      await this.ssrf.assertSafeUrlResolved(current, {
+        allowHttp: this.httpAllowed(),
+      });
       const response = await fetch(current, { ...init, redirect: 'manual' });
 
       // Not a redirect → final response.

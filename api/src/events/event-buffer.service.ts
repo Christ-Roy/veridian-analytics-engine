@@ -5,6 +5,17 @@ import { TrackingEvent } from './entities/event.entity';
 const MAX_BUFFER_SIZE = 500;
 const FLUSH_INTERVAL_MS = 2000;
 
+/**
+ * Default hard upper bound on the number of events retained in a single
+ * workspace buffer. Reached only on the failure path: when a ClickHouse flush
+ * throws, events are re-queued instead of being lost. Under a sustained CH
+ * outage at high ingest volume this re-queue would otherwise grow unbounded →
+ * OOM. Past this cap we DROP the oldest events (newest are likeliest to still
+ * matter) and surface the drop loudly so an incident is never silent.
+ * Overridable via EVENT_BUFFER_MAX_RETAINED; default sized for ~tens of MB.
+ */
+const DEFAULT_MAX_RETAINED_EVENTS = 50_000;
+
 @Injectable()
 export class EventBufferService implements OnModuleDestroy {
   private readonly logger = new Logger(EventBufferService.name);
@@ -12,8 +23,21 @@ export class EventBufferService implements OnModuleDestroy {
   private buffers = new Map<string, TrackingEvent[]>();
   private flushTimers = new Map<string, NodeJS.Timeout>();
   private flushingWorkspaces = new Set<string>();
+  /** Cumulative count of events dropped due to buffer overflow (observability). */
+  private droppedEvents = 0;
+  /** Per-workspace retention cap, read once at construction (ENV-overridable). */
+  private readonly maxRetainedEvents: number;
 
-  constructor(private readonly clickhouse: ClickHouseService) {}
+  constructor(private readonly clickhouse: ClickHouseService) {
+    const raw = parseInt(process.env.EVENT_BUFFER_MAX_RETAINED || '', 10);
+    this.maxRetainedEvents =
+      Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_MAX_RETAINED_EVENTS;
+  }
+
+  /** Total events dropped on overflow since boot (for /health or metrics). */
+  getDroppedEventsCount(): number {
+    return this.droppedEvents;
+  }
 
   async onModuleDestroy() {
     // Stop all timers
@@ -133,9 +157,30 @@ export class EventBufferService implements OnModuleDestroy {
         `Flushed ${eventsToFlush.length} events to workspace ${workspaceId}`,
       );
     } catch (error) {
-      // Re-add failed events to buffer (at front for retry)
+      // Re-add failed events to buffer (at front for retry). New events may have
+      // landed during the flush, so the merged buffer can exceed the cap — when
+      // it does we DROP the oldest to keep memory bounded under a CH outage at
+      // high ingest volume. Dropping silently would hide the incident, so we
+      // count + warn. Newest events are kept (likeliest to still be relevant).
       const currentBuffer = this.buffers.get(workspaceId) || [];
-      this.buffers.set(workspaceId, [...eventsToFlush, ...currentBuffer]);
+      let merged = [...eventsToFlush, ...currentBuffer];
+      if (merged.length > this.maxRetainedEvents) {
+        const dropped = merged.length - this.maxRetainedEvents;
+        merged = merged.slice(dropped); // drop oldest (front)
+        this.droppedEvents += dropped;
+        this.logger.warn(
+          `Event buffer overflow for workspace ${workspaceId}: dropped ${dropped} ` +
+            `oldest events (cap=${this.maxRetainedEvents}, total dropped=${this.droppedEvents}). ` +
+            `ClickHouse likely degraded.`,
+        );
+      }
+      this.buffers.set(workspaceId, merged);
+      // Re-arm a flush timer so the re-queued buffer drains even if ingest
+      // traffic stops — otherwise stopFlushTimer() at the top of flush() leaves
+      // it stranded until the next add() for this workspace (which may not come).
+      if (merged.length > 0) {
+        this.startFlushTimer(workspaceId);
+      }
       this.logger.error(
         `Failed to flush events for workspace ${workspaceId}:`,
         error,

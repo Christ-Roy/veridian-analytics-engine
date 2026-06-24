@@ -13,6 +13,26 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
       'CLICKHOUSE_SYSTEM_DATABASE',
       'staminads_system',
     );
+    // Timeouts: without them a heavy aggregation over an ever-growing events
+    // table can pin an HTTP connection forever → pool exhaustion under load.
+    // max_execution_time caps server-side query time; request_timeout caps the
+    // client HTTP wait. Both ENV-overridable, with sane defaults so a missing
+    // ENV never crashes boot (avoids the "module with no default env" trap).
+    const maxExecRaw = parseInt(
+      this.configService.get<string>('CLICKHOUSE_MAX_EXECUTION_TIME') || '',
+      10,
+    );
+    const maxExecutionTime =
+      Number.isFinite(maxExecRaw) && maxExecRaw > 0 ? maxExecRaw : 30; // seconds
+    const reqTimeoutRaw = parseInt(
+      this.configService.get<string>('CLICKHOUSE_REQUEST_TIMEOUT_MS') || '',
+      10,
+    );
+    const requestTimeout =
+      Number.isFinite(reqTimeoutRaw) && reqTimeoutRaw > 0
+        ? reqTimeoutRaw
+        : 60_000; // ms — must exceed max_execution_time so the server kills first
+
     // Create client without default database - we'll use fully qualified names
     this.client = createClient({
       url: this.configService.get<string>(
@@ -21,6 +41,10 @@ export class ClickHouseService implements OnModuleInit, OnModuleDestroy {
       ),
       username: this.configService.get<string>('CLICKHOUSE_USER', 'default'),
       password: this.configService.get<string>('CLICKHOUSE_PASSWORD', ''),
+      request_timeout: requestTimeout,
+      clickhouse_settings: {
+        max_execution_time: maxExecutionTime,
+      },
     });
   }
 

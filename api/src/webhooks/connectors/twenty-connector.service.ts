@@ -43,6 +43,15 @@ export interface ConnectorOutcome {
 
 const BATCH_SIZE = 60; // §4c.2
 const PERSON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Default hard cap on the Person resolution cache. The key embeds the visitor
+ * identity (email / slug), so on a high-traffic workspace the number of distinct
+ * keys is effectively unbounded — TTL only governs reuse, it never evicts.
+ * Without a size cap the Map grows forever → slow OOM. We evict oldest-first
+ * (insertion order) once the cap is hit, same pattern as GeoService.
+ * Overridable via TWENTY_PERSON_CACHE_MAX_SIZE.
+ */
+const DEFAULT_PERSON_CACHE_MAX_SIZE = 50_000;
 /** crm_mapping config cache TTL — config changes rarely; a flush is a tick. */
 const CRM_CONFIG_CACHE_TTL_MS = 60 * 1000;
 
@@ -69,12 +78,26 @@ export class TwentyConnectorService {
   private readonly personCache = new Map<string, CachedPerson>();
   /** Per-workspace crm_mapping config cache (60s TTL). */
   private readonly crmConfigCache = new Map<string, CachedCrmConfig>();
+  /** Hard size cap for personCache (oldest-first eviction). ENV-overridable. */
+  private readonly personCacheMaxSize: number;
 
   constructor(
     private readonly mapper: TwentyEventMapper,
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
-  ) {}
+  ) {
+    const raw = parseInt(
+      this.config.get<string>('TWENTY_PERSON_CACHE_MAX_SIZE') || '',
+      10,
+    );
+    this.personCacheMaxSize =
+      Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_PERSON_CACHE_MAX_SIZE;
+  }
+
+  /** Test/observability seam — current Person cache size. */
+  getPersonCacheSize(): number {
+    return this.personCache.size;
+  }
 
   /** True when a webhook is a Twenty destination. */
   static isTwentyDestination(webhook: WebhookDefinition): boolean {
@@ -279,8 +302,24 @@ export class TwentyConnectorService {
       mapped.identityField,
     );
     if (!person) return { status: 'not_found' };
-    this.personCache.set(key, { id: person.id, resolvedAt: Date.now() });
+    this.cachePerson(key, person.id);
     return { status: 'found', personId: person.id };
+  }
+
+  /**
+   * Insert into the Person cache with a hard size cap (evict oldest-first).
+   * A Map preserves insertion order, so the first key is the oldest. Mirrors
+   * GeoService's bounded-cache pattern to keep memory flat under high traffic.
+   */
+  private cachePerson(key: string, id: string): void {
+    if (
+      this.personCache.size >= this.personCacheMaxSize &&
+      !this.personCache.has(key)
+    ) {
+      const oldest = this.personCache.keys().next().value;
+      if (oldest !== undefined) this.personCache.delete(oldest);
+    }
+    this.personCache.set(key, { id, resolvedAt: Date.now() });
   }
 
   private parseBody(raw: string): Record<string, unknown> {

@@ -206,6 +206,71 @@ describe('EventBufferService', () => {
       expect(service.getBufferSize('ws-1')).toBe(2);
     });
 
+    it('caps the buffer on sustained flush failure (drops oldest)', async () => {
+      // Build a dedicated service with a tiny cap so we can exercise overflow
+      // deterministically without seeding 50k events. The cap is read at
+      // construction from EVENT_BUFFER_MAX_RETAINED.
+      const prev = process.env.EVENT_BUFFER_MAX_RETAINED;
+      process.env.EVENT_BUFFER_MAX_RETAINED = '5';
+      const cappedCh = {
+        insertWorkspace: jest.fn().mockRejectedValue(new Error('CH down')),
+      } as unknown as jest.Mocked<ClickHouseService>;
+      const cappedModule = await Test.createTestingModule({
+        providers: [
+          EventBufferService,
+          { provide: ClickHouseService, useValue: cappedCh },
+        ],
+      }).compile();
+      const capped = cappedModule.get<EventBufferService>(EventBufferService);
+
+      try {
+        // Ingest 12 events one-by-one. Each add() past MAX_BUFFER_SIZE would
+        // auto-flush, but here we stay under 500 so the buffer just grows; we
+        // then force a failing flush that re-queues and triggers the cap.
+        for (let i = 0; i < 12; i++) {
+          await capped.add(createEvent('ws-1', `s-${i}`)).catch(() => {});
+        }
+        await capped.flush('ws-1').catch(() => {});
+
+        // Buffer never exceeds the cap, oldest dropped, drop counted (visible).
+        expect(capped.getBufferSize('ws-1')).toBeLessThanOrEqual(5);
+        expect(capped.getDroppedEventsCount()).toBeGreaterThan(0);
+        // Newest event must survive (drop-oldest, not drop-newest).
+        const remaining = (
+          capped as unknown as { buffers: Map<string, Array<{ session_id: string }>> }
+        ).buffers.get('ws-1')!;
+        expect(remaining.some((e) => e.session_id === 's-11')).toBe(true);
+      } finally {
+        // Avoid the afterEach destroy re-flushing a rejecting mock forever.
+        (capped as unknown as { buffers: Map<string, unknown[]> }).buffers.clear();
+        await capped.onModuleDestroy();
+        if (prev === undefined) delete process.env.EVENT_BUFFER_MAX_RETAINED;
+        else process.env.EVENT_BUFFER_MAX_RETAINED = prev;
+      }
+    });
+
+    it('re-arms a flush timer after a failed flush', async () => {
+      // First flush fails (re-queues + re-arms timer), second succeeds.
+      clickhouse.insertWorkspace
+        .mockRejectedValueOnce(new Error('CH blip'))
+        .mockResolvedValue(undefined);
+
+      await service.add(createEvent('ws-1', 'session-1'));
+      await service.add(createEvent('ws-1', 'session-2'));
+
+      await expect(service.flush('ws-1')).rejects.toThrow('CH blip');
+      // Events re-queued, NOT lost.
+      expect(service.getBufferSize('ws-1')).toBe(2);
+
+      // No new add() happens — only the re-armed timer can drain the buffer.
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(clickhouse.insertWorkspace).toHaveBeenCalledTimes(2);
+      expect(service.getBufferSize('ws-1')).toBe(0);
+    });
+
     it('prevents concurrent flushes for same workspace', async () => {
       let resolveInsert: () => void;
       clickhouse.insertWorkspace.mockImplementation(
