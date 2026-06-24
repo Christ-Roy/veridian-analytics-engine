@@ -2,7 +2,7 @@ import { Controller, Get, HttpCode } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { Public } from '../common/decorators/public.decorator';
-import { APP_VERSION } from '../version';
+import { APP_VERSION, GIT_SHA } from '../version';
 
 /**
  * Lightweight liveness/readiness probe.
@@ -28,6 +28,7 @@ export class HealthController {
   async health(): Promise<{
     status: 'ok';
     version: string;
+    gitSha: string;
     clickhouse: 'ok';
     timestamp: string;
   }> {
@@ -36,6 +37,10 @@ export class HealthController {
     return {
       status: 'ok',
       version: APP_VERSION,
+      // SHA du commit servi (injecté au build) — le verdict de deploy prod
+      // confirme que health.gitSha == SHA déployé (preuve du BON code, pas
+      // juste d'un code sain). 'unknown' hors-CI.
+      gitSha: GIT_SHA,
       clickhouse: 'ok',
       timestamp: new Date().toISOString(),
     };

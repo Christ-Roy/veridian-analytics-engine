@@ -56,6 +56,14 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
+# SHA du commit déployé (injecté par la CI via --build-arg GIT_SHA=${GITHUB_SHA}).
+# Exposé au runtime dans ENV GIT_SHA → /api/health.gitSha. Permet au verdict de
+# deploy prod de confirmer que LE BON code est servi (pas juste un code sain),
+# et sert de marqueur greppable pour la validation manuelle de promo. Défaut
+# 'unknown' = build local sans CI (le verdict tolère 'unknown', cf wait-dokploy).
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 # Install production dependencies only
 COPY api/package*.json ./
 RUN npm ci --omit=dev

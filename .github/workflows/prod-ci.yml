@@ -159,6 +159,11 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          # GIT_SHA injecté dans l'image → ENV GIT_SHA → /api/health.gitSha.
+          # Le verdict de deploy (wait-dokploy-deploy.sh) confirme que la prod
+          # sert bien CE SHA (preuve du BON code déployé, pas juste d'un code sain).
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.engine_tag }}
             ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:latest
@@ -295,6 +300,7 @@ jobs:
           VPS_HOST: ${{ vars.PROD_VPS_HOST }}
           VPS_USER: ${{ vars.PROD_VPS_USER }}
           DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           # Le `compose.deploy` Dokploy est ASYNCHRONE : il queue, puis clone+pull+
           # recreate en arrière-plan (plusieurs min). DEUX faux négatifs en prod :
@@ -304,21 +310,22 @@ jobs:
           #      déploiement dont le code finit servi et la prod healthy (vécu
           #      2026-06-25, run 28134278276) → rollback parasite sur un deploy SAIN.
           #
-          # Le seul juge fiable = une CONFIRMATION FONCTIONNELLE STABLE de l'app
-          # (health 200 consécutifs + clickhouse:ok + version), faite EN LOOPBACK
-          # DANS le container prod (bypass Traefik/DNS qui flottent depuis un
-          # runner). Toute cette logique est dans wait-dokploy-deploy.sh, exécuté
-          # SUR le VPS : il poll Dokploy, et sur Dokploy `error`/`timeout` il
-          # NE conclut PAS échec — il laisse un grace fonctionnel de 5 min
-          # (5×200 consécutifs requis) avant de trancher. Verdict émis : DONE
-          # (deploy sain, qu'il soit Dokploy-done ou Dokploy-error-mais-fonctionnel)
-          # ou FAILED (prod réellement cassée → rollback légitime).
+          # Le seul juge fiable que LE BON code est servi = une CONFIRMATION
+          # FONCTIONNELLE STABLE de l'app (health 200 consécutifs + clickhouse:ok
+          # + gitSha == SHA déployé), faite EN LOOPBACK DANS le container prod
+          # (bypass Traefik/DNS qui flottent depuis un runner). Toute cette logique
+          # est dans wait-dokploy-deploy.sh, exécuté SUR le VPS : il poll Dokploy,
+          # et sur Dokploy `error`/`timeout` il NE conclut PAS échec — il laisse un
+          # grace fonctionnel de 5 min (5×200 consécutifs + bon SHA requis) avant de
+          # trancher. EXPECTED_SHA (github.sha) est confronté à /api/health.gitSha
+          # (injecté au build via ENV GIT_SHA). Verdict : DONE (deploy sain servant
+          # le bon code) ou FAILED (prod cassée OU mauvais code → rollback légitime).
           # Cf ticket todo/2026-06-25-prod-ci-deploy-faux-negatif-rollback-parasite.md.
           mkdir -p ~/.ssh; echo "$SSH_KEY" > ~/.ssh/deploy_key; chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           # 15 min : 8 min poll Dokploy au pire + jusqu'à 5 min de grace fonctionnel.
           VERDICT=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
-            "COMPOSE_ID='$DOKPLOY_COMPOSE_ID' bash -s" < scripts/ci/wait-dokploy-deploy.sh)
+            "COMPOSE_ID='$DOKPLOY_COMPOSE_ID' EXPECTED_SHA='$EXPECTED_SHA' bash -s" < scripts/ci/wait-dokploy-deploy.sh)
           echo "Verdict déploiement prod: $VERDICT"
           rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
           if [ "$VERDICT" = "DONE" ]; then
