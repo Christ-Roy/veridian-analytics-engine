@@ -475,17 +475,52 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
       expect(res.body.workspace_id).toBe(explicitId);
     });
 
-    it('rejects an explicit workspace_id that breaks the id regex (409)', async () => {
-      await request(ctx.app.getHttpServer())
+    it('rejects an explicit workspace_id that breaks the id regex with 400 VALIDATION_ERROR (not 409)', async () => {
+      // T2 (ticket 2026-06-24-provision-invalid-workspace-id-409-vs-400): a
+      // MALFORMED id is an input error → 400 (regex now lives in the DTO via
+      // @Matches), NOT a 409. The 409 is reserved for the genuine "already
+      // taken" conflict (covered below).
+      const res = await request(ctx.app.getHttpServer())
         .post('/api/admin/platform/tenants.provision')
         .set('Authorization', `Bearer ${PLATFORM_KEY}`)
         .send({
           email: `badid-${Date.now()}@test.com`,
           siteUrl: 'https://badid.example.com',
           name: 'Bad Id Client',
-          workspace_id: '1-invalid-Caps', // doit matcher ^[a-z][a-z0-9_]*$
+          workspace_id: '1-invalid-Caps', // breaks ^[a-z][a-z0-9_]*$
+        })
+        .expect(400);
+      expect(res.body.code).toBe('VALIDATION_ERROR');
+      expect(res.body.error).toBe('Bad Request');
+      expect(Array.isArray(res.body.message)).toBe(true);
+    });
+
+    it('reserves 409 for a genuinely already-taken explicit workspace_id', async () => {
+      const explicitId = `legacy_dup_${Date.now().toString(36)}`;
+      // First provision adopts the id.
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: `dupws-a-${Date.now()}@test.com`,
+          siteUrl: 'https://dupws.example.com',
+          name: 'Dup Ws Client A',
+          workspace_id: explicitId,
+        })
+        .expect(201);
+      // Second provision with the SAME id → real conflict → 409.
+      const res = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: `dupws-b-${Date.now()}@test.com`,
+          siteUrl: 'https://dupws.example.com',
+          name: 'Dup Ws Client B',
+          workspace_id: explicitId,
         })
         .expect(409);
+      expect(res.body.code).toBe('WORKSPACE_ALREADY_EXISTS');
+      expect(res.body.error).toBe('Conflict');
     });
   });
 
