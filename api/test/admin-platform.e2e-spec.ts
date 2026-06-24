@@ -67,6 +67,11 @@ async function createAdminPlatformTestApp(): Promise<TestAppContext> {
   const app = moduleFixture.createNestApplication();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
+  // Bind a real port so tracking.verify's loopback HTTP probe to /api/track
+  // reaches THIS running app (supertest's in-memory server is not addressable
+  // by an outbound fetch). Port 0 = OS-assigned; e2e runs --runInBand.
+  await app.listen(0, '127.0.0.1');
+  process.env.VERIFY_SELF_BASE_URL = `http://127.0.0.1:${new URL(await app.getUrl()).port}`;
 
   const systemClient = createClient(getSystemClientConfig());
 

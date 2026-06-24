@@ -1154,9 +1154,21 @@ describe('AdminPlatformService.provisionTenant', () => {
      * tests rely on this so the HTTP probe succeeds).
      */
     function ingestionVisible(visible: boolean): void {
-      clickhouse.queryWorkspace.mockResolvedValue(
-        (visible ? [{ c: 1 }] : [{ c: 0 }]) as never,
-      );
+      // queryWorkspace serves two DIFFERENT polls:
+      //   • event visibility (FROM events WHERE … dedup_token) → must reflect
+      //     `visible`.
+      //   • session-purged check (FROM sessions WHERE id …) → must report the
+      //     synthetic row is GONE (count 0) so waitForSessionPurged returns
+      //     immediately instead of polling the full timeout under real timers.
+      clickhouse.queryWorkspace.mockImplementation(((
+        _ws: string,
+        sql: string,
+      ) => {
+        if (/FROM sessions\b/i.test(sql)) {
+          return Promise.resolve([{ c: 0 }] as never);
+        }
+        return Promise.resolve((visible ? [{ c: 1 }] : [{ c: 0 }]) as never);
+      }) as never);
       // Default: the /api/track POST answers 200; snippet GET rejects (no
       // site_url in most ingestion-only tests, so it is never called).
       stubFetch({});

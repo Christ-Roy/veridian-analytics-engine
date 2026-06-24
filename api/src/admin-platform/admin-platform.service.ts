@@ -1356,6 +1356,10 @@ export class AdminPlatformService {
 
       if (visible) {
         const purgeNote = await this.purgeSyntheticEvent(workspaceId, sessionId);
+        // The synthetic session has a RECENT created_at (DTO-bounded), so unlike
+        // the far-past low-level probe it WOULD be counted until the async purge
+        // settles. Wait for it to vanish so zero-pollution is deterministic.
+        await this.waitForSessionPurged(workspaceId, sessionId);
         return {
           ok: true,
           round_trip_ms: roundTrip,
@@ -1473,12 +1477,15 @@ export class AdminPlatformService {
   /**
    * Loopback base URL for the verify HTTP probe. The probe runs INSIDE the API
    * process, so it POSTs to itself over 127.0.0.1:<PORT> — hitting the real
-   * controller/guards/handler, never an external hop. PORT mirrors main.ts
-   * (`process.env.PORT ?? 3000`); overridable via VERIFY_SELF_BASE_URL for
-   * tests/atypical deployments.
+   * controller/ValidationPipe/handler, never an external hop. PORT mirrors
+   * main.ts (`process.env.PORT ?? 3000`); overridable via VERIFY_SELF_BASE_URL
+   * (read straight from process.env so the e2e harness can point it at the
+   * random port it bound with app.listen(0) AFTER ConfigService was built).
    */
   private selfBaseUrl(): string {
-    const override = this.configService.get<string>('VERIFY_SELF_BASE_URL');
+    const override =
+      process.env.VERIFY_SELF_BASE_URL ||
+      this.configService.get<string>('VERIFY_SELF_BASE_URL');
     if (override) return override.replace(/\/+$/, '');
     const port = process.env.PORT ?? '3000';
     return `http://127.0.0.1:${port}`;
@@ -1682,6 +1689,38 @@ export class AdminPlatformService {
     return failed.length
       ? ` (purge warning: ${failed.join(', ')} — row stays invisible via sentinel ts)`
       : '';
+  }
+
+  /**
+   * Wait until the synthetic session row is actually GONE from the `sessions`
+   * table. The HTTP probe's synthetic session carries a RECENT created_at (the
+   * /api/track DTO bounds session timestamps to ±24h — it cannot be far-past
+   * like the low-level probe), so it WOULD be counted in sessions_30d during
+   * the brief window between insert and the async ALTER…DELETE materialising.
+   * Polling for the row to vanish before verify returns makes the zero-pollution
+   * guarantee DETERMINISTIC (not timing-dependent): no client-facing count ever
+   * sees the synthetic session. Bounded + fail-soft — a timeout only means the
+   * mutation is still settling, never throws.
+   */
+  private async waitForSessionPurged(
+    workspaceId: string,
+    sessionId: string,
+  ): Promise<void> {
+    const deadline = Date.now() + VERIFY_INGEST_TIMEOUT_MS;
+    do {
+      try {
+        const rows = await this.clickhouse.queryWorkspace<{ c: number }>(
+          workspaceId,
+          `SELECT count() AS c FROM sessions WHERE id = {sid:String}`,
+          { sid: sessionId },
+        );
+        if (Number(rows[0]?.c ?? 0) === 0) return;
+      } catch {
+        // Transient read error during the mutation — keep polling.
+      }
+      if (Date.now() >= deadline) return;
+      await this.sleep(VERIFY_INGEST_POLL_INTERVAL_MS);
+    } while (Date.now() < deadline);
   }
 
   /**

@@ -38,6 +38,13 @@ export interface CreateTestAppOptions {
   corsOrigins?: string[];
   /** Custom CORS options delegate */
   corsOptionsDelegate?: (req: unknown, callback: unknown) => void;
+  /**
+   * Bind the app to a real random port (app.listen(0)) and point
+   * VERIFY_SELF_BASE_URL at it. Required for tests that exercise
+   * tracking.verify's loopback HTTP probe to /api/track (it POSTs over the
+   * network to the running app, supertest's in-memory server is not enough).
+   */
+  listen?: boolean;
 }
 
 /**
@@ -62,7 +69,7 @@ export interface CreateTestAppOptions {
 export async function createTestApp(
   options: CreateTestAppOptions = {},
 ): Promise<TestAppContext> {
-  const { workspaceId, mockMailService, corsOptionsDelegate } = options;
+  const { workspaceId, mockMailService, corsOptionsDelegate, listen } = options;
 
   // Create and compile testing module
   const moduleFixture = await Test.createTestingModule({
@@ -87,6 +94,18 @@ export async function createTestApp(
 
   // Initialize app
   await app.init();
+
+  // Bind a real port when a test needs the running HTTP server (e.g.
+  // tracking.verify's loopback /api/track probe). Port 0 = OS-assigned free
+  // port (e2e runs --runInBand, so no contention). We point VERIFY_SELF_BASE_URL
+  // at it so the in-process probe reaches THIS app, not a stale :3000.
+  if (listen) {
+    await app.listen(0, '127.0.0.1');
+    const url = await app.getUrl();
+    // app.getUrl() may report 0.0.0.0/[::1]; normalise the host to 127.0.0.1.
+    const port = new URL(url).port;
+    process.env.VERIFY_SELF_BASE_URL = `http://127.0.0.1:${port}`;
+  }
 
   // Create ClickHouse clients
   const systemClient = createClient(getSystemClientConfig());
@@ -162,6 +181,10 @@ export async function createTestAppWithWorkspace(): Promise<TestAppContext> {
  */
 export async function closeTestApp(context: TestAppContext): Promise<void> {
   const { app, systemClient, workspaceClient } = context;
+
+  // Drop any VERIFY_SELF_BASE_URL this app set (listen:true) so it never leaks
+  // into a later test file whose app binds a different port.
+  delete process.env.VERIFY_SELF_BASE_URL;
 
   await systemClient.close();
   if (workspaceClient) {

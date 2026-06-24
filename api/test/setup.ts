@@ -24,6 +24,8 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // Tunnel aggregate e2e (tunnel.e2e-spec.ts) — workspace + multi-tenant probe
   'staminads_ws_tunnel_test_ws',
   'staminads_ws_tunnel_other_ws',
+  // P0 initializing→active transition e2e (initializing-activation.e2e-spec.ts)
+  'staminads_ws_test_ws_init_activate',
 ];
 
 let client: ClickHouseClient;
