@@ -31,6 +31,10 @@ import { TrackingVerifyDto } from './dto/tracking-verify.dto';
 import { TrackingVerifyResponseDto } from './dto/tracking-verify-response.dto';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { Public } from '../common/decorators/public.decorator';
+import {
+  ReadM2MThrottle,
+  WriteM2MThrottle,
+} from '../common/decorators/throttle.decorator';
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
 import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
 import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
@@ -59,12 +63,19 @@ import {
 @Controller('api/admin/platform')
 @Public()
 @UseGuards(PlatformAdminGuard)
+// Rate-limit M2M : CHAQUE route est décorée explicitement (pas de défaut au
+// niveau classe — sinon, à cause de `Reflector.getAllAndOverride([handler,
+// class])`, un SkipThrottle de classe sur un throttler non re-déclaré par la
+// méthode "fuirait" et désactiverait le rate-limit voulu). Lecture =
+// @ReadM2MThrottle() (analytics 1000/min) ; écriture/provisioning =
+// @WriteM2MThrottle() (default 300/min, sans le `auth:10`). Ticket P2 2026-06-23.
 export class AdminPlatformController {
   constructor(
     private readonly adminPlatformService: AdminPlatformService,
   ) {}
 
   @Post('tenants.provision')
+  @WriteM2MThrottle()
   @ApiOperation({
     summary:
       'Provision a brand-new tenant (workspace + owner user + admin API key + magic-link invite) in one M2M call.',
@@ -76,6 +87,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.provisionApiKey')
+  @WriteM2MThrottle()
   @HttpCode(201)
   @ApiOperation({
     summary:
@@ -90,6 +102,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.revokeApiKey')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -104,6 +117,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.listApiKeys')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -117,6 +131,7 @@ export class AdminPlatformController {
   }
 
   @Post('analytics.query')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -127,6 +142,7 @@ export class AdminPlatformController {
   }
 
   @Post('analytics.funnel')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -137,6 +153,7 @@ export class AdminPlatformController {
   }
 
   @Post('analytics.conversionsByChannel')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -149,6 +166,7 @@ export class AdminPlatformController {
   // ─── Lot A — Consolidated workspace status ────────────────────────────
 
   @Post('workspaces.status')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -163,6 +181,7 @@ export class AdminPlatformController {
   // ─── Lot B — VoIP M2M ─────────────────────────────────────────────────
 
   @Post('voip.listPhoneNumbers')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary: 'List a workspace’s tracked phone numbers + allowed sources (M2M).',
@@ -172,6 +191,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.addPhoneNumber')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -182,6 +202,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.removePhoneNumber')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({ summary: 'Soft-delete a tracked phone number by id (M2M).' })
   voipRemovePhoneNumber(@Body() dto: VoipRemovePhoneNumberDto) {
@@ -192,6 +213,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.listCredentials')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -202,6 +224,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.saveCredential')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -212,6 +235,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.testCredential')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Test a VoIP credential against the provider API (M2M).',
@@ -221,6 +245,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.deleteCredential')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({ summary: 'Soft-delete a VoIP credential (M2M).' })
   voipDeleteCredential(@Body() dto: VoipCredentialKindDto) {
@@ -228,6 +253,7 @@ export class AdminPlatformController {
   }
 
   @Post('voip.sync')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -240,6 +266,7 @@ export class AdminPlatformController {
   // ─── Lot C — GSC M2M (status + resync; OAuth stays human/browser) ─────
 
   @Post('gsc.status')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -250,6 +277,7 @@ export class AdminPlatformController {
   }
 
   @Post('gsc.resync')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Trigger an immediate GSC sync for a connected workspace (M2M).',
@@ -261,6 +289,7 @@ export class AdminPlatformController {
   // ─── Lot D — Webhooks / Twenty connectors M2M ─────────────────────────
 
   @Post('webhooks.list')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary: 'List webhook destinations of a workspace (M2M). Secrets never returned.',
@@ -270,6 +299,7 @@ export class AdminPlatformController {
   }
 
   @Post('webhooks.create')
+  @WriteM2MThrottle()
   @HttpCode(201)
   @ApiOperation({
     summary:
@@ -280,6 +310,7 @@ export class AdminPlatformController {
   }
 
   @Post('webhooks.delete')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({ summary: 'Soft-delete a webhook destination (M2M).' })
   webhooksDelete(@Body() dto: DeleteWebhookDto) {
@@ -287,6 +318,7 @@ export class AdminPlatformController {
   }
 
   @Post('webhooks.test')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -299,6 +331,7 @@ export class AdminPlatformController {
   // ─── Lot E — Workspace settings M2M ───────────────────────────────────
 
   @Post('workspaces.updateSettings')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -311,6 +344,7 @@ export class AdminPlatformController {
   // ─── Lot H — Customization M2M (white-label + multi-industrie) ─────────
 
   @Post('workspaces.getCustomization')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -321,6 +355,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.setBranding')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -331,6 +366,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.setFeatures')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -341,6 +377,7 @@ export class AdminPlatformController {
   }
 
   @Post('workspaces.setLayout')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -351,6 +388,7 @@ export class AdminPlatformController {
   }
 
   @Post('crm.setMapping')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -361,6 +399,7 @@ export class AdminPlatformController {
   }
 
   @Post('crm.getMapping')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary: 'Read a workspace’s current analytics→CRM mapping (audit / IA).',
@@ -372,6 +411,7 @@ export class AdminPlatformController {
   // ─── Lot F — ads.conversions (read-only Ads-attributed conversions) ───
 
   @Post('ads.conversions')
+  @ReadM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:
@@ -386,6 +426,7 @@ export class AdminPlatformController {
   // ─── Lot G — tracking.verify (dry-run install check, zero pollution) ───
 
   @Post('tracking.verify')
+  @WriteM2MThrottle()
   @HttpCode(200)
   @ApiOperation({
     summary:

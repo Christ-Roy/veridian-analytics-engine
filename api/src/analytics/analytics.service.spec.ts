@@ -198,6 +198,52 @@ describe('AnalyticsService', () => {
     });
   });
 
+  // Ticket leak-sql 2026-06-24 : la réponse ne doit JAMAIS exposer le SQL
+  // ClickHouse brut ni ses paramètres (fuite de structure interne — OWASP).
+  // Le SQL reste interne au service ; seuls data + meta agrégée sortent.
+  describe('SQL leak (réponse sans SQL brut)', () => {
+    const baseQuery = {
+      workspace_id: 'ws-1',
+      metrics: ['sessions'],
+      dateRange: {
+        start: '2025-01-01 00:00:00',
+        end: '2025-01-02 23:59:59',
+        granularity: 'day' as const,
+      },
+    };
+
+    it('does not expose meta.query / query.sql on a simple query', async () => {
+      cacheManager.get.mockResolvedValue(undefined);
+
+      const result = await service.query(baseQuery);
+
+      // Aucun champ `query` au top-level, aucun `sql` nulle part.
+      expect(result).not.toHaveProperty('query');
+      expect((result as Record<string, unknown>).query).toBeUndefined();
+      expect(JSON.stringify(result)).not.toMatch(/"sql"/);
+      // Le happy-path reste intact.
+      expect(result.data).toBeDefined();
+      expect(result.meta).toBeDefined();
+    });
+
+    it('does not expose query/sql on a comparison query', async () => {
+      cacheManager.get.mockResolvedValue(undefined);
+
+      const result = await service.query({
+        ...baseQuery,
+        compareDateRange: {
+          start: '2024-12-01 00:00:00',
+          end: '2024-12-02 23:59:59',
+        },
+      });
+
+      expect(result).not.toHaveProperty('query');
+      expect(JSON.stringify(result)).not.toMatch(/"sql"/);
+      expect(result.data).toBeDefined();
+      expect(result.meta.compareDateRange).toBeDefined();
+    });
+  });
+
   describe('query deduplication', () => {
     const baseQuery = {
       workspace_id: 'ws-1',

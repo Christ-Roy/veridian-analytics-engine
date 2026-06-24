@@ -54,10 +54,10 @@ export interface AnalyticsResponse {
     compareDateRange?: { start: string; end: string };
     total_rows: number;
   };
-  query: {
-    sql: string;
-    params: Record<string, unknown>;
-  };
+  // NOTE: on n'expose JAMAIS le SQL ClickHouse brut ni les paramètres dans la
+  // réponse applicative (fuite de structure interne — OWASP, ticket leak-sql
+  // 2026-06-24). La requête reste interne au service ; pour debug, la logger
+  // côté serveur, pas la renvoyer au consommateur (Hub/IA/console).
 }
 
 @Injectable()
@@ -224,7 +224,6 @@ export class AnalyticsService {
         },
         total_rows: data.length,
       },
-      query: { sql, params },
     };
   }
 
@@ -346,7 +345,6 @@ export class AnalyticsService {
         },
         total_rows: filledCurrent.length + filledPrevious.length,
       },
-      query: { sql: currentSql, params: currentParams },
     };
   }
 
