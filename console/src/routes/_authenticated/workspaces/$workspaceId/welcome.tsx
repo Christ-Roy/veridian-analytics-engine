@@ -13,15 +13,20 @@ import { VeridianWelcomePage } from '../../../../veridian/pages/welcome'
  * Pourquoi sous-route native plutôt que tunnel ? L'ancien chemin
  * `/veridian/welcome/...` bypassait le layout staminads (`workspaces/$workspaceId.tsx`)
  * → pas de nav, pas de breadcrumbs, pas de bouton Assistant. En intégrant la
- * welcome comme sous-route, on hérite automatiquement de ces éléments tout en
- * gardant le wizard scopé sous `.veridian-scope` (pas de pollution AntDesign).
+ * welcome comme sous-route, on hérite automatiquement de ces éléments. Le rendu
+ * est 100 % AntDesign (thème console clair + accent violet) depuis la refonte
+ * UX 2026-06-24 — fini le `.veridian-scope` dark qui jurait avec le produit.
+ *
+ * 🔴 ONBOARDING NON BLOQUANT (figé Robert 2026-06-24) : cette page est une
+ * SUGGESTION, jamais un mur. Le client peut entrer dans son dashboard à tout
+ * moment (bouton « Accéder à mon tableau de bord »). Le layout ne séquestre
+ * plus les workspaces non-actifs ici.
  *
  * Comportements :
- *   - Si le workspace a déjà reçu un event tracker (status === 'active'),
- *     on redirige automatiquement vers le dashboard Veridian → l'utilisateur
- *     ne se retrouve pas bloqué dans l'onboarding s'il revient par erreur.
- *   - À la fin du wizard (event détecté), on flag `status = 'active'` puis
- *     on redirige vers le dashboard staminads natif `/workspaces/:id`.
+ *   - Si le workspace est déjà actif, on redirige vers le dashboard (l'user
+ *     n'a rien à faire sur l'onboarding s'il y revient via un bookmark).
+ *   - `onComplete` (clic « Accéder au dashboard ») flag `status = 'active'`
+ *     puis navigue vers le dashboard staminads natif `/workspaces/:id`.
  */
 export const Route = createFileRoute(
   '/_authenticated/workspaces/$workspaceId/welcome',

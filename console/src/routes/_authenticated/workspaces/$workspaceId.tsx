@@ -83,33 +83,12 @@ function WorkspaceLayout() {
     }
   }, [timezonePopoverOpen])
 
-  // Redirect to the Veridian welcome wizard if workspace is not yet active.
-  // `welcome` est le NOUVEAU chemin d'onboarding (sprint UI-WELCOME-NATIVE,
-  // 2026-05-22) : intégré au layout staminads, pas de tunnel parallèle.
-  // `install-sdk` reste accessible directement pour qui veut le pattern
-  // staminads upstream, mais n'est plus la destination par défaut.
-  const isInstallSdkPage = currentPath.endsWith('/install-sdk')
-  const isWelcomePage = currentPath.endsWith('/welcome')
-  useEffect(() => {
-    if (
-      workspace.status !== 'active' &&
-      !isInstallSdkPage &&
-      !isWelcomePage
-    ) {
-      navigate({
-        to: '/workspaces/$workspaceId/welcome',
-        params: { workspaceId },
-        replace: true,
-      })
-    }
-  }, [
-    workspace.status,
-    isInstallSdkPage,
-    isWelcomePage,
-    navigate,
-    workspaceId,
-  ])
-
+  // 🔴 ONBOARDING NON BLOQUANT (figé Robert 2026-06-24) : on NE redirige PLUS
+  // de force vers `/welcome` quand le workspace n'a pas encore reçu d'event.
+  // L'ancienne logique séquestrait le nouveau client hors de son dashboard tant
+  // qu'aucune visite n'arrivait — mauvaise première impression. Désormais le
+  // dashboard est accessible immédiatement ; l'install du tracker est proposée
+  // en encart dismissable (OnboardingBanner) + via le lien « Démarrage ».
   const isWorkspaceActive = workspace.status === 'active'
 
   // Build timezone options with workspace timezone first, then all IANA timezones
@@ -245,10 +224,14 @@ function WorkspaceLayout() {
                 }] : []),
               ]}
             />
-            {!isWorkspaceActive && (
-              <div className="flex items-center">
-                <div className="h-5 w-px bg-gray-200" />
-                <nav className="flex gap-1 pl-2">
+            {/* Nav staminads complète — TOUJOURS affichée (onboarding non
+                bloquant). Le lien « Démarrage » n'apparaît que tant que le
+                workspace n'a pas reçu d'event, en tête de nav, sans masquer
+                le reste. */}
+            <div className="flex items-center">
+              <div className="h-5 w-px bg-gray-200" />
+              <nav className="flex gap-1 pl-2">
+                {!isWorkspaceActive && (
                   <Link
                     to="/workspaces/$workspaceId/welcome"
                     params={{ workspaceId }}
@@ -260,13 +243,7 @@ function WorkspaceLayout() {
                   >
                     Démarrage
                   </Link>
-                </nav>
-              </div>
-            )}
-            {isWorkspaceActive && (
-              <div className="flex items-center">
-                <div className="h-5 w-px bg-gray-200" />
-                <nav className="flex gap-1 pl-2">
+                )}
                 {[
                   { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
                   { to: '/workspaces/$workspaceId/live', label: 'En direct' },
@@ -295,15 +272,14 @@ function WorkspaceLayout() {
                     </Link>
                   )
                 })}
-                </nav>
-              </div>
-            )}
+              </nav>
+            </div>
           </Space>
           </div>
 
           {/* Mobile: Sync + Hamburger */}
           <div className="flex md:hidden items-center gap-2">
-            {isWorkspaceActive && <SyncStatusIcon workspaceId={workspaceId} />}
+            <SyncStatusIcon workspaceId={workspaceId} />
             <Button
               type="text"
               icon={<MenuOutlined />}
@@ -315,8 +291,6 @@ function WorkspaceLayout() {
           {/* Desktop: Sync Status + Timezone + Logout */}
           <div className="hidden md:block">
           <Space>
-            {isWorkspaceActive && (
-              <>
                 <SyncStatusIcon workspaceId={workspaceId} />
                 <Tooltip title={`Fuseau horaire : ${timezone}`} placement="left">
                   <Popover
@@ -355,8 +329,6 @@ function WorkspaceLayout() {
                     />
                   </Popover>
                 </Tooltip>
-              </>
-            )}
             <Dropdown
               menu={{
                 items: [
@@ -496,29 +468,26 @@ function WorkspaceLayout() {
             />
           </div>
 
-          {/* Navigation Links — onboarding (workspace pas actif) */}
-          {!isWorkspaceActive && (
-            <nav className="flex flex-col py-2">
-              <Link
-                to="/workspaces/$workspaceId/welcome"
-                params={{ workspaceId }}
-                onClick={closeMobileMenu}
-                className={`px-4 py-3 transition-colors ${
-                  currentPath.endsWith('/welcome')
-                    ? '!text-[var(--primary)] bg-purple-50'
-                    : '!text-gray-700 hover:bg-gray-50'
-                }`}
-              >
-                Démarrage
-              </Link>
-            </nav>
-          )}
-
-          {/* Navigation Links */}
-          {isWorkspaceActive && (
-            <nav className="flex flex-col py-2">
+          {/* Navigation Links — nav staminads complète TOUJOURS affichée
+              (onboarding non bloquant). Le lien « Démarrage » n'apparaît que
+              tant que le workspace n'a pas reçu d'event. */}
+          <nav className="flex flex-col py-2">
               {mobileMenuLevel === 'main' ? (
                 <>
+                  {!isWorkspaceActive && (
+                    <Link
+                      to="/workspaces/$workspaceId/welcome"
+                      params={{ workspaceId }}
+                      onClick={closeMobileMenu}
+                      className={`px-4 py-3 transition-colors ${
+                        currentPath.endsWith('/welcome')
+                          ? '!text-[var(--primary)] bg-purple-50'
+                          : '!text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      Démarrage
+                    </Link>
+                  )}
                   {[
                     { to: '/workspaces/$workspaceId', label: 'Tableau de bord', exact: true },
                     { to: '/workspaces/$workspaceId/live', label: 'En direct' },
@@ -582,30 +551,27 @@ function WorkspaceLayout() {
                   ))}
                 </>
               )}
-            </nav>
-          )}
+          </nav>
 
           {/* Divider */}
           <div className="border-t border-gray-200" />
 
           {/* Timezone Picker */}
-          {isWorkspaceActive && (
-            <div className="p-4">
-              <div className="text-xs text-gray-500 mb-2">Fuseau horaire</div>
-              <Select
-                value={timezone}
-                onChange={(value) => {
-                  setTimezone(value)
-                  message.success(`Fuseau horaire défini sur ${value}`)
-                }}
-                variant="filled"
-                className="w-full"
-                showSearch
-                optionFilterProp="label"
-                options={timezoneOptions}
-              />
-            </div>
-          )}
+          <div className="p-4">
+            <div className="text-xs text-gray-500 mb-2">Fuseau horaire</div>
+            <Select
+              value={timezone}
+              onChange={(value) => {
+                setTimezone(value)
+                message.success(`Fuseau horaire défini sur ${value}`)
+              }}
+              variant="filled"
+              className="w-full"
+              showSearch
+              optionFilterProp="label"
+              options={timezoneOptions}
+            />
+          </div>
 
           {/* Divider */}
           <div className="border-t border-gray-200" />
@@ -675,12 +641,8 @@ function WorkspaceLayout() {
       </div>
 
       {/* AI Assistant - available on all workspace pages */}
-      {isWorkspaceActive && (
-        <>
-          <AssistantButton />
-          <AssistantPanel />
-        </>
-      )}
+      <AssistantButton />
+      <AssistantPanel />
     </div>
     </WorkspaceBrandingProvider>
     </AssistantProvider>
