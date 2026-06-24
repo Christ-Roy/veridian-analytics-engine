@@ -596,6 +596,19 @@ export class AnalyticsService {
         : ['signup', 'app_started'];
 
     // Conversions per (channel_group, app) from the goals table.
+    //
+    // `AND session_id != ''` aligns the definition of "a conversion" with the
+    // sales funnel (funnel-builder.ts applies the same guard in session mode):
+    // a conversion is a *converted session*, identified by a non-empty
+    // session_id. This makes funnel(goal) == sum(conversions(goal)) hold for
+    // ANY data state, instead of diverging on orphan goals.
+    //
+    // Why this is safe (never drops a legitimate conversion): every goal carries
+    // a non-empty session_id by construction — web goals belong to the visitor's
+    // session, and server-to-server goals synthesize one (e.g. phone_call →
+    // `voip:<provider>:<id>`, see voip/phone-call-event.ts). A goal with an
+    // empty session_id is an orphan (transient ingestion anomaly) that must not
+    // be counted as a converted session by either surface.
     const convRows = await this.clickhouse.queryWorkspace<{
       channel_group: string;
       app: string;
@@ -610,6 +623,7 @@ export class AnalyticsService {
        WHERE goal_timestamp >= {start:DateTime64(3)}
          AND goal_timestamp <= {end:DateTime64(3)}
          AND goal_name IN ({goals:Array(String)})
+         AND session_id != ''
        GROUP BY channel_group, app`,
       { start: startCh, end: endCh, goals },
     );
