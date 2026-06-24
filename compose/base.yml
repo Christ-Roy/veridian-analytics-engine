@@ -68,6 +68,12 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM_NAME: ${SMTP_FROM_NAME:-Veridian Analytics}
       SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-noreply@veridian.site}
+      # Active le cron de rapports email programmés (@Cron toutes les 15 min).
+      # Off par défaut (fail-soft, même modèle que VOIP_SYNC_ENABLED) : tant que
+      # le canal email transactionnel propre à l'engine n'est pas câblé, le cron
+      # est un no-op (n'envoie rien, ne pollue pas audit_logs en report_failed).
+      # Passer à "true" une fois le provider transactionnel en place.
+      SUBSCRIPTIONS_ENABLED: ${SUBSCRIPTIONS_ENABLED:-false}
       # DEMO_SECRET optionnel : protège les endpoints de génération de fixtures démo.
       DEMO_SECRET: ${DEMO_SECRET:-}
       # Secret M2M des endpoints /api/admin/platform/* (PlatformAdminGuard).

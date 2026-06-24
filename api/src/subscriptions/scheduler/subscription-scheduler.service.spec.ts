@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { SubscriptionSchedulerService } from './subscription-scheduler.service';
 import { SubscriptionsService } from '../subscriptions.service';
 import { ReportGeneratorService } from '../report/report-generator.service';
@@ -16,6 +17,9 @@ describe('SubscriptionSchedulerService', () => {
   let smtpService: jest.Mocked<SmtpService>;
   let usersService: jest.Mocked<UsersService>;
   let auditService: jest.Mocked<AuditService>;
+  // Par défaut le flag est activé pour exercer le flow d'envoi dans les tests
+  // existants ; le test de gating ci-dessous le repasse à 'false'.
+  let subscriptionsEnabled: string;
 
   const mockSubscription: Subscription = {
     id: 'sub-123',
@@ -55,9 +59,20 @@ describe('SubscriptionSchedulerService', () => {
   };
 
   beforeEach(async () => {
+    subscriptionsEnabled = 'true';
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SubscriptionSchedulerService,
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn((key: string) =>
+              key === 'SUBSCRIPTIONS_ENABLED'
+                ? subscriptionsEnabled
+                : undefined,
+            ),
+          },
+        },
         {
           provide: SubscriptionsService,
           useValue: {
@@ -115,6 +130,17 @@ describe('SubscriptionSchedulerService', () => {
   });
 
   describe('processScheduledReports', () => {
+    it('is a no-op when SUBSCRIPTIONS_ENABLED != true (gated cron)', async () => {
+      subscriptionsEnabled = 'false';
+
+      await service.processScheduledReports();
+
+      // Aucun travail : pas de lookup, pas d'envoi, pas d'audit pollué.
+      expect(subscriptionsService.findDue).not.toHaveBeenCalled();
+      expect(mailService.sendReport).not.toHaveBeenCalled();
+      expect(auditService.log).not.toHaveBeenCalled();
+    });
+
     it('should find and process all due subscriptions', async () => {
       await service.processScheduledReports();
 

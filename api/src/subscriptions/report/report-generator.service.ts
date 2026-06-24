@@ -547,6 +547,19 @@ export class ReportGeneratorService {
   }
 
   private buildMjml(data: ReportData, subscriptionName: string): string {
+    // Marque Veridian (jamais Staminads upstream) dans l'en-tête du rapport.
+    // Le logo est servi par la console à l'origine de `dashboardUrl`
+    // (/veridian-logo.svg) — on dérive l'URL absolue de cette origine pour que
+    // l'image charge dans n'importe quel client mail. Fallback prudent sur le
+    // domaine prod si l'URL est inexploitable.
+    let brandLogoUrl =
+      'https://analytics-engine.app.veridian.site/veridian-logo.svg';
+    try {
+      brandLogoUrl = `${new URL(data.dashboardUrl).origin}/veridian-logo.svg`;
+    } catch {
+      // dashboardUrl invalide → on garde le fallback prod.
+    }
+
     const metricsHeaders = data.metrics
       .map((m) => `<th>${m.label}</th>`)
       .join('\n                  ');
@@ -683,7 +696,7 @@ export class ReportGeneratorService {
   </mj-head>
 
   <mj-body background-color="#f3f6fc">
-    <!-- Header: Workspace Info + Staminads Logo -->
+    <!-- Header: Workspace Info + Veridian Logo -->
     <mj-section padding-top="16px" padding-bottom="0px" padding-left="12px" padding-right="12px">
       <mj-column width="70%" vertical-align="middle">
         <mj-table padding="0">
@@ -699,7 +712,7 @@ export class ReportGeneratorService {
         </mj-table>
       </mj-column>
       <mj-column width="30%" vertical-align="middle">
-        <mj-image src="https://www.staminads.com/favicon.svg" alt="Staminads" width="32px" align="right" padding="0" href="https://www.staminads.com" />
+        <mj-image src="${brandLogoUrl}" alt="Veridian Analytics" width="32px" align="right" padding="0" href="${data.dashboardUrl}" />
       </mj-column>
     </mj-section>
 

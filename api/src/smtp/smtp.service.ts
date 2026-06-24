@@ -227,10 +227,16 @@ export class SmtpService {
           }
         : undefined,
       from: {
-        name: this.configService.get<string>('SMTP_FROM_NAME', 'Staminads'),
+        // Défauts de marque Veridian (fail-safe) — alignés sur compose/base.yml
+        // (SMTP_FROM_NAME/SMTP_FROM_EMAIL). Le défaut code ne doit jamais
+        // exposer la marque upstream Staminads dans un email client.
+        name: this.configService.get<string>(
+          'SMTP_FROM_NAME',
+          'Veridian Analytics',
+        ),
         email: this.configService.get<string>(
           'SMTP_FROM_EMAIL',
-          'noreply@staminads.com',
+          'noreply@veridian.site',
         ),
       },
     };

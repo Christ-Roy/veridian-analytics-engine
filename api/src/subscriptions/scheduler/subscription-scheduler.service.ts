@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
+import { ConfigService } from '@nestjs/config';
 import { SubscriptionsService } from '../subscriptions.service';
 import { ReportGeneratorService } from '../report/report-generator.service';
 import { MailService } from '../../mail/mail.service';
@@ -19,13 +20,29 @@ export class SubscriptionSchedulerService {
     private readonly smtpService: SmtpService,
     private readonly usersService: UsersService,
     private readonly auditService: AuditService,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Cron gaté sur `SUBSCRIPTIONS_ENABLED='true'` (même modèle que
+   * `VOIP_SYNC_ENABLED` pour le sync VoIP). Off par défaut (fail-soft) : le
+   * canal email transactionnel propre à l'engine n'est pas encore câblé en
+   * prod (cf todo subscriptions). Tant que le flag n'est pas posé, le cron est
+   * un no-op — il ne tente AUCUN envoi et ne pollue donc pas `audit_logs` en
+   * `report_failed` (ce qui arriverait dès qu'un abonnement actif existe sans
+   * SMTP réel). On l'activera quand le provider transactionnel sera en place.
+   */
+  private enabled(): boolean {
+    return this.config.get<string>('SUBSCRIPTIONS_ENABLED') === 'true';
+  }
 
   /**
    * Run every 15 minutes to check for due subscriptions
    */
   @Cron('0 */15 * * * *')
   async processScheduledReports(): Promise<void> {
+    if (!this.enabled()) return;
+
     this.logger.log('Processing scheduled reports...');
 
     const dueSubscriptions = await this.subscriptionsService.findDue();

@@ -257,11 +257,15 @@ describe('ReportGeneratorService', () => {
       expect(html).toContain('View Dashboard');
     });
 
-    it('should include Staminads logo', async () => {
+    it('should brand the report with the Veridian logo (never Staminads)', async () => {
       const reportData = await service.generate(mockSubscription);
       const html = service.renderEmail(reportData, mockSubscription);
 
-      expect(html).toContain('favicon.svg');
+      // Branding Veridian : le logo doit être veridian-logo.svg (servi par la
+      // console à l'origine de dashboardUrl), jamais le favicon Staminads.
+      expect(html).toContain('veridian-logo.svg');
+      expect(html).not.toContain('staminads.com');
+      expect(html).not.toContain('staminads.com/favicon.svg');
     });
 
     it('should include workspace info with website', async () => {
