@@ -147,12 +147,21 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
     await waitForClickHouse();
   }
 
+  // Channel distribution by DISTINCT row identity. Both sessions and goals are
+  // ReplacingMergeTree; an ALTER UPDATE mutation can transiently leave the
+  // pre-mutation and post-mutation parts active until the background merge runs,
+  // so a plain `count()` may momentarily see both versions of a row. We dedup by
+  // the row's primary identity (sessions.id / goals.id) via uniqExact — exactly
+  // how the production analytics layer counts sessions (uniqExact(id) on
+  // `sessions FINAL`, cf query-builder.ts) — so the assertion is deterministic.
   async function channelDist(
     table: 'sessions' | 'goals',
   ): Promise<Record<string, number>> {
     const dbName = `staminads_ws_${workspaceId}`;
     const r = await workspaceClient.query({
-      query: `SELECT channel_group, count() AS c FROM ${dbName}.${table} GROUP BY channel_group`,
+      query: `SELECT channel_group, uniqExact(id) AS c
+              FROM ${dbName}.${table} FINAL
+              GROUP BY channel_group`,
       format: 'JSONEachRow',
     });
     const rows = (await r.json()) as Array<{
@@ -162,6 +171,13 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
     const out: Record<string, number> = {};
     for (const row of rows) out[row.channel_group] = Number(row.c);
     return out;
+  }
+
+  /** Force ReplacingMergeTree merges so post-mutation reads are stable. */
+  async function settle() {
+    await workspaceClient.command({ query: 'OPTIMIZE TABLE sessions FINAL' });
+    await workspaceClient.command({ query: 'OPTIMIZE TABLE goals FINAL' });
+    await waitForClickHouse();
   }
 
   beforeAll(async () => {
@@ -193,6 +209,7 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
   it('re-derives channel/channel_group on historical sessions + goals', async () => {
     await seed();
     const summary = await service.backfillChannel(workspaceId);
+    await settle();
 
     // 3 sessions + 3 goals all moved off the empty bucket.
     expect(summary.sessions_updated).toBe(3);
@@ -214,28 +231,28 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
   it('preserves totals (only channel columns rewritten, no row added/removed)', async () => {
     await seed();
     const dbName = `staminads_ws_${workspaceId}`;
-    const totalBefore = await workspaceClient
-      .query({
-        query: `SELECT count() AS c FROM ${dbName}.sessions`,
+    // uniqExact(id) on FINAL = deterministic session total (cf channelDist).
+    const totalQuery = async () => {
+      const r = await workspaceClient.query({
+        query: `SELECT uniqExact(id) AS c FROM ${dbName}.sessions FINAL`,
         format: 'JSONEachRow',
-      })
-      .then((r) => r.json() as Promise<Array<{ c: string }>>);
+      });
+      const rows = (await r.json()) as Array<{ c: string }>;
+      return Number(rows[0].c);
+    };
 
+    const totalBefore = await totalQuery();
     await service.backfillChannel(workspaceId);
+    await settle();
+    const totalAfter = await totalQuery();
 
-    const totalAfter = await workspaceClient
-      .query({
-        query: `SELECT count() AS c FROM ${dbName}.sessions`,
-        format: 'JSONEachRow',
-      })
-      .then((r) => r.json() as Promise<Array<{ c: string }>>);
+    // Only channel columns rewritten → row count invariant.
+    expect(totalAfter).toBe(totalBefore);
 
-    expect(Number(totalAfter[0].c)).toBe(Number(totalBefore[0].c));
-
-    // Sum across channel groups == total sessions.
+    // Sum across channel groups == total sessions (no row lost to a bad bucket).
     const dist = await channelDist('sessions');
     const sum = Object.values(dist).reduce((a, b) => a + b, 0);
-    expect(sum).toBe(Number(totalAfter[0].c));
+    expect(sum).toBe(totalAfter);
   });
 
   it('is idempotent: a second run updates 0 rows', async () => {
@@ -248,6 +265,7 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
     expect(second.sessions_updated).toBe(0);
     expect(second.goals_updated).toBe(0);
     expect(second.changes.length).toBe(0);
+    await settle();
 
     // Distribution unchanged after the second run.
     const sess = await channelDist('sessions');
