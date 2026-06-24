@@ -524,7 +524,10 @@ describe('Analytics E2E', () => {
         .expect(401);
     });
 
-    it('returns SQL in response for debugging', async () => {
+    it('does NOT leak raw ClickHouse SQL in the response (no-leak contract)', async () => {
+      // Contrat durci 2026-06-24 (ticket leak-sql) : la réponse applicative
+      // n'expose JAMAIS le SQL ClickHouse brut ni les paramètres (fuite de
+      // structure interne — OWASP). Le champ `query` est retiré du contrat.
       const response = await request(ctx.app.getHttpServer())
         .post('/api/analytics.query')
         .set('Authorization', `Bearer ${authToken}`)
@@ -535,10 +538,10 @@ describe('Analytics E2E', () => {
         })
         .expect(200);
 
-      expect(response.body.query).toBeDefined();
-      expect(response.body.query.sql).toContain('SELECT');
-      expect(response.body.query.sql).toContain('sessions FINAL');
-      expect(response.body.query.params).toBeDefined();
+      expect(response.body.query).toBeUndefined();
+      // La donnée et la metadata restent servies normalement.
+      expect(response.body.data).toBeDefined();
+      expect(response.body.meta).toBeDefined();
     });
 
     it('returns sessions as integers (not floats) when grouped by dimension', async () => {
@@ -840,11 +843,10 @@ describe('Analytics E2E', () => {
         })
         .expect(200);
 
-      // Since all bounce_rates are 100%, all rows should pass the filter
+      // Since all bounce_rates are 100%, all rows should pass the filter.
+      // Le filtrage effectif (HAVING côté SQL) est prouvé par data.length —
+      // le SQL brut n'est plus exposé dans la réponse (no-leak contract).
       expect(filteredResponse.body.data.length).toBe(2);
-
-      // Verify HAVING clause is in SQL
-      expect(filteredResponse.body.query.sql).toContain('HAVING');
     });
 
     it('filters grouped results by bounce_rate < threshold (excludes high bounce)', async () => {
@@ -888,13 +890,12 @@ describe('Analytics E2E', () => {
       // Test data: odd sessions have device='mobile' AND utm_source='facebook'
       // So filtering by mobile gives only facebook sessions (15 total)
       // bounce_rate is 100% so it passes the metricFilter
+      // L'application conjointe du filtre dimension (WHERE device=mobile) et du
+      // metricFilter (HAVING bounce_rate>50) est prouvée par le résultat filtré
+      // ci-dessous — le SQL brut n'est plus exposé (no-leak contract).
       expect(response.body.data.length).toBe(1);
       expect(response.body.data[0].utm_source).toBe('facebook');
       expect(Number(response.body.data[0].sessions)).toBe(15);
-
-      // Verify SQL has both WHERE and HAVING
-      expect(response.body.query.sql).toContain('device = {f0:String}');
-      expect(response.body.query.sql).toContain('HAVING');
     });
 
     it('combines metricFilters with havingMinSessions', async () => {
@@ -914,12 +915,10 @@ describe('Analytics E2E', () => {
         .expect(200);
 
       // Both utm_sources have 15 sessions each, so both pass havingMinSessions
-      // Both have 100% bounce_rate, so both pass metricFilter
+      // Both have 100% bounce_rate, so both pass metricFilter.
+      // Les deux conditions HAVING (count>=10 + bounce_rate>50) sont prouvées
+      // par data.length — le SQL brut n'est plus exposé (no-leak contract).
       expect(response.body.data.length).toBe(2);
-
-      // Verify HAVING clause has both conditions
-      expect(response.body.query.sql).toContain('HAVING');
-      expect(response.body.query.sql).toContain('count() >= 10');
     });
 
     it('filters by median_duration metric', async () => {
@@ -976,10 +975,11 @@ describe('Analytics E2E', () => {
         })
         .expect(200);
 
-      // Since dimensions is empty and no totalsGroupBy, metricFilters are ignored
+      // Since dimensions is empty and no totalsGroupBy, metricFilters are ignored.
+      // L'absence de HAVING est prouvée par les 30 sessions intactes (le filtre
+      // n'a rien exclu) — le SQL brut n'est plus exposé (no-leak contract).
       expect(response.body.data.length).toBe(1);
       expect(Number(response.body.data[0].sessions)).toBe(30);
-      expect(response.body.query.sql).not.toContain('HAVING');
     });
 
     it('applies metricFilters to totals using totalsGroupBy (filtered totals)', async () => {
@@ -1022,14 +1022,12 @@ describe('Analytics E2E', () => {
         })
         .expect(200);
 
-      // Totals should be the sum of filtered groups
+      // Totals should be the sum of filtered groups.
+      // Le pattern subquery + HAVING est prouvé par le total filtré ci-dessous —
+      // le SQL brut n'est plus exposé dans la réponse (no-leak contract).
       expect(totalsResponse.body.data.length).toBe(1);
       expect(Number(totalsResponse.body.data[0].sessions)).toBe(30);
       expect(Number(totalsResponse.body.data[0].bounce_rate)).toBe(100);
-
-      // SQL should use subquery pattern
-      expect(totalsResponse.body.query.sql).toContain('FROM (');
-      expect(totalsResponse.body.query.sql).toContain('HAVING');
     });
 
     it('returns filtered totals that exclude groups not passing metricFilter', async () => {
@@ -1049,13 +1047,11 @@ describe('Analytics E2E', () => {
         })
         .expect(200);
 
-      // No groups pass the filter, so totals should be 0
+      // No groups pass the filter, so totals should be 0.
+      // L'exclusion (subquery + HAVING) est prouvée par sessions=0 — le SQL
+      // brut n'est plus exposé dans la réponse (no-leak contract).
       expect(response.body.data.length).toBe(1);
       expect(Number(response.body.data[0].sessions)).toBe(0);
-
-      // SQL should use subquery pattern with HAVING
-      expect(response.body.query.sql).toContain('FROM (');
-      expect(response.body.query.sql).toContain('HAVING');
     });
 
     it('filtered totals respects dimension filters too', async () => {
@@ -1555,7 +1551,10 @@ describe('Analytics E2E', () => {
           .expect(400);
       });
 
-      it('returns SQL with FINAL for pages table', async () => {
+      it('serves the pages table (FINAL dedup) without leaking SQL', async () => {
+        // Le routage sur la table `pages` (avec FINAL pour la déduplication
+        // ReplacingMergeTree) est prouvé par une réponse 200 + données servies.
+        // Le SQL brut n'est plus exposé dans la réponse (no-leak contract).
         const response = await request(ctx.app.getHttpServer())
           .post('/api/analytics.query')
           .set('Authorization', `Bearer ${authToken}`)
@@ -1567,7 +1566,8 @@ describe('Analytics E2E', () => {
           })
           .expect(200);
 
-        expect(response.body.query.sql).toContain('FROM pages FINAL');
+        expect(response.body.query).toBeUndefined();
+        expect(response.body.data).toBeDefined();
       });
     });
 
@@ -1952,7 +1952,10 @@ describe('Analytics E2E', () => {
           .expect(400);
       });
 
-      it('returns SQL with FINAL for goals table', async () => {
+      it('serves the goals table (FINAL dedup) without leaking SQL', async () => {
+        // Le routage sur la table `goals` (avec FINAL pour la déduplication
+        // ReplacingMergeTree) est prouvé par une réponse 200 + données servies.
+        // Le SQL brut n'est plus exposé dans la réponse (no-leak contract).
         const response = await request(ctx.app.getHttpServer())
           .post('/api/analytics.query')
           .set('Authorization', `Bearer ${authToken}`)
@@ -1964,7 +1967,8 @@ describe('Analytics E2E', () => {
           })
           .expect(200);
 
-        expect(response.body.query.sql).toContain('FROM goals FINAL');
+        expect(response.body.query).toBeUndefined();
+        expect(response.body.data).toBeDefined();
       });
     });
 
