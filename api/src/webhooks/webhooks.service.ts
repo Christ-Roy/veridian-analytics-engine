@@ -338,15 +338,18 @@ export class WebhooksService {
   /**
    * Read the ready (pending/retrying) deliveries due now.
    *
-   * ⚠️ NOT an atomic claim. ClickHouse has no SELECT…FOR UPDATE / transactions,
-   * so two workers reading concurrently would BOTH pick up the same row and
-   * double-POST. The only guard today is the per-process `running` flag in the
-   * delivery worker → this is correct ONLY in a single-instance deployment
-   * (current prod: no `replicas` in any compose). Scaling to 2+ replicas (or a
-   * deploy overlap) requires a real claim (worker_id + lease_until column +
-   * read-back verification) — tracked in
-   * todo/2026-06-23-webhooks-claim-delivery-non-atomique-multi-instance.md.
-   * Until then, DO NOT scale the engine to >1 replica without that fix.
+   * ⚠️ NOT an atomic claim — and deliberately so. ClickHouse has no
+   * SELECT…FOR UPDATE / transactions, and the engine has no Postgres/Redis lock
+   * backend, so a real distributed claim is impossible here without new infra.
+   * A fake claim (worker_id + lease_until on ClickHouse) would only give an
+   * ILLUSION of atomicity (ReplacingMergeTree dedups async, after both workers
+   * already decided to POST). Instead, correctness relies on a single-leader
+   * gate in the delivery worker: exactly ONE process drains the queue
+   * (`WEBHOOK_WORKER_LEADER`, default true). With one reader there is no race.
+   * To scale the API to >1 replica, set WEBHOOK_WORKER_LEADER=false on all
+   * replicas but one — see WebhookDeliveryWorker.onModuleInit /
+   * docs/runbooks/webhook-worker-single-leader.md
+   * (decision: todo/done/2026-06-23-webhooks-claim-delivery-non-atomique-multi-instance.md).
    */
   async findReadyDeliveries(limit = 50): Promise<WebhookDelivery[]> {
     const rows = await this.clickhouse.querySystem<DeliveryRow>(

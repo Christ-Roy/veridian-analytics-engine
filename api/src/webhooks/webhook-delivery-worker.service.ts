@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { WebhooksService } from './webhooks.service';
@@ -43,9 +43,24 @@ export interface DeliveryAttemptResult {
  *     until attempt == max_attempts → status=gave_up
  */
 @Injectable()
-export class WebhookDeliveryWorker {
+export class WebhookDeliveryWorker implements OnModuleInit {
   private readonly logger = new Logger(WebhookDeliveryWorker.name);
   private running = false;
+  /**
+   * Single-leader gate. `findReadyDeliveries` is NOT an atomic claim — ClickHouse
+   * has no SELECT…FOR UPDATE / transactions, so two workers polling the same
+   * `pending` rows would BOTH POST them (double delivery). We have no lock
+   * backend in the engine (ClickHouse only — no Postgres/Redis), so a real
+   * distributed claim is impossible here without new infra.
+   *
+   * The honest guarantee instead: exactly ONE process drains the queue. That
+   * single drainer is genuinely race-free (one reader → no concurrency). Default
+   * `true` so a mono-instance deployment (current prod) just works. To scale the
+   * API horizontally, set `WEBHOOK_WORKER_LEADER=false` on every replica BUT one.
+   * Cf todo/done/2026-06-23-webhooks-claim-delivery-non-atomique-multi-instance.md
+   * + docs/runbooks/webhook-worker-single-leader.md.
+   */
+  private isLeader = true;
 
   constructor(
     private readonly webhooks: WebhooksService,
@@ -55,9 +70,48 @@ export class WebhookDeliveryWorker {
     private readonly twenty: TwentyConnectorService,
   ) {}
 
-  /** Cron entry-point. Skipped while the previous tick is still running. */
+  /**
+   * Resolve the leader flag once and announce it loudly so the single-instance
+   * assumption is impossible to miss in the logs the day someone scales out.
+   * Fail-safe default: absent/empty ENV → leader=true (mono-instance keeps
+   * delivering). Only an explicit `false` (case-insensitive) demotes a replica.
+   */
+  onModuleInit(): void {
+    this.isLeader =
+      (this.config.get<string>('WEBHOOK_WORKER_LEADER') ?? 'true')
+        .trim()
+        .toLowerCase() !== 'false';
+
+    if (this.isLeader) {
+      this.logger.warn(
+        '[webhook-worker] leader=true — SINGLE-INSTANCE assumed. The delivery ' +
+          'claim is NOT atomic on ClickHouse; running >1 active worker double-POSTs ' +
+          'generic webhooks. Before scaling the API to N replicas, set ' +
+          'WEBHOOK_WORKER_LEADER=false on every replica BUT one.',
+      );
+    } else {
+      this.logger.log(
+        '[webhook-worker] leader=false — delivery polling DISABLED on this ' +
+          'instance (non-leader replica). Exactly one leader must drain the queue.',
+      );
+    }
+  }
+
+  /**
+   * Cron entry-point. Skipped while the previous tick is still running.
+   *
+   * ⚠️ SINGLE-LEADER ONLY. Gated on `isLeader` (WEBHOOK_WORKER_LEADER, default
+   * true). `findReadyDeliveries` reads `pending` rows WITHOUT an atomic claim —
+   * ClickHouse offers no SELECT…FOR UPDATE / transaction, and the engine has no
+   * Postgres/Redis lock backend. Correctness therefore relies on exactly one
+   * process polling. NEVER run two active workers (≥2 replicas with leader=true,
+   * or a rolling-deploy overlap where both old and new poll) — they would both
+   * pick up the same row and POST it twice. Generic (Slack/n8n/client) webhooks
+   * are NOT idempotent, so that double-fire is a real client-visible bug.
+   */
   @Interval('webhook-delivery-tick', POLL_INTERVAL_MS)
   async tick(): Promise<void> {
+    if (!this.isLeader) return; // non-leader replica: never drain the queue
     if (this.running) return;
     this.running = true;
     try {
@@ -141,13 +195,16 @@ export class WebhookDeliveryWorker {
       return;
     }
 
-    // Anti-loop + scheme + resolved-IP guard on the Twenty base URL (same guard
-    // as the generic path: resolve the hostname's IPs before any outbound call).
+    // Anti-loop + scheme + resolved-IP guard on the Twenty base URL. The guard
+    // now lives INSIDE the connector's buildClient (single SSRF choke point,
+    // same philosophy as the generic path's sendOne — no caller can bypass it),
+    // so building the client both vets the URL and instantiates it in one step.
+    // A rejection here is TERMINAL (the target is unsafe regardless of retries):
+    // mark each delivery failed with an `ssrf:` reason, never retry.
+    const secret = this.webhooks.decryptSecret(webhook);
+    let client;
     try {
-      await this.ssrf.assertSafeUrlResolved(webhook.url, {
-        allowHttp: this.httpAllowed(),
-        allowPrivate: this.privateAllowed(),
-      });
+      client = await this.twenty.buildClient(webhook, secret);
     } catch (err) {
       for (const d of deliveries) {
         await this.webhooks.updateDelivery({
@@ -159,8 +216,6 @@ export class WebhookDeliveryWorker {
       return;
     }
 
-    const secret = this.webhooks.decryptSecret(webhook);
-    const client = this.twenty.buildClient(webhook, secret);
     const byId = new Map(deliveries.map((d) => [d.id, d]));
     let outcome: ConnectorOutcome;
     try {

@@ -10,6 +10,7 @@ import {
 import { TwentyClient } from './twenty-client';
 import { TwentyBudget } from './twenty-budget';
 import { deterministicTimelineId } from './deterministic-id';
+import { SsrfGuard } from '../../common/ssrf-guard';
 import { WorkspacesService } from '../../workspaces/workspaces.service';
 import type { WorkspaceCrmMapping } from '../../workspaces/entities/workspace.entity';
 
@@ -85,6 +86,7 @@ export class TwentyConnectorService {
     private readonly mapper: TwentyEventMapper,
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
+    private readonly ssrf: SsrfGuard,
   ) {
     const raw = parseInt(
       this.config.get<string>('TWENTY_PERSON_CACHE_MAX_SIZE') || '',
@@ -106,9 +108,26 @@ export class TwentyConnectorService {
 
   /**
    * Build the per-tenant Twenty client from the webhook definition.
+   *
+   * ⚠️ SSRF choke point. The TwentyClient fetches `webhook.url` at runtime
+   * (resolvePerson / batchTimeline / reachable), so — exactly like the generic
+   * delivery path guards inside `sendOne` — we resolve + vet the base URL HERE,
+   * before any client exists. This closes the DNS-rebinding window between
+   * webhook CREATION (validated literal-only at CRUD) and the actual push: a
+   * public-looking host that re-resolves to 127.0.0.1 / 169.254.169.254 / RFC1918
+   * is rejected before a single fetch. All three client methods hit the same
+   * host (`new URL(path, baseUrl)`), so one resolution covers them. Making this
+   * the connector's own guard means no caller can bypass it (the worker no longer
+   * needs a separate guard — single choke point, same pattern as `sendOne`).
+   *
    * @param secret decrypted Bearer (caller decrypts via WebhooksService).
+   * @throws ForbiddenException (SSRF) when the resolved target is private/loopback.
    */
-  buildClient(webhook: WebhookDefinition, secret: string): TwentyClient {
+  async buildClient(webhook: WebhookDefinition, secret: string): Promise<TwentyClient> {
+    await this.ssrf.assertSafeUrlResolved(webhook.url, {
+      allowHttp: this.config.get<string>('WEBHOOK_ALLOW_HTTP') === 'true',
+      allowPrivate: this.config.get<string>('WEBHOOK_ALLOW_PRIVATE_IPS') === 'true',
+    });
     const transform = webhook.transform as { type: 'twenty'; dry_run?: boolean } | null;
     const dryRun =
       transform?.dry_run === true ||

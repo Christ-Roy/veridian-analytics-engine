@@ -38,6 +38,10 @@ services:
       CLICKHOUSE_DATABASE: staminads
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Webhook delivery worker single-leader gate (default true = drains the
+      # queue). The demo runs single-instance, so true is correct. See
+      # docs/runbooks/webhook-worker-single-leader.md before scaling to N replicas.
+      WEBHOOK_WORKER_LEADER: ${WEBHOOK_WORKER_LEADER:-true}
       IS_DEMO: "true"
       DEMO_SECRET: ${DEMO_SECRET}
     depends_on:

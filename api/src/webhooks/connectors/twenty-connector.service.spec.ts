@@ -3,11 +3,30 @@ import { TwentyConnectorService } from './twenty-connector.service';
 import { TwentyEventMapper } from './twenty-event-mapper';
 import { TwentyBudget } from './twenty-budget';
 import { TwentyClient } from './twenty-client';
+import { SsrfGuard } from '../../common/ssrf-guard';
 import {
   WebhookDefinition,
   DEFAULT_RETRY_CONFIG,
 } from '../entities/webhook-definition.entity';
 import { WebhookDelivery } from '../entities/webhook-delivery.entity';
+
+/**
+ * SSRF guard with a stub resolver so buildClient's pre-fetch resolution never
+ * hits the network: the test CRM host resolves to a public IP, while the
+ * well-known internal hostnames used by the SSRF test resolve to private/
+ * metadata IPs (mirrors the worker spec's stub).
+ */
+function stubSsrf(): SsrfGuard {
+  return new SsrfGuard(async (hostname: string) => {
+    if (hostname === 'rebind.evil.example') {
+      return [{ address: '169.254.169.254', family: 4 }];
+    }
+    if (hostname === 'internal.evil.example') {
+      return [{ address: '10.0.0.5', family: 4 }];
+    }
+    return [{ address: '93.184.216.34', family: 4 }]; // public
+  });
+}
 
 function twentyWebhook(over: Partial<WebhookDefinition> = {}): WebhookDefinition {
   return {
@@ -100,6 +119,7 @@ describe('TwentyConnectorService', () => {
       new TwentyEventMapper(),
       config,
       fakeWorkspaces(),
+      stubSsrf(),
     );
   });
 
@@ -118,17 +138,59 @@ describe('TwentyConnectorService', () => {
   });
 
   describe('buildClient', () => {
-    it('dry_run from the transform forces dry-run', () => {
+    it('dry_run from the transform forces dry-run', async () => {
       const wh = twentyWebhook({ transform: { type: 'twenty', dry_run: true } });
-      const client = connector.buildClient(wh, 'secret');
+      const client = await connector.buildClient(wh, 'secret');
       // dry-run client does not POST — proven via batchTimeline being a no-op
       expect(client).toBeInstanceOf(TwentyClient);
     });
 
-    it('global TWENTY_CONNECTOR_DRY_RUN forces dry-run', () => {
+    it('global TWENTY_CONNECTOR_DRY_RUN forces dry-run', async () => {
       config = { get: (k: string) => (k === 'TWENTY_CONNECTOR_DRY_RUN' ? 'true' : undefined) } as unknown as ConfigService;
-      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces());
-      expect(connector.buildClient(twentyWebhook(), 's')).toBeInstanceOf(TwentyClient);
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      expect(await connector.buildClient(twentyWebhook(), 's')).toBeInstanceOf(TwentyClient);
+    });
+
+    // ─── SSRF: buildClient is the connector's outbound choke point ──────────
+    it('rejects a base URL that RESOLVES to a private IP (DNS rebinding)', async () => {
+      const wh = twentyWebhook({ url: 'https://internal.evil.example' });
+      await expect(connector.buildClient(wh, 's')).rejects.toMatchObject({
+        // ForbiddenException with the SSRF code — never instantiates a client.
+        response: { code: 'FORBIDDEN_TARGET' },
+      });
+    });
+
+    it('rejects a base URL that resolves to the cloud-metadata IP', async () => {
+      const wh = twentyWebhook({ url: 'https://rebind.evil.example' });
+      await expect(connector.buildClient(wh, 's')).rejects.toMatchObject({
+        response: { code: 'FORBIDDEN_TARGET' },
+      });
+    });
+
+    it('rejects a literal loopback base URL before any client exists', async () => {
+      const wh = twentyWebhook({ url: 'https://127.0.0.1' });
+      await expect(connector.buildClient(wh, 's')).rejects.toMatchObject({
+        response: { code: 'FORBIDDEN_TARGET' },
+      });
+    });
+
+    it('SABOTAGE: with private IPs explicitly allowed the same internal host passes (proves the guard is what blocks it)', async () => {
+      // Mirrors WEBHOOK_ALLOW_PRIVATE_IPS=true (test/staging). The resolution is
+      // skipped → the otherwise-blocked host is accepted. Removing the guard
+      // would let it through unconditionally — this asserts the guard, not luck.
+      config = {
+        get: (k: string) => (k === 'WEBHOOK_ALLOW_PRIVATE_IPS' ? 'true' : undefined),
+      } as unknown as ConfigService;
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      const wh = twentyWebhook({ url: 'http://10.0.0.5' });
+      // allowHttp also needed for an http:// private target.
+      config = {
+        get: (k: string) =>
+          k === 'WEBHOOK_ALLOW_PRIVATE_IPS' || k === 'WEBHOOK_ALLOW_HTTP' ? 'true' : undefined,
+      } as unknown as ConfigService;
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      const client = await connector.buildClient(wh, 's');
+      expect(client).toBeInstanceOf(TwentyClient);
     });
   });
 
@@ -350,6 +412,7 @@ describe('TwentyConnectorService', () => {
         new TwentyEventMapper(),
         config,
         fakeWorkspaces({ ws_yoga: crm }),
+        stubSsrf(),
       );
       const { client, batches } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
       const budget = new TwentyBudget(100, () => 0);
@@ -370,6 +433,7 @@ describe('TwentyConnectorService', () => {
         new TwentyEventMapper(),
         config,
         fakeWorkspaces({ ws_yoga: crm }),
+        stubSsrf(),
       );
       const { client, resolveCalls } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
       const budget = new TwentyBudget(100, () => 0);
@@ -411,6 +475,7 @@ describe('TwentyConnectorService', () => {
         new TwentyEventMapper(),
         cappedConfig,
         fakeWorkspaces(),
+        stubSsrf(),
       );
 
       // Resolve 10 DISTINCT identities in one flush → 10 cache inserts, cap 3.

@@ -32,6 +32,12 @@ services:
       CLICKHOUSE_DATABASE: staminads
       CLICKHOUSE_USER: default
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Webhook delivery worker single-leader gate. The queue claim is NOT atomic
+      # (ClickHouse has no transaction/lock). Default true = this instance drains
+      # the queue (correct for a single instance). To scale the API to N replicas,
+      # set this to false on every replica BUT one — otherwise generic webhooks
+      # double-POST. Cf docs/runbooks/webhook-worker-single-leader.md.
+      WEBHOOK_WORKER_LEADER: ${WEBHOOK_WORKER_LEADER:-true}
     depends_on:
       clickhouse:
         condition: service_healthy

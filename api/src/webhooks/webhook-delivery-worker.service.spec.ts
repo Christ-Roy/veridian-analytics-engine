@@ -464,4 +464,81 @@ describe('WebhookDeliveryWorker', () => {
       expect(updated.error_message).toMatch(/ssrf/);
     });
   });
+
+  // ─── Single-leader gate (multi-instance double-POST guard) ──────────────
+  // `findReadyDeliveries` is NOT an atomic claim on ClickHouse → correctness
+  // relies on exactly one process draining the queue. The leader flag enforces
+  // that: a non-leader replica must NEVER poll. Fail-safe default = leader.
+  describe('single-leader gate (WEBHOOK_WORKER_LEADER)', () => {
+    function makeWorker(leaderEnv: string | undefined): WebhookDeliveryWorker {
+      const cfg = {
+        get: (k: string) => {
+          if (k === 'WEBHOOK_WORKER_LEADER') return leaderEnv;
+          if (k === 'WEBHOOK_ALLOW_HTTP') return 'false';
+          return undefined;
+        },
+      } as unknown as ConfigService;
+      return new WebhookDeliveryWorker(
+        webhooks,
+        {} as WebhookTransformEngine,
+        {} as SsrfGuard,
+        cfg,
+        {} as TwentyConnectorService,
+      );
+    }
+
+    it('defaults to leader (drains) when the ENV is unset', async () => {
+      const w = makeWorker(undefined);
+      w.onModuleInit();
+      const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+      await w.tick();
+      expect(drainSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('defaults to leader when the ENV is empty string', async () => {
+      const w = makeWorker('');
+      w.onModuleInit();
+      const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+      await w.tick();
+      expect(drainSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('drains when WEBHOOK_WORKER_LEADER=true', async () => {
+      const w = makeWorker('true');
+      w.onModuleInit();
+      const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+      await w.tick();
+      expect(drainSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT drain when WEBHOOK_WORKER_LEADER=false (non-leader replica)', async () => {
+      const w = makeWorker('false');
+      w.onModuleInit();
+      const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+      await w.tick();
+      expect(drainSpy).not.toHaveBeenCalled();
+    });
+
+    it('treats "FALSE"/" false " (case + whitespace) as non-leader', async () => {
+      for (const env of ['FALSE', '  false  ', 'False']) {
+        const w = makeWorker(env);
+        w.onModuleInit();
+        const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+        await w.tick();
+        expect(drainSpy).not.toHaveBeenCalled();
+      }
+    });
+
+    it('treats any non-"false" value as leader (fail-safe: only explicit false demotes)', async () => {
+      // A typo like "no"/"0" must NOT silently disable delivery — only the exact
+      // token "false" demotes. Anything else keeps the worker draining.
+      for (const env of ['no', '0', 'off', 'yes']) {
+        const w = makeWorker(env);
+        w.onModuleInit();
+        const drainSpy = jest.spyOn(w, 'drainQueue').mockResolvedValue(0);
+        await w.tick();
+        expect(drainSpy).toHaveBeenCalledTimes(1);
+      }
+    });
+  });
 });
