@@ -442,5 +442,50 @@ describe('AnalyticsService', () => {
         conversion_rate: 0,
       });
     });
+
+    it('rate per row = conversions(channel,app) / sessions(channel), never > 100%', async () => {
+      // Two apps share the same channel ("ads"): each row's rate must be its own
+      // conversions over the channel's sessions, and clamped at 100% (a goal can
+      // reference a session outside the window => conversions > channel sessions).
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'ads', app: 'prospection', conversions: 30 },
+        { channel_group: 'ads', app: 'notifuse', conversions: 120 }, // > sessions
+      ]);
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'ads', sessions: 100 },
+      ]);
+
+      const res = await service.conversionsByChannel({
+        workspace_id: 'ws-1',
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+      });
+
+      const prospection = res.rows.find((r) => r.app === 'prospection')!;
+      expect(prospection.conversion_rate).toBe(30); // 30/100, own numerator
+      const notifuse = res.rows.find((r) => r.app === 'notifuse')!;
+      // 120/100 = 120% clamped to 100, never a > 100% rate shown to a client.
+      expect(notifuse.conversion_rate).toBe(100);
+      // Both rows keep the channel's session count as denominator (labelled
+      // "Sessions du canal" in the console), not a per-app phantom number.
+      expect(prospection.sessions).toBe(100);
+      expect(notifuse.sessions).toBe(100);
+    });
+
+    it('queries sessions denominator with uniqExact(id), not count() (stable)', async () => {
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'direct', app: 'prospection', conversions: 1 },
+      ]);
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { channel_group: 'direct', sessions: 10 },
+      ]);
+      await service.conversionsByChannel({
+        workspace_id: 'ws-1',
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+      });
+      // 2nd queryWorkspace call = the sessions denominator query.
+      const sessSql = clickhouse.queryWorkspace.mock.calls[1][1] as string;
+      expect(sessSql).toContain('uniqExact(id) AS sessions');
+      expect(sessSql).not.toContain('count() AS sessions');
+    });
   });
 });

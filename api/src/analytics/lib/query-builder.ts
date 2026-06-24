@@ -123,15 +123,24 @@ function buildFilteredTotalsQuery(
     // Add inner aggregate and corresponding outer aggregation
     switch (m) {
       case 'sessions':
-        innerSelectParts.push('count() as _sessions');
+        // uniqExact(id), NOT count(): dedup by session identity so the total is
+        // stable on `sessions FINAL` (un-merged ReplacingMergeTree duplicate rows
+        // would otherwise inflate count() non-deterministically). The inner query
+        // groups by totalsGroupBy (disjoint per session => one session contributes
+        // to exactly one group), so sum() of the per-group uniqExact is the exact
+        // deterministic total. Mirrors the `sessions` metric definition.
+        innerSelectParts.push('uniqExact(id) as _sessions');
         outerSelectParts.push('sum(_sessions) as sessions');
         break;
       case 'bounce_rate':
-        // Need bounces and total for proper re-calculation
+        // Same identity-based dedup as the bounce_rate metric: bounces and total
+        // must both be uniqExact over session id to stay deterministic on
+        // `sessions FINAL`. Groups are disjoint per session, so summing per-group
+        // uniqExact across the outer query is exact.
         innerSelectParts.push(
-          `countIf(duration < ${ctx.bounce_threshold * 1000}) as _bounces`,
+          `uniqExactIf(id, duration < ${ctx.bounce_threshold * 1000}) as _bounces`,
         );
-        innerSelectParts.push('count() as _total');
+        innerSelectParts.push('uniqExact(id) as _total');
         outerSelectParts.push(
           'if(sum(_total) > 0, sum(_bounces) * 100.0 / sum(_total), 0) as bounce_rate',
         );

@@ -22,7 +22,17 @@ export const METRICS: Record<string, MetricDefinition> = {
   // Session metrics
   sessions: {
     name: 'sessions',
-    sql: 'count()',
+    // uniqExact(id), NOT count(). The sessions table is a
+    // ReplacingMergeTree(updated_at) ORDER BY (created_at, id) fed by sessions_mv,
+    // which re-inserts a session row on every event block. On `sessions FINAL`,
+    // count() counts not-yet-merged duplicate rows for the same session id (the
+    // background merge that dedups them is async), so the same query returns a
+    // different total between two refreshes (observed 147 -> 160 on staging while
+    // uniqExact(visitor_id) stayed at 2). uniqExact(id) dedups by session identity
+    // at query time and is immune to un-merged duplicate rows => deterministic
+    // total. Aligned with unique_visitors (uniqExact(visitor_id)). The session PK
+    // is `id` (cf schemas.ts sessions ORDER BY (created_at, id)).
+    sql: 'uniqExact(id)',
     description: 'Total sessions',
     tables: ['sessions'],
   },
@@ -58,8 +68,13 @@ export const METRICS: Record<string, MetricDefinition> = {
   },
   bounce_rate: {
     name: 'bounce_rate',
+    // sessions-only metric: both numerator and denominator must dedup by session
+    // id to stay stable on `sessions FINAL` (un-merged duplicate rows would
+    // otherwise inflate count() and make the rate drift between refreshes, same
+    // root cause as the `sessions` metric). uniqExactIf / uniqExact = same
+    // identity-based dedup, deterministic ratio.
     sql: (ctx: MetricContext) =>
-      `round(countIf(duration < ${ctx.bounce_threshold * 1000}) * 100.0 / count(), 2)`,
+      `round(uniqExactIf(id, duration < ${ctx.bounce_threshold * 1000}) * 100.0 / uniqExact(id), 2)`,
     description: 'Percentage of sessions under bounce threshold',
     tables: ['sessions'],
   },

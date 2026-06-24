@@ -553,8 +553,15 @@ export class AnalyticsService {
 
   /**
    * Taux de conversion par app × canal : pour chaque (channel_group, app), le
-   * nombre de conversions (goals du type ciblé) et le taux vs les sessions du
-   * MÊME canal. `app` provient de `properties['app']` porté par les goals
+   * nombre de conversions (uniqExact(session_id) sur les goals du type ciblé) et
+   * le taux = conversions(canal, app) / sessions(canal). Le dénominateur est le
+   * total des sessions du canal (colonne UI "Sessions du canal"), compté en
+   * uniqExact(id) pour être déterministe et cohérent avec le numérateur (les
+   * deux dédupliquent par identité de session ; un mélange count()/uniqExact
+   * donnait des chiffres faux et instables). Le taux d'une ligne = part des
+   * sessions du canal converties vers cette app ; les taux des apps d'un même
+   * canal ne sont pas exclusifs et ne s'additionnent donc pas à 100 %. Borné à
+   * 100 % par sécurité. `app` provient de `properties['app']` porté par les goals
    * d'inscription (signup/app_started). Différenciateur "d'où viennent mes
    * clients, et sur quelle app".
    */
@@ -607,13 +614,23 @@ export class AnalyticsService {
       { start: startCh, end: endCh, goals },
     );
 
-    // Sessions per channel_group (denominator).
+    // Sessions per channel_group (denominator). uniqExact(id), NOT count():
+    // `sessions` is a ReplacingMergeTree(updated_at) and count() over FINAL is
+    // non-deterministic until the async merge dedups duplicate rows (observed
+    // direct: 1 -> 12 -> 14 between refreshes). uniqExact(id) dedups by session
+    // identity at query time => stable denominator, and matches the numerator's
+    // own uniqExact(session_id) dedup logic (count vs uniqExact mismatch was the
+    // core defect). The denominator is the total sessions of the channel — the
+    // console labels this column "Sessions du canal" explicitly. The rate per row
+    // is conversions(channel, app) / sessions(channel): the share of the channel's
+    // sessions that converted toward this app. Rates across apps of the same
+    // channel are NOT mutually exclusive, so they are not meant to sum to <= 100%.
     const sessRows = await this.clickhouse.queryWorkspace<{
       channel_group: string;
       sessions: string | number;
     }>(
       dto.workspace_id,
-      `SELECT channel_group, count() AS sessions
+      `SELECT channel_group, uniqExact(id) AS sessions
        FROM sessions FINAL
        WHERE created_at >= {start:DateTime64(3)}
          AND created_at <= {end:DateTime64(3)}
@@ -629,13 +646,18 @@ export class AnalyticsService {
     const rows = convRows.map((r) => {
       const conversions = Number(r.conversions ?? 0);
       const sessions = sessionsByChannel.get(r.channel_group) ?? 0;
+      // Clamp at 100%: a conversion goal can carry a session_id whose session row
+      // falls outside the date window (or was never materialized), so converted
+      // sessions for an app can momentarily exceed the channel's session count.
+      // A conversion rate > 100% is always a wrong number to show a client.
+      const rate =
+        sessions > 0 ? Math.min(round2((conversions / sessions) * 100), 100) : 0;
       return {
         channel_group: r.channel_group,
         app: r.app || '(non renseigné)',
         conversions,
         sessions,
-        conversion_rate:
-          sessions > 0 ? round2((conversions / sessions) * 100) : 0,
+        conversion_rate: rate,
       };
     });
 

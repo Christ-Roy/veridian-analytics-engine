@@ -16,7 +16,7 @@ describe('buildAnalyticsQuery', () => {
 
   it('builds basic query with metrics only', () => {
     const { sql, params } = buildAnalyticsQuery(baseQuery);
-    expect(sql).toContain('count() as sessions');
+    expect(sql).toContain('uniqExact(id) as sessions');
     expect(sql).toContain('FROM sessions FINAL');
     // workspace_id filter is no longer in query - queries run against workspace-specific database
     expect(sql).not.toContain('workspace_id');
@@ -33,12 +33,12 @@ describe('buildAnalyticsQuery', () => {
       undefined,
       defaultContext,
     );
-    expect(sql).toContain('count() as sessions');
+    expect(sql).toContain('uniqExact(id) as sessions');
     expect(sql).toContain(
       'round(median(duration) / 1000, 1) as median_duration',
     );
     expect(sql).toContain(
-      'round(countIf(duration < 10000) * 100.0 / count(), 2) as bounce_rate',
+      'round(uniqExactIf(id, duration < 10000) * 100.0 / uniqExact(id), 2) as bounce_rate',
     );
   });
 
@@ -397,7 +397,7 @@ describe('buildAnalyticsQuery', () => {
       expect(sql).not.toContain('HAVING');
       expect(sql).not.toContain('GROUP BY');
       // Query should still work and return aggregate metrics
-      expect(sql).toContain('count() as sessions');
+      expect(sql).toContain('uniqExact(id) as sessions');
     });
 
     it('handles between operator in metricFilters', () => {
@@ -454,7 +454,7 @@ describe('buildAnalyticsQuery', () => {
         undefined,
         defaultContext,
       );
-      expect(sql).toContain('count() as _sessions');
+      expect(sql).toContain('uniqExact(id) as _sessions');
       expect(sql).toContain('sum(_sessions) as sessions');
     });
 
@@ -473,8 +473,8 @@ describe('buildAnalyticsQuery', () => {
         defaultContext,
       );
       // Should calculate from summed bounces/total
-      expect(sql).toContain('countIf(duration < 10000) as _bounces');
-      expect(sql).toContain('count() as _total');
+      expect(sql).toContain('uniqExactIf(id, duration < 10000) as _bounces');
+      expect(sql).toContain('uniqExact(id) as _total');
       expect(sql).toContain('sum(_bounces) * 100.0 / sum(_total)');
     });
 
@@ -870,13 +870,15 @@ describe('buildExtremesQuery', () => {
     expect(sql).toContain('round(median(duration) / 1000, 1) as value');
   });
 
-  it('handles sessions metric', () => {
+  it('handles sessions metric (uniqExact(id), deterministic on FINAL)', () => {
     const { sql } = buildExtremesQuery({
       ...baseExtremesQuery,
       metric: 'sessions',
     });
 
-    expect(sql).toContain('count() as value');
+    // sessions metric is uniqExact(id), not count() — so per-group extremes are
+    // stable on `sessions FINAL` too (same dedup as the metric/query paths).
+    expect(sql).toContain('uniqExact(id) as value');
   });
 
   it('includes HAVING in both subqueries when havingMinSessions specified', () => {
