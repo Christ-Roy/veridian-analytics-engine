@@ -308,6 +308,62 @@ export class WorkspacesService {
   }
 
   /**
+   * Flip a workspace out of the 'initializing' bootstrap state into 'active'
+   * once it has received its first valid event (called best-effort by the
+   * SessionPayloadHandler). This is the transition the create() comment
+   * ("Status remains initializing until first event is received") always
+   * promised but never implemented — its
+   * absence, combined with the ingestion kill-switch, silently dropped 100 % of
+   * a freshly-provisioned client's traffic (P0 2026-06-24, incident Yoga Sculpt).
+   *
+   * Idempotent & race-safe by construction:
+   *   - Re-reads the freshest row; only flips when status is STILL 'initializing'
+   *     (a concurrent flip, a manual activation, or an admin suspension all make
+   *     this a no-op → returns false, never clobbers a deliberate state).
+   *   - Uses the SAME INSERT-only ReplacingMergeTree(updated_at) path as
+   *     update(), with the strictly-increasing updated_at guard, so it can never
+   *     resurrect a stale version or race the async-DELETE the legacy update had.
+   *   - Preserves settings verbatim (re-serialises the row we just read) — no
+   *     field is touched except status + updated_at.
+   *
+   * @returns true if it actually transitioned, false if it was already past
+   *          'initializing' (or vanished) and nothing was written.
+   */
+  async activateIfInitializing(id: string): Promise<boolean> {
+    let workspace: Workspace;
+    try {
+      workspace = await this.get(id);
+    } catch {
+      // Workspace deleted between ingestion and this best-effort flip — no-op.
+      return false;
+    }
+
+    if (workspace.status !== 'initializing') {
+      return false;
+    }
+
+    const now = toClickHouseDateTime();
+    const nextUpdatedAt =
+      now > workspace.updated_at ? now : bumpMillis(workspace.updated_at);
+
+    const activated: Workspace = {
+      ...workspace,
+      status: 'active',
+      updated_at: nextUpdatedAt,
+    };
+
+    await this.clickhouse.insertSystem('workspaces', [
+      serializeWorkspace(activated),
+    ]);
+
+    // Invalidate every workspace cache (handler + analytics) so the fresh
+    // 'active' status is read immediately, not after the 60s TTL.
+    this.eventEmitter.emit('workspace.settings.changed', { workspaceId: id });
+
+    return true;
+  }
+
+  /**
    * Encrypt API keys in integrations that are not already encrypted.
    * Encrypted keys contain ':' separators (format: iv:authTag:data).
    */

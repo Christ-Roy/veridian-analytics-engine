@@ -1097,6 +1097,51 @@ describe('AdminPlatformService.provisionTenant', () => {
     /** Make workspaceExists() true (querySystem returns one row). */
     function workspaceExists(): void {
       clickhouse.querySystem.mockResolvedValue([{ id: WS }]);
+      // The HTTP probe reads the workspace (deriveProbeOrigin / classifyHttpDrop).
+      // Default: an active workspace with an open domain policy so the probe's
+      // Origin is always accepted and a non-visible event is classified as a
+      // CH/buffer issue, not a gate drop.
+      workspacesService.get.mockResolvedValue({
+        id: WS,
+        status: 'active',
+        website: 'https://client.example',
+        settings: { allowed_domains: [] },
+      } as never);
+    }
+
+    /**
+     * URL-aware global.fetch stub. verifyTracking now issues TWO kinds of fetch:
+     *   1. POST http://127.0.0.1:<PORT>/api/track  — the REAL ingestion probe.
+     *   2. GET  <site_url>                          — the optional snippet probe.
+     * We answer the /api/track POST with a 200 (its visibility is driven by the
+     * queryWorkspace count-back, wired via ingestionVisible) and delegate the
+     * snippet GET to `snippetResponder`. `trackResponder` lets a test override
+     * the /api/track answer (e.g. to simulate a kill-switch / domain drop).
+     */
+    function stubFetch(opts: {
+      snippet?: () => unknown | Promise<unknown>;
+      track?: () => unknown | Promise<unknown>;
+    }): jest.SpyInstance {
+      return jest
+        .spyOn(global, 'fetch')
+        .mockImplementation(((input: unknown, init?: { method?: string }) => {
+          const url = String(input);
+          const isTrack =
+            url.includes('/api/track') &&
+            (init?.method ?? 'GET').toUpperCase() === 'POST';
+          if (isTrack) {
+            return Promise.resolve(
+              (opts.track
+                ? opts.track()
+                : { ok: true, status: 200, text: async () => '{"success":true}' }) as never,
+            );
+          }
+          // snippet GET
+          if (!opts.snippet) {
+            return Promise.reject(new Error('no snippet responder stubbed'));
+          }
+          return Promise.resolve(opts.snippet() as never);
+        }) as never);
     }
 
     /**
@@ -1105,12 +1150,16 @@ describe('AdminPlatformService.provisionTenant', () => {
      *   - real_tracking probe (analyticsService.query) returns sessions count
      * The service issues the events count-back via queryWorkspace and the
      * sessions count via analyticsService.query (countSessions), so we wire
-     * them separately.
+     * them separately. Also stubs /api/track to 200 by default (snippet-less
+     * tests rely on this so the HTTP probe succeeds).
      */
     function ingestionVisible(visible: boolean): void {
       clickhouse.queryWorkspace.mockResolvedValue(
         (visible ? [{ c: 1 }] : [{ c: 0 }]) as never,
       );
+      // Default: the /api/track POST answers 200; snippet GET rejects (no
+      // site_url in most ingestion-only tests, so it is never called).
+      stubFetch({});
     }
 
     afterEach(() => {
@@ -1144,11 +1193,29 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(res.workspace_exists).toBe(true);
       expect(res.ingestion.ok).toBe(true);
       expect(res.ingestion.round_trip_ms).toEqual(expect.any(Number));
-      expect(res.ingestion.detail).toContain('ingested and purged');
+      // ok now comes from the REAL HTTP /api/track probe.
+      expect(res.ingestion.detail).toContain('real HTTP POST /api/track ingested');
+      expect(res.ingestion.drop_reason).toBeNull();
+      // The low-level table+MV chain is still checked alongside.
+      expect(res.ingestion.low_level_chain_ok).toBe(true);
       expect(res.snippet).toBeNull();
       expect(res.verdict).toBe('ok');
 
-      // Real insert path used (proves the real ingestion chain, not a mock).
+      // The HONEST probe POSTs to the real /api/track door (loopback).
+      const fetchCalls = (global.fetch as jest.Mock).mock.calls;
+      const trackCall = fetchCalls.find(
+        ([url, init]) =>
+          String(url).includes('/api/track') &&
+          (init as { method?: string } | undefined)?.method === 'POST',
+      );
+      expect(trackCall).toBeDefined();
+      const trackBody = JSON.parse(
+        (trackCall![1] as { body: string }).body,
+      ) as Record<string, unknown>;
+      expect(trackBody.workspace_id).toBe(WS);
+      expect(trackBody.session_id).toBe(`__veridian_verify_http__${WS}`);
+
+      // Low-level chain still exercised (insert into events table, proves CH).
       expect(clickhouse.insertWorkspace).toHaveBeenCalledWith(
         WS,
         'events',
@@ -1202,12 +1269,122 @@ describe('AdminPlatformService.provisionTenant', () => {
 
         expect(res.ingestion.ok).toBe(false);
         expect(res.ingestion.round_trip_ms).toBeNull();
+        // Active workspace + open domains, yet event never surfaced → the
+        // storage chain, not a gate, is the suspect.
+        expect(res.ingestion.drop_reason).toBe('not_requeryable');
         expect(res.verdict).toBe('ingestion_failed');
         // Even on failure we still purge (no orphan synthetic row).
         expect(clickhouse.commandWorkspaceWithParams).toHaveBeenCalled();
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    // ─── The honest-verify regression guards: a REAL door drop must be SEEN ──
+    // These are the tests that would have caught the P0 (kill-switch dropping
+    // every `initializing` workspace) instead of reporting a false `ok`.
+
+    it('verdict=dropped_workspace_inactive when the kill-switch silently drops (HTTP 200 but no row, status inactive)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: WS }]); // exists
+      // /api/track answers 200 (the silent kill-switch 200), but the event
+      // never surfaces in ClickHouse — exactly the P0 failure mode.
+      ingestionVisible(false);
+      // The workspace the probe reads to classify the drop is INACTIVE.
+      workspacesService.get.mockResolvedValue({
+        id: WS,
+        status: 'inactive',
+        website: 'https://client.example',
+        settings: { allowed_domains: [] },
+      } as never);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+
+      jest.useFakeTimers();
+      try {
+        const promise = service.verifyTracking({ workspace_id: WS });
+        await jest.advanceTimersByTimeAsync(9000);
+        const res = await promise;
+
+        expect(res.ingestion.ok).toBe(false);
+        expect(res.ingestion.drop_reason).toBe('workspace_inactive');
+        expect(res.verdict).toBe('dropped_workspace_inactive');
+        expect(res.ingestion.detail).toContain('kill-switch');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('verdict=dropped_domain_not_allowed when the domain-check silently drops (HTTP 200 but no row, Origin not allowed)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: WS }]);
+      ingestionVisible(false);
+      // Active workspace, but its allowed_domains do NOT cover the probe Origin
+      // we derive from them — simulate by reading back a different host on the
+      // classify call than the one we POST. Easiest: allowed_domains points at a
+      // host, then the classify re-read returns a DISJOINT list. We model the
+      // real "Origin not allowed" by making deriveProbeOrigin and classify see
+      // an allowed list whose host can never match the derived Origin.
+      // deriveProbeOrigin builds `https://<first allowed host>`, which WOULD
+      // match — so to exercise domain_not_allowed we point the classify read at
+      // a list that excludes that host. We do this by returning, on the classify
+      // call, a list with a host the derived Origin is not under.
+      let getCall = 0;
+      workspacesService.get.mockImplementation(() => {
+        getCall += 1;
+        // 1st get = deriveProbeOrigin (build Origin from a host we then drop);
+        // later gets = classifyHttpDrop (allowed list excludes that host).
+        const allowed =
+          getCall === 1 ? ['*.allowed-host.example'] : ['*.other-host.example'];
+        return Promise.resolve({
+          id: WS,
+          status: 'active',
+          website: 'https://client.example',
+          settings: { allowed_domains: allowed },
+        } as never);
+      });
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+
+      jest.useFakeTimers();
+      try {
+        const promise = service.verifyTracking({ workspace_id: WS });
+        await jest.advanceTimersByTimeAsync(9000);
+        const res = await promise;
+
+        expect(res.ingestion.ok).toBe(false);
+        expect(res.ingestion.drop_reason).toBe('domain_not_allowed');
+        expect(res.verdict).toBe('dropped_domain_not_allowed');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('verdict=ingestion_failed when /api/track validation rejects the payload (HTTP 400)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: WS }]);
+      ingestionVisible(true); // CH would be fine, but the door 400s first.
+      workspacesService.get.mockResolvedValue({
+        id: WS,
+        status: 'active',
+        website: 'https://client.example',
+        settings: { allowed_domains: [] },
+      } as never);
+      analyticsService.query.mockResolvedValue({
+        data: [{ sessions: 0 }],
+        meta: {},
+      } as never);
+      // /api/track refuses the synthetic payload at the validation pipe.
+      stubFetch({
+        track: () => ({ ok: false, status: 400, text: async () => 'Bad Request' }),
+      });
+
+      const res = await service.verifyTracking({ workspace_id: WS });
+
+      expect(res.ingestion.ok).toBe(false);
+      expect(res.ingestion.drop_reason).toBe('validation_rejected');
+      expect(res.verdict).toBe('ingestion_failed');
     });
 
     it('verdict=snippet_missing when site_url HTML has no tracker script', async () => {
@@ -1217,6 +1394,8 @@ describe('AdminPlatformService.provisionTenant', () => {
         data: [{ sessions: 0 }],
         meta: {},
       } as never);
+      // Blanket 200 HTML: also answers the /api/track POST (status 200 →
+      // visibility driven by ingestionVisible(true) → ingestion.ok stays true).
       jest.spyOn(global, 'fetch').mockResolvedValue({
         ok: true,
         status: 200,
@@ -1408,15 +1587,21 @@ describe('AdminPlatformService.provisionTenant', () => {
         data: [{ sessions: 0 }],
         meta: {},
       } as never);
-      jest
-        .spyOn(global, 'fetch')
-        .mockRejectedValue(new Error('ETIMEDOUT'));
+      // ONLY the snippet GET is unreachable; the /api/track ingestion probe
+      // must still succeed (it is a loopback to our own API, not the down site).
+      stubFetch({
+        track: () => ({ ok: true, status: 200, text: async () => '{"success":true}' }),
+        snippet: () => {
+          throw new Error('ETIMEDOUT');
+        },
+      });
 
       const res = await service.verifyTracking({
         workspace_id: WS,
         site_url: 'https://down.example',
       });
 
+      expect(res.ingestion.ok).toBe(true);
       expect(res.snippet!.present).toBe(false);
       expect(res.snippet!.detail).toContain('could not fetch site');
       // Unreachable site is an availability issue, not a confirmed missing tag.
@@ -1446,15 +1631,20 @@ describe('AdminPlatformService.provisionTenant', () => {
           } as never);
           // Hostname looks public but DNS points at a private/metadata IP.
           ssrfResolve = async () => [{ address: ip, family: 4 }];
-          const fetchSpy = jest.spyOn(global, 'fetch');
+          // ingestionVisible(true) already stubbed fetch (/api/track → 200).
+          const fetchSpy = global.fetch as jest.Mock;
 
           const res = await service.verifyTracking({
             workspace_id: WS,
             site_url: 'https://evil-rebind.example',
           });
 
-          // No outbound fetch ever happened — the guard short-circuited first.
-          expect(fetchSpy).not.toHaveBeenCalled();
+          // The guard short-circuited BEFORE any fetch to the site_url — the
+          // only fetch allowed is the loopback /api/track ingestion probe.
+          const siteFetched = fetchSpy.mock.calls.some(([url]) =>
+            String(url).includes('evil-rebind.example'),
+          );
+          expect(siteFetched).toBe(false);
           // Fail-soft: probe reports a fetch failure, endpoint does not throw.
           expect(res.snippet!.checked).toBe(true);
           expect(res.snippet!.present).toBe(false);
@@ -1504,26 +1694,38 @@ describe('AdminPlatformService.provisionTenant', () => {
           hostname === 'internal.evil.example'
             ? [{ address: '169.254.169.254', family: 4 }]
             : [{ address: PUBLIC_IP, family: 4 }];
-        const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
-          ok: false,
-          status: 302,
-          headers: {
-            get: (h: string) =>
-              h.toLowerCase() === 'location'
-                ? 'https://internal.evil.example/'
-                : null,
-          },
-          text: async () => '',
-        } as never);
+        // /api/track → 200 (loopback ingestion). The site_url GET → 302 toward a
+        // private target whose second hop the SSRF guard must block.
+        const fetchSpy = stubFetch({
+          track: () => ({
+            ok: true,
+            status: 200,
+            text: async () => '{"success":true}',
+          }),
+          snippet: () => ({
+            ok: false,
+            status: 302,
+            headers: {
+              get: (h: string) =>
+                h.toLowerCase() === 'location'
+                  ? 'https://internal.evil.example/'
+                  : null,
+            },
+            text: async () => '',
+          }),
+        });
 
         const res = await service.verifyTracking({
           workspace_id: WS,
           site_url: 'https://public-front.example',
         });
 
-        // Exactly one fetch (the first hop); the second hop is blocked by the
-        // re-validation BEFORE any fetch to the private target.
-        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        // The site_url is fetched exactly once (the first hop); the second hop
+        // is blocked by re-validation BEFORE any fetch to the private target.
+        const siteFetchCount = fetchSpy.mock.calls.filter(([url]) =>
+          /public-front\.example|internal\.evil\.example/.test(String(url)),
+        ).length;
+        expect(siteFetchCount).toBe(1);
         expect(res.snippet!.present).toBe(false);
         expect(res.snippet!.detail).toContain('could not fetch site');
         expect(res.verdict).toBe('ok');

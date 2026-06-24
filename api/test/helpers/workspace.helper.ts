@@ -19,7 +19,7 @@ export interface CreateWorkspaceOptions {
   website?: string;
   timezone?: string;
   currency?: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'initializing' | 'error';
   settings?: WorkspaceSettings;
 }
 

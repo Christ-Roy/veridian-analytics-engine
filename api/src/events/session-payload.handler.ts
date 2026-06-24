@@ -54,13 +54,24 @@ export class SessionPayloadHandler {
     // 1. Validate workspace
     const workspace = await this.getWorkspace(payload.workspace_id);
 
-    // 1b. Kill-switch : ne PAS ingérer pour un workspace non-actif
-    //     (suspendu/résilié/initializing/error). Réponse 200 muette — comme le
-    //     domain-reject plus bas — pour ne pas leaker l'état du tenant à un
-    //     client externe. Le statut vient du cache workspace (TTL 60s) donc
+    // 1b. Kill-switch : ne PAS ingérer pour un workspace RÉELLEMENT inactif
+    //     (résilié/suspendu = 'inactive', ou cassé = 'error'). Réponse 200 muette
+    //     — comme le domain-reject plus bas — pour ne pas leaker l'état du tenant
+    //     à un client externe. Le statut vient du cache workspace (TTL 60s) donc
     //     zéro coût DB additionnel à fort volume.
-    //     Ticket ingest-no-killswitch-workspace-inactif 2026-06-23.
-    if (workspace.status !== 'active') {
+    //
+    //     ⚠️ 'initializing' DOIT ingérer (P0 2026-06-24). Un workspace neuf est
+    //     créé en 'initializing' (WorkspacesService.create) et n'a AUCUNE
+    //     transition de sortie ailleurs. Le droppait ici (ancien `!== 'active'`)
+    //     jetait son tout premier event → il ne devenait jamais 'active' →
+    //     cercle vicieux mortel : 100 % du trafic d'un client provisionné
+    //     normalement perdu en silence (incident Yoga Sculpt, argent client
+    //     perdu). C'est précisément CE premier event valide qui flippe le
+    //     workspace en 'active' (cf §11b plus bas).
+    //
+    //     On bloque donc UNIQUEMENT les états d'inactivité avérée, jamais
+    //     l'amorçage. Ticket P0-killswitch-initializing-drop-ingestion 2026-06-24.
+    if (workspace.status === 'inactive' || workspace.status === 'error') {
       this.logger.debug(
         `Ingestion skipped: workspace ${workspace.id} status=${workspace.status}`,
       );
@@ -160,7 +171,57 @@ export class SessionPayloadHandler {
       this.emitTracked(event);
     }
 
+    // 11b. Transition initializing → active (P0 2026-06-24).
+    //      Un workspace neuf naît 'initializing' (WorkspacesService.create) ; ce
+    //      premier payload VALIDE prouve que le tracking est branché → on le
+    //      passe 'active'. C'est la transition que le commentaire historique
+    //      « Status remains 'initializing' until first event is received »
+    //      promettait sans jamais l'implémenter.
+    //
+    //      Best-effort & NON bloquant : on N'AWAIT PAS (l'ingestion est déjà
+    //      committée au buffer, l'event ne doit jamais dépendre de cette écriture
+    //      système). Toute erreur est avalée — un échec de flip ne perd aucun
+    //      event (le workspace reste 'initializing', qui ingère désormais aussi)
+    //      et sera retenté au prochain payload. On invalide le cache local pour
+    //      ne pas reflipper en boucle sur la fenêtre TTL.
+    if (workspace.status === 'initializing') {
+      this.activateWorkspace(workspace.id);
+    }
+
     return { success: true };
+  }
+
+  /**
+   * Flip a freshly-provisioned workspace out of the 'initializing' bootstrap
+   * state into 'active' once its first valid payload has been ingested.
+   * Fire-and-forget: never awaited
+   * by the ingestion path, never throws into it.
+   *
+   * Idempotent: re-checks the status server-side inside
+   * WorkspacesService.activateIfInitializing (a concurrent flip / a manual
+   * activation is a no-op). The local cache is cleared so the next event reads
+   * the fresh 'active' status instead of re-triggering this flip for the whole
+   * TTL window.
+   */
+  private activateWorkspace(workspaceId: string): void {
+    // Optimistically clear the cache NOW so concurrent in-flight events for the
+    // same workspace don't each fire their own flip on the stale cached status.
+    this.workspaceCache.delete(workspaceId);
+    void this.workspacesService
+      .activateIfInitializing(workspaceId)
+      .then((flipped) => {
+        if (flipped) {
+          this.logger.log(
+            `Workspace ${workspaceId} activated (first event ingested)`,
+          );
+        }
+      })
+      .catch((err) => {
+        this.logger.warn(
+          `activateWorkspace failed for ${workspaceId}: ${(err as Error).message} ` +
+            `(workspace stays 'initializing' which still ingests; retried next event)`,
+        );
+      });
   }
 
   /**

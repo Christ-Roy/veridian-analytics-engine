@@ -6,13 +6,15 @@ import request from 'supertest';
 import {
   createTestAppWithWorkspace,
   closeTestApp,
+  getService,
   TestAppContext,
 } from './helpers/app.helper';
-import { toClickHouseDateTime } from './helpers';
+import { toClickHouseDateTime, createTestWorkspace } from './helpers';
 import { createUserWithToken, getAdminAuthToken } from './helpers/user.helper';
 import { truncateSystemTables } from './helpers/cleanup.helper';
 import { waitForClickHouse, waitForMutations } from './helpers/wait.helper';
 import { TEST_SYSTEM_DATABASE } from './constants/test-config';
+import { WorkspacesService } from '../src/workspaces/workspaces.service';
 
 describe('Workspaces Integration', () => {
   let ctx: TestAppContext;
@@ -584,6 +586,79 @@ describe('Workspaces Integration', () => {
         .post('/api/workspaces.update')
         .send({ id: 'some_id', name: 'Test' })
         .expect(401);
+    });
+  });
+
+  // P0 (2026-06-24): the missing initializing → active transition. A workspace
+  // is provisioned 'initializing' and the first valid event flips it to
+  // 'active' via WorkspacesService.activateIfInitializing. Idempotent; never
+  // touches a deliberate non-initializing state.
+  describe('WorkspacesService.activateIfInitializing (P0 transition)', () => {
+    /** Freshest status row (ReplacingMergeTree → latest by updated_at). */
+    async function readStatus(id: string): Promise<string | null> {
+      const res = await ctx.systemClient.query({
+        query: `SELECT status FROM workspaces
+                WHERE id = {id:String} ORDER BY updated_at DESC LIMIT 1`,
+        query_params: { id },
+        format: 'JSONEachRow',
+      });
+      const rows = await res.json<{ status: string }>();
+      return rows[0]?.status ?? null;
+    }
+
+    it('flips an "initializing" workspace to "active" and returns true', async () => {
+      const wsId = 'activate_init_ws';
+      await createTestWorkspace(ctx.systemClient, wsId, {
+        status: 'initializing',
+      });
+
+      const service = getService(ctx, WorkspacesService);
+      const flipped = await service.activateIfInitializing(wsId);
+
+      expect(flipped).toBe(true);
+      await waitForClickHouse();
+      expect(await readStatus(wsId)).toBe('active');
+    });
+
+    it('is a no-op (returns false) when the workspace is already "active"', async () => {
+      const wsId = 'activate_active_ws';
+      await createTestWorkspace(ctx.systemClient, wsId, { status: 'active' });
+
+      const service = getService(ctx, WorkspacesService);
+      const flipped = await service.activateIfInitializing(wsId);
+
+      expect(flipped).toBe(false);
+      expect(await readStatus(wsId)).toBe('active');
+    });
+
+    it('NEVER resurrects a deliberately "inactive" workspace (returns false)', async () => {
+      const wsId = 'activate_inactive_ws';
+      await createTestWorkspace(ctx.systemClient, wsId, { status: 'inactive' });
+
+      const service = getService(ctx, WorkspacesService);
+      const flipped = await service.activateIfInitializing(wsId);
+
+      expect(flipped).toBe(false);
+      // A suspended/closed tenant must STAY inactive — the transition only
+      // promotes the initializing bootstrap state, nothing else.
+      expect(await readStatus(wsId)).toBe('inactive');
+    });
+
+    it('preserves settings verbatim when flipping to active', async () => {
+      const wsId = 'activate_settings_ws';
+      await createTestWorkspace(ctx.systemClient, wsId, {
+        status: 'initializing',
+        settings: { timescore_reference: 42, bounce_threshold: 7 },
+      });
+
+      const service = getService(ctx, WorkspacesService);
+      await service.activateIfInitializing(wsId);
+      await waitForClickHouse();
+
+      const ws = await service.get(wsId);
+      expect(ws.status).toBe('active');
+      expect(ws.settings.timescore_reference).toBe(42);
+      expect(ws.settings.bounce_threshold).toBe(7);
     });
   });
 

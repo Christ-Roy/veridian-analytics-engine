@@ -1,27 +1,68 @@
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
- * Result of the synthetic dry-run ingestion: did an event traverse the WHOLE
- * chain (validation → buffer → ClickHouse events table → MV fan-out →
- * requeryable) and how long did the round trip take? The synthetic event is
- * anchored at a far-past sentinel timestamp (invisible to every date-bounded
- * report) and purged after the probe — see AdminPlatformService.verifyTracking.
+ * Why a real /api/track probe was dropped, when it was. Mirrors the silent
+ * 200-muted exits inside SessionPayloadHandler so an IA/CLI knows EXACTLY which
+ * gate ate the event. /api/track always answers HTTP 200 even when it drops, so
+ * `null` here means "the event came through", a non-null value names the gate
+ * that swallowed it.
+ */
+export type TrackingDropReason =
+  | 'workspace_inactive' // kill-switch: status inactive/error
+  | 'domain_not_allowed' // Origin not in allowed_domains
+  | 'validation_rejected' // DTO validation refused the payload (HTTP 400)
+  | 'not_requeryable'; // accepted but never surfaced in CH within the timeout
+
+/**
+ * Result of the REAL ingestion probe: a genuine HTTP POST to /api/track — the
+ * exact door real browser traffic hits (kill-switch + domain-check + DTO
+ * validation + buffer + MV fan-out) — read back from ClickHouse and purged. The
+ * synthetic event uses a reserved deterministic session_id, a far-past goal
+ * timestamp (invisible to every date-bounded report) and is purged after the
+ * probe — see AdminPlatformService.verifyTracking.
  */
 export class TrackingVerifyIngestion {
   @ApiProperty({
     description:
-      'True if the synthetic event was ingested through the real pipeline ' +
-      'and read back from ClickHouse. The proof the tracker chain works.',
+      'True ONLY if a real HTTP POST to /api/track (the exact door real ' +
+      'browser traffic hits — kill-switch + domain-check + DTO validation + ' +
+      'buffer + MV fan-out included) was ingested and then re-read out of ' +
+      'ClickHouse. This is the honest proof the live tracker chain works; it ' +
+      'is NOT a side-channel insert.',
   })
   ok: boolean;
 
   @ApiProperty({
     nullable: true,
     description:
-      'Round-trip latency (ms) between injection and the event being ' +
-      'requeryable. null when ingestion failed.',
+      'Round-trip latency (ms) between the HTTP POST and the event being ' +
+      'requeryable. null when ingestion failed or was dropped.',
   })
   round_trip_ms: number | null;
+
+  @ApiProperty({
+    nullable: true,
+    enum: [
+      'workspace_inactive',
+      'domain_not_allowed',
+      'validation_rejected',
+      'not_requeryable',
+    ],
+    description:
+      'Which gate dropped the event, when ok=false. null when ok=true. ' +
+      '/api/track answers 200 even when it silently drops, so this field is ' +
+      'the only way to know WHY the real door ate the event.',
+  })
+  drop_reason?: TrackingDropReason | null;
+
+  @ApiProperty({
+    description:
+      'True when the low-level table+MV insert chain (bypassing the HTTP ' +
+      'door) succeeded. Lets an IA distinguish a healthy ClickHouse storage ' +
+      'chain whose public door is dropping (a gate problem) versus a broken ' +
+      'storage chain. Kept ALONGSIDE the HTTP probe.',
+  })
+  low_level_chain_ok: boolean;
 
   @ApiProperty({ description: 'Human-readable outcome of the ingestion probe.' })
   detail: string;
@@ -67,7 +108,9 @@ export class TrackingVerifyRealTracking {
 
 export type TrackingVerifyVerdict =
   | 'ok'
-  | 'ingestion_failed'
+  | 'ingestion_failed' // CH/storage chain broken (low-level probe failed too)
+  | 'dropped_workspace_inactive' // real door dropped: workspace inactive/error
+  | 'dropped_domain_not_allowed' // real door dropped: Origin not allowed
   | 'snippet_missing'
   | 'snippet_misconfigured'
   | 'workspace_not_found';
@@ -85,7 +128,8 @@ export class TrackingVerifyResponseDto {
 
   @ApiProperty({
     type: TrackingVerifyIngestion,
-    description: 'Synthetic dry-run ingestion round-trip result.',
+    description:
+      'Real HTTP /api/track ingestion round-trip result (the honest probe).',
   })
   ingestion: TrackingVerifyIngestion;
 
@@ -106,6 +150,8 @@ export class TrackingVerifyResponseDto {
     enum: [
       'ok',
       'ingestion_failed',
+      'dropped_workspace_inactive',
+      'dropped_domain_not_allowed',
       'snippet_missing',
       'snippet_misconfigured',
       'workspace_not_found',

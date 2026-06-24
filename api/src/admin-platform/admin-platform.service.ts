@@ -61,6 +61,7 @@ import {
 } from './dto/ads-conversions-response.dto';
 import { TrackingVerifyDto } from './dto/tracking-verify.dto';
 import {
+  TrackingDropReason,
   TrackingVerifyResponseDto,
   TrackingVerifySnippet,
   TrackingVerifyVerdict,
@@ -82,9 +83,22 @@ const MAX_SLUG_COLLISION_ATTEMPTS = 50;
  * requeryable/purgeable; `received_at` feeds no client-facing count.
  */
 const VERIFY_SENTINEL_TS = '2000-01-01 00:00:00.000';
+/**
+ * Far-past goal timestamp (epoch ms, year 2000) for the REAL HTTP probe. The
+ * /api/track DTO bounds the SESSION created_at/updated_at to ±24h (they cannot
+ * be far-past or validation rejects the payload), so the HTTP probe sends
+ * recent session timestamps but anchors its single GOAL action far in the past.
+ * Goals are counted by `goal_timestamp` (analytics WHERE goal_timestamp >= …),
+ * so a year-2000 goal is invisible to every goal/funnel/conversion report. The
+ * residual session-count window (insert→purge) is closed by the immediate
+ * surgical purge + the reserved deterministic session_id.
+ */
+const VERIFY_GOAL_SENTINEL_MS = Date.UTC(2000, 0, 1, 0, 0, 0);
 /** How long to poll for the synthetic event to become requeryable (ms). */
 const VERIFY_INGEST_TIMEOUT_MS = 8000;
 const VERIFY_INGEST_POLL_INTERVAL_MS = 250;
+/** Timeout (ms) for the loopback HTTP POST to our own /api/track during verify. */
+const VERIFY_HTTP_POST_TIMEOUT_MS = 5000;
 /** Timeout for the optional client-site HTML fetch (snippet check). */
 const VERIFY_SITE_FETCH_TIMEOUT_MS = 5000;
 /** Cap on bytes read from the client site HTML (snippet lives in <head>). */
@@ -1072,6 +1086,8 @@ export class AdminPlatformService {
         ingestion: {
           ok: false,
           round_trip_ms: null,
+          drop_reason: null,
+          low_level_chain_ok: false,
           detail: 'workspace does not exist; ingestion not attempted',
         },
         snippet: null,
@@ -1080,9 +1096,16 @@ export class AdminPlatformService {
       };
     }
 
-    // Run the three probes concurrently — each is independently fail-soft.
+    // Run the probes concurrently — each is independently fail-soft.
+    //   • ingestion: the HONEST probe — a real HTTP POST to /api/track (kill-
+    //     switch + domain-check + DTO validation + buffer + MV fan-out), the
+    //     exact door real browser traffic hits. It ALSO runs the low-level
+    //     table+MV insert (bypassing the door) to tell a dropped-by-gate from a
+    //     broken-storage-chain (ticket C: keep the low-level check in addition).
+    //   • snippet: optional static-HTML audit.
+    //   • real_tracking: real (non-synthetic) liveness over the last 30d/30min.
     const [ingestion, rawSnippet, real] = await Promise.all([
-      this.probeIngestionRoundTrip(workspaceId),
+      this.probeIngestion(workspaceId),
       dto.site_url
         ? this.probeSnippet(workspaceId, dto.site_url)
         : Promise.resolve(null),
@@ -1115,7 +1138,7 @@ export class AdminPlatformService {
       ingestion,
       snippet,
       real_tracking: { sessions_30d: real.sessions_30d, live: real.live },
-      verdict: this.computeVerifyVerdict(ingestion.ok, snippet, real.live),
+      verdict: this.computeVerifyVerdict(ingestion, snippet, real.live),
     };
   }
 
@@ -1139,11 +1162,28 @@ export class AdminPlatformService {
    *      confirmed missing tag → never down-rank to snippet_missing.
    */
   private computeVerifyVerdict(
-    ingestionOk: boolean,
+    ingestion: {
+      ok: boolean;
+      drop_reason?: TrackingDropReason | null;
+    },
     snippet: TrackingVerifySnippet | null,
     realLive: boolean,
   ): TrackingVerifyVerdict {
-    if (!ingestionOk) return 'ingestion_failed';
+    // Ingestion failure dominates everything (the live door is broken).
+    // Name the SPECIFIC gate that dropped the event so the IA gets an
+    // actionable verdict, not a generic "ingestion_failed".
+    if (!ingestion.ok) {
+      switch (ingestion.drop_reason) {
+        case 'workspace_inactive':
+          return 'dropped_workspace_inactive';
+        case 'domain_not_allowed':
+          return 'dropped_domain_not_allowed';
+        // validation_rejected / not_requeryable / null (HTTP/CH error) all mean
+        // the pipeline itself failed to ingest a well-formed event.
+        default:
+          return 'ingestion_failed';
+      }
+    }
     if (snippet) {
       if (snippet.present) {
         // A tag is present: grade it. Misconfiguration is always actionable.
@@ -1166,9 +1206,291 @@ export class AdminPlatformService {
   }
 
   /**
+   * The HONEST ingestion probe. Runs TWO things and combines them:
+   *
+   *   1. probeIngestionHttp — a REAL HTTP POST to our own /api/track (loopback).
+   *      This is the exact door real browser traffic hits: it traverses the
+   *      kill-switch, the domain-check, the DTO validation, the buffer and the
+   *      MV fan-out. If ANY of those drops the event (as the P0 kill-switch did
+   *      for every `initializing` workspace), THIS probe sees it — the previous
+   *      verify inserted straight into the events table and was structurally
+   *      blind to the drop (faux positif). This drives `ok` + `drop_reason`.
+   *
+   *   2. probeIngestionRoundTrip — the original low-level table+MV insert
+   *      (bypassing the HTTP door). Kept ALONGSIDE (ticket C) so the IA can
+   *      distinguish a healthy storage chain with a dropping public door (a gate
+   *      bug) versus a broken ClickHouse storage chain.
+   *
+   * The two run concurrently. The HTTP probe is the verdict; the low-level
+   * result is surfaced as `low_level_chain_ok` and folded into `detail`.
+   */
+  private async probeIngestion(workspaceId: string): Promise<{
+    ok: boolean;
+    round_trip_ms: number | null;
+    drop_reason: TrackingDropReason | null;
+    low_level_chain_ok: boolean;
+    detail: string;
+  }> {
+    const [http, lowLevel] = await Promise.all([
+      this.probeIngestionHttp(workspaceId),
+      this.probeIngestionRoundTrip(workspaceId),
+    ]);
+
+    const detail = http.ok
+      ? http.detail
+      : `${http.detail} | low-level table+MV chain ${
+          lowLevel.ok ? 'OK (storage healthy — drop is at the public door)' : `FAILED (${lowLevel.detail})`
+        }`;
+
+    return {
+      ok: http.ok,
+      round_trip_ms: http.round_trip_ms,
+      drop_reason: http.drop_reason,
+      low_level_chain_ok: lowLevel.ok,
+      detail,
+    };
+  }
+
+  /**
+   * REAL HTTP ingestion probe — POST to our own /api/track over loopback, then
+   * read the event back from ClickHouse and purge it. This exercises the public
+   * ingestion door end-to-end (kill-switch → domain-check → ValidationPipe →
+   * SessionPayloadHandler → buffer → events → MV fan-out), so a silent drop is
+   * caught instead of bypassed.
+   *
+   * ZERO-POLLUTION: the /api/track DTO bounds the SESSION created_at/updated_at
+   * to ±24h, so those MUST be recent (a far-past session would be rejected by
+   * validation — a false negative). We therefore anchor the single GOAL action
+   * far in the past (VERIFY_GOAL_SENTINEL_MS, year 2000): goals are counted by
+   * `goal_timestamp` so the synthetic goal is invisible to every goal/funnel/
+   * conversion report. The session row (counted by created_at) exists only for
+   * the bounded insert→purge window and is then surgically purged, keyed on the
+   * reserved deterministic session_id `__veridian_verify_http__<ws>`.
+   *
+   * Drop classification: /api/track answers 200 even when it drops, so when the
+   * event never surfaces we read the workspace to name the gate
+   * (workspace_inactive / domain_not_allowed). An HTTP 400 means the DTO
+   * rejected the payload (validation_rejected). Everything else =
+   * not_requeryable (accepted, never surfaced — buffer/MV/CH issue).
+   */
+  private async probeIngestionHttp(workspaceId: string): Promise<{
+    ok: boolean;
+    round_trip_ms: number | null;
+    drop_reason: TrackingDropReason | null;
+    detail: string;
+  }> {
+    const sessionId = `__veridian_verify_http__${workspaceId}`;
+    const goalName = '__veridian_verify__';
+    // MUST mirror SessionPayloadHandler.deserializeGoal's dedup_token EXACTLY
+    // (`${sessionId}_goal_${name}_${timestamp}`) so the round-trip poll finds
+    // the very row the handler wrote.
+    const dedupToken = `${sessionId}_goal_${goalName}_${VERIFY_GOAL_SENTINEL_MS}`;
+    const nowMs = Date.now();
+
+    // Pick an Origin the workspace's domain-check will accept so a correctly
+    // domain-restricted workspace is NOT mis-reported as domain_not_allowed.
+    const origin = await this.deriveProbeOrigin(workspaceId);
+
+    const payload = {
+      workspace_id: workspaceId,
+      session_id: sessionId,
+      // Recent session timestamps so the DTO's ±24h bound passes.
+      created_at: nowMs,
+      updated_at: nowMs,
+      sdk_version: 'verify-http',
+      attributes: {
+        landing_page: 'https://veridian.invalid/__veridian_verify__',
+      },
+      actions: [
+        {
+          type: 'goal',
+          name: goalName,
+          path: '/__veridian_verify__',
+          page_number: 1,
+          // Far-past goal → invisible to every goal/funnel/conversion count.
+          timestamp: VERIFY_GOAL_SENTINEL_MS,
+        },
+      ],
+    };
+
+    const url = `${this.selfBaseUrl()}/api/track`;
+    const start = Date.now();
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: origin,
+          'User-Agent': 'veridian-tracking-verify/1.0',
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(VERIFY_HTTP_POST_TIMEOUT_MS),
+      });
+
+      if (res.status === 400) {
+        await this.purgeSyntheticEvent(workspaceId, sessionId).catch(() => '');
+        return {
+          ok: false,
+          round_trip_ms: null,
+          drop_reason: 'validation_rejected',
+          detail: `POST /api/track rejected the synthetic payload (HTTP 400)`,
+        };
+      }
+      if (!res.ok) {
+        await this.purgeSyntheticEvent(workspaceId, sessionId).catch(() => '');
+        return {
+          ok: false,
+          round_trip_ms: null,
+          drop_reason: 'not_requeryable',
+          detail: `POST /api/track returned HTTP ${res.status}`,
+        };
+      }
+
+      // 200 — but /api/track answers 200 even when it silently drops. Poll CH.
+      const visible = await this.pollSyntheticEventVisible(
+        workspaceId,
+        sessionId,
+        dedupToken,
+      );
+      const roundTrip = Date.now() - start;
+
+      if (visible) {
+        const purgeNote = await this.purgeSyntheticEvent(workspaceId, sessionId);
+        return {
+          ok: true,
+          round_trip_ms: roundTrip,
+          drop_reason: null,
+          detail: `real HTTP POST /api/track ingested and purged${purgeNote}`,
+        };
+      }
+
+      // Accepted (200) but never surfaced → a gate dropped it. Name the gate by
+      // reading the workspace state (the handler's exact drop conditions).
+      const dropReason = await this.classifyHttpDrop(workspaceId, origin);
+      const purgeNote = await this.purgeSyntheticEvent(workspaceId, sessionId);
+      const detailByReason: Record<TrackingDropReason, string> = {
+        workspace_inactive:
+          'kill-switch dropped the event — workspace status is inactive/error (real traffic is silently dropped)',
+        domain_not_allowed: `domain-check dropped the event — Origin ${origin} is not in allowed_domains`,
+        validation_rejected:
+          'payload was rejected by validation (unexpected on 200 — investigate)',
+        not_requeryable: `synthetic event accepted (200) but not requeryable within ${VERIFY_INGEST_TIMEOUT_MS}ms (buffer/MV/ClickHouse)`,
+      };
+      return {
+        ok: false,
+        round_trip_ms: null,
+        drop_reason: dropReason,
+        detail: `${detailByReason[dropReason]}${purgeNote}`,
+      };
+    } catch (err) {
+      const purgeNote = await this.purgeSyntheticEvent(
+        workspaceId,
+        sessionId,
+      ).catch(() => '');
+      this.logger.warn(
+        `[verify] HTTP ingestion probe failed for ${workspaceId}: ${(err as Error).message}`,
+      );
+      return {
+        ok: false,
+        round_trip_ms: null,
+        drop_reason: 'not_requeryable',
+        detail: `HTTP POST to /api/track failed: ${(err as Error).message}${purgeNote}`,
+      };
+    }
+  }
+
+  /**
+   * Name the gate that silently dropped a 200-accepted /api/track event by
+   * replaying the handler's exact drop conditions against the freshest
+   * workspace row: status inactive/error → kill-switch; Origin not in a
+   * non-empty allowed_domains → domain-check. Otherwise the event was accepted
+   * but never surfaced (buffer/MV/CH) → not_requeryable.
+   */
+  private async classifyHttpDrop(
+    workspaceId: string,
+    origin: string,
+  ): Promise<TrackingDropReason> {
+    try {
+      const ws = await this.workspacesService.get(workspaceId);
+      if (ws.status === 'inactive' || ws.status === 'error') {
+        return 'workspace_inactive';
+      }
+      const allowed = ws.settings.allowed_domains ?? [];
+      if (allowed.length > 0) {
+        let host = '';
+        try {
+          host = new URL(origin).hostname.toLowerCase();
+        } catch {
+          host = '';
+        }
+        const ok = allowed.some((pattern) => {
+          const p = pattern.toLowerCase().trim();
+          if (p.startsWith('*.')) {
+            const base = p.slice(2);
+            return host === base || host.endsWith('.' + base);
+          }
+          return host === p;
+        });
+        if (!ok) return 'domain_not_allowed';
+      }
+    } catch {
+      // Couldn't read the workspace — fall through to the generic reason.
+    }
+    return 'not_requeryable';
+  }
+
+  /**
+   * Pick an Origin the workspace's domain-check will accept. Uses the first
+   * allowed_domain (collapsing a `*.apex` wildcard to a concrete `https://apex`
+   * host) so a domain-restricted workspace isn't falsely flagged. Falls back to
+   * the workspace `website`, then to a neutral host (open default accepts any).
+   */
+  private async deriveProbeOrigin(workspaceId: string): Promise<string> {
+    try {
+      const ws = await this.workspacesService.get(workspaceId);
+      const allowed = ws.settings.allowed_domains ?? [];
+      if (allowed.length > 0) {
+        const first = allowed[0].trim();
+        const host = first.startsWith('*.') ? first.slice(2) : first;
+        return `https://${host}`;
+      }
+      if (ws.website) {
+        try {
+          const u = new URL(
+            /^https?:\/\//i.test(ws.website) ? ws.website : `https://${ws.website}`,
+          );
+          return `${u.protocol}//${u.host}`;
+        } catch {
+          // fall through
+        }
+      }
+    } catch {
+      // fall through
+    }
+    return 'https://veridian.invalid';
+  }
+
+  /**
+   * Loopback base URL for the verify HTTP probe. The probe runs INSIDE the API
+   * process, so it POSTs to itself over 127.0.0.1:<PORT> — hitting the real
+   * controller/guards/handler, never an external hop. PORT mirrors main.ts
+   * (`process.env.PORT ?? 3000`); overridable via VERIFY_SELF_BASE_URL for
+   * tests/atypical deployments.
+   */
+  private selfBaseUrl(): string {
+    const override = this.configService.get<string>('VERIFY_SELF_BASE_URL');
+    if (override) return override.replace(/\/+$/, '');
+    const port = process.env.PORT ?? '3000';
+    return `http://127.0.0.1:${port}`;
+  }
+
+  /**
    * Synthetic dry-run ingestion round trip (zero-pollution — see
-   * verifyTracking header). Injects ONE synthetic screen_view via the real
-   * insert path, polls until it's requeryable, measures latency, then purges.
+   * verifyTracking header). LOW-LEVEL chain check: inserts ONE synthetic
+   * screen_view straight into the events table (BYPASSING the HTTP door), polls
+   * until it's requeryable, measures latency, then purges. Kept alongside the
+   * real HTTP probe so we can distinguish a public-door drop from a broken
+   * storage chain.
    */
   private async probeIngestionRoundTrip(workspaceId: string): Promise<{
     ok: boolean;
