@@ -29,6 +29,7 @@ import {
   TestWebhookDto,
 } from '../webhooks/dto/create-webhook.dto';
 import { generateId, generateToken } from '../common/crypto';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
 import {
   ProvisionTenantDto,
@@ -88,6 +89,18 @@ const VERIFY_INGEST_POLL_INTERVAL_MS = 250;
 const VERIFY_SITE_FETCH_TIMEOUT_MS = 5000;
 /** Cap on bytes read from the client site HTML (snippet lives in <head>). */
 const VERIFY_SITE_MAX_BYTES = 512 * 1024;
+/** Max redirect hops followed (manually, re-validated) when probing a site. */
+const VERIFY_SITE_MAX_REDIRECTS = 5;
+
+/**
+ * Default timeout (ms) for each per-number call to the VoIP bridge during
+ * provisioning. The provisioning loop is sequential, so a single hung bridge
+ * request would otherwise freeze the whole provisioning call indefinitely —
+ * this is the only outbound fetch in the repo that previously had no
+ * AbortSignal. ENV-overridable via BRIDGE_REQUEST_TIMEOUT_MS, with a sane
+ * default so a missing ENV never disables the guard.
+ */
+const BRIDGE_REQUEST_TIMEOUT_MS_DEFAULT = 10_000;
 
 /** Google Ads click-id types carried in `utm_id_from`. */
 const ADS_CLICK_ID_TYPES = ['gclid', 'gbraid', 'wbraid'] as const;
@@ -114,6 +127,7 @@ export class AdminPlatformService {
     private readonly gscService: GscService,
     private readonly webhooksService: WebhooksService,
     private readonly webhookDeliveryWorker: WebhookDeliveryWorker,
+    private readonly ssrf: SsrfGuard,
   ) {}
 
   /**
@@ -1351,8 +1365,18 @@ export class AdminPlatformService {
   /**
    * Fetch the client site HTML (fail-soft) and audit the tracker snippet:
    * present? src points at /sdk/v1/tracker.js (not the SPA-trap /tracker.js)?
-   * data-workspace-id matches? A fetch failure (down site / timeout) returns
-   * present:false with an explanatory detail — it NEVER fails the endpoint.
+   * data-workspace-id matches? A fetch failure (down site / timeout / blocked
+   * SSRF target) returns present:false with an explanatory detail — it NEVER
+   * fails the endpoint.
+   *
+   * SSRF: `siteUrl` is caller-supplied (Hub passes the client's public site),
+   * so every fetch goes through SsrfGuard.assertSafeUrlResolved — the SAME
+   * guard webhooks use. It blocks loopback / RFC1918 / 169.254 metadata even
+   * when a public hostname resolves there, while letting real client domains
+   * through. Redirects are followed MANUALLY (redirect:'manual') and each hop
+   * is re-validated, so a legit www→apex / http→https hop passes but a 3xx
+   * pointing at 169.254.169.254 is caught. http:// is tolerated by default
+   * (client sites may not be on TLS yet) — same posture as the tools probe.
    */
   private async probeSnippet(
     workspaceId: string,
@@ -1360,11 +1384,7 @@ export class AdminPlatformService {
   ): Promise<TrackingVerifySnippet> {
     let html: string;
     try {
-      const res = await fetch(siteUrl, {
-        redirect: 'follow',
-        signal: AbortSignal.timeout(VERIFY_SITE_FETCH_TIMEOUT_MS),
-        headers: { 'User-Agent': 'veridian-tracking-verify/1.0' },
-      });
+      const res = await this.fetchSiteFollowingRedirects(siteUrl);
       if (!res.ok) {
         return {
           checked: true,
@@ -1386,6 +1406,45 @@ export class AdminPlatformService {
     }
 
     return this.auditSnippetHtml(workspaceId, html);
+  }
+
+  /** http:// tolerated by default (client sites may not be TLS yet). */
+  private verifyHttpAllowed(): boolean {
+    return this.configService.get<string>('TRACKING_VERIFY_ALLOW_HTTP') !== 'false';
+  }
+
+  /**
+   * Fetch a caller-supplied site URL with manual redirect following, re-running
+   * the DNS-resolved SSRF guard on every hop. Mirrors ToolsService /
+   * WebhookDeliveryWorker — `redirect:'follow'` would make a 3xx toward a
+   * private/metadata target invisible, so we resolve hops ourselves and re-check
+   * each one. Caps at VERIFY_SITE_MAX_REDIRECTS; the whole probe is also bounded
+   * by VERIFY_SITE_FETCH_TIMEOUT_MS via AbortSignal.
+   */
+  private async fetchSiteFollowingRedirects(url: string): Promise<Response> {
+    let current = url;
+    for (let hop = 0; hop <= VERIFY_SITE_MAX_REDIRECTS; hop++) {
+      await this.ssrf.assertSafeUrlResolved(current, {
+        allowHttp: this.verifyHttpAllowed(),
+      });
+      const response = await fetch(current, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: AbortSignal.timeout(VERIFY_SITE_FETCH_TIMEOUT_MS),
+        headers: { 'User-Agent': 'veridian-tracking-verify/1.0' },
+      });
+
+      // Not a redirect → final response.
+      if (response.status < 300 || response.status >= 400) {
+        return response;
+      }
+
+      const location = response.headers.get('location');
+      if (!location) return response; // redirect without target → hand back as-is
+      // Resolve relative redirects against the current URL, re-check next loop.
+      current = new URL(location, current).toString();
+    }
+    throw new Error(`too many redirects (>${VERIFY_SITE_MAX_REDIRECTS})`);
   }
 
   /**
@@ -1620,6 +1679,19 @@ export class AdminPlatformService {
       }));
     }
 
+    // Each bridge call is bounded by an AbortSignal: the loop is sequential, so
+    // without a timeout one hung bridge request would freeze the entire
+    // provisioning call. ENV-overridable, sane default so a missing ENV never
+    // disables the guard.
+    const timeoutRaw = parseInt(
+      this.configService.get<string>('BRIDGE_REQUEST_TIMEOUT_MS') || '',
+      10,
+    );
+    const bridgeTimeoutMs =
+      Number.isFinite(timeoutRaw) && timeoutRaw > 0
+        ? timeoutRaw
+        : BRIDGE_REQUEST_TIMEOUT_MS_DEFAULT;
+
     const statuses: PhoneNumberProvisionStatus[] = [];
     for (const phone of phoneNumbers) {
       try {
@@ -1638,6 +1710,7 @@ export class AdminPlatformService {
               Authorization: `Bearer ${bridgeKey}`,
             },
             body: JSON.stringify({ e164: phone.e164, source: phone.source }),
+            signal: AbortSignal.timeout(bridgeTimeoutMs),
           },
         );
         if (!res.ok) {
@@ -1656,11 +1729,22 @@ export class AdminPlatformService {
           });
         }
       } catch (err) {
+        // AbortSignal.timeout fires a TimeoutError (an AbortError-family
+        // DOMException). Surface it as an explicit bridge_timeout so the Hub
+        // can distinguish a hung bridge from a real per-number rejection.
+        const isTimeout =
+          err instanceof Error &&
+          (err.name === 'TimeoutError' || err.name === 'AbortError');
+        if (isTimeout) {
+          this.logger.warn(
+            `[provision] bridge call timed out after ${bridgeTimeoutMs}ms for ${workspaceId} (${phone.e164}); marking failed.`,
+          );
+        }
         statuses.push({
           e164: phone.e164,
           source: phone.source,
           status: 'failed',
-          error: (err as Error).message,
+          error: isTimeout ? 'bridge_timeout' : (err as Error).message,
         });
       }
     }

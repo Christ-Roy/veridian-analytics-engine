@@ -22,6 +22,7 @@ import { VoipSyncService } from '../voip/voip-sync.service';
 import { GscService } from '../gsc/gsc.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
+import { SsrfGuard } from '../common/ssrf-guard';
 
 describe('AdminPlatformService.provisionTenant', () => {
   let service: AdminPlatformService;
@@ -38,7 +39,19 @@ describe('AdminPlatformService.provisionTenant', () => {
   let webhooksService: jest.Mocked<WebhooksService>;
   let webhookDeliveryWorker: jest.Mocked<WebhookDeliveryWorker>;
 
+  /**
+   * Stub DNS resolver backing the injected SsrfGuard. Mutable so individual
+   * tests can repoint a hostname at a private / metadata IP. Default: every
+   * hostname resolves to a public address (93.184.216.34) so the existing
+   * site-snippet tests sail through the guard to the stubbed fetch.
+   */
+  let ssrfResolve: (hostname: string) => Promise<Array<{ address: string; family: number }>>;
+  const PUBLIC_IP = '93.184.216.34';
+
   beforeEach(async () => {
+    ssrfResolve = async () => [{ address: PUBLIC_IP, family: 4 }];
+
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AdminPlatformService,
@@ -156,6 +169,18 @@ describe('AdminPlatformService.provisionTenant', () => {
           useValue: {
             sendOne: jest.fn(),
           },
+        },
+        // SsrfGuard with a STUB resolver so verifyTracking's site probe never
+        // does real DNS in tests. By default every test hostname resolves to a
+        // public IP (so the existing snippet tests reach the stubbed fetch);
+        // the dedicated SSRF tests below override ssrfResolve to point at
+        // private / metadata addresses and assert the guard blocks them.
+        {
+          provide: SsrfGuard,
+          useFactory: () =>
+            new SsrfGuard((hostname: string) =>
+              ssrfResolve(hostname),
+            ),
         },
       ],
     }).compile();
@@ -1396,6 +1421,113 @@ describe('AdminPlatformService.provisionTenant', () => {
       expect(res.snippet!.detail).toContain('could not fetch site');
       // Unreachable site is an availability issue, not a confirmed missing tag.
       expect(res.verdict).toBe('ok');
+    });
+
+    // ─── SSRF guard on the site probe (caller-supplied site_url) ──────────
+    describe('SSRF guard on site_url probe', () => {
+      // The probe must block a public hostname that resolves to a private /
+      // loopback / cloud-metadata address, WITHOUT ever issuing the fetch.
+      // It must stay fail-soft (present:false + detail), never throw the
+      // endpoint, and never down-rank an otherwise-ok verdict.
+      const blocked = [
+        ['loopback', '127.0.0.1'],
+        ['cloud metadata', '169.254.169.254'],
+        ['RFC1918 10/8', '10.0.0.5'],
+        ['RFC1918 192.168', '192.168.1.10'],
+      ] as const;
+
+      for (const [label, ip] of blocked) {
+        it(`blocks a site_url resolving to a ${label} address (${ip}) without fetching`, async () => {
+          workspaceExists();
+          ingestionVisible(true);
+          analyticsService.query.mockResolvedValue({
+            data: [{ sessions: 0 }],
+            meta: {},
+          } as never);
+          // Hostname looks public but DNS points at a private/metadata IP.
+          ssrfResolve = async () => [{ address: ip, family: 4 }];
+          const fetchSpy = jest.spyOn(global, 'fetch');
+
+          const res = await service.verifyTracking({
+            workspace_id: WS,
+            site_url: 'https://evil-rebind.example',
+          });
+
+          // No outbound fetch ever happened — the guard short-circuited first.
+          expect(fetchSpy).not.toHaveBeenCalled();
+          // Fail-soft: probe reports a fetch failure, endpoint does not throw.
+          expect(res.snippet!.checked).toBe(true);
+          expect(res.snippet!.present).toBe(false);
+          expect(res.snippet!.detail).toContain('could not fetch site');
+          // Ingestion was fine → blocking the (malicious) probe must not fail it.
+          expect(res.verdict).toBe('ok');
+        });
+      }
+
+      it('lets a real public client domain through to the fetch', async () => {
+        workspaceExists();
+        ingestionVisible(true);
+        analyticsService.query.mockResolvedValue({
+          data: [{ sessions: 0 }],
+          meta: {},
+        } as never);
+        // Public IP (default resolver), tracker correctly installed.
+        const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+          ok: true,
+          status: 200,
+          text: async () =>
+            `<html><head><script async src="https://t.example/sdk/v1/tracker.js" data-workspace-id="${WS}"></script></head></html>`,
+        } as never);
+
+        const res = await service.verifyTracking({
+          workspace_id: WS,
+          site_url: 'https://real-client.example',
+        });
+
+        // The guard allowed the public host → fetch ran → snippet parsed.
+        expect(fetchSpy).toHaveBeenCalled();
+        expect(res.snippet!.present).toBe(true);
+        expect(res.snippet!.src_correct).toBe(true);
+        expect(res.snippet!.workspace_id_match).toBe(true);
+      });
+
+      it('re-validates each redirect hop (3xx toward a private IP is blocked)', async () => {
+        workspaceExists();
+        ingestionVisible(true);
+        analyticsService.query.mockResolvedValue({
+          data: [{ sessions: 0 }],
+          meta: {},
+        } as never);
+        // First host public, redirect target host private — second-hop resolve
+        // must reject before the second fetch fires.
+        ssrfResolve = async (hostname: string) =>
+          hostname === 'internal.evil.example'
+            ? [{ address: '169.254.169.254', family: 4 }]
+            : [{ address: PUBLIC_IP, family: 4 }];
+        const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue({
+          ok: false,
+          status: 302,
+          headers: {
+            get: (h: string) =>
+              h.toLowerCase() === 'location'
+                ? 'https://internal.evil.example/'
+                : null,
+          },
+          text: async () => '',
+        } as never);
+
+        const res = await service.verifyTracking({
+          workspace_id: WS,
+          site_url: 'https://public-front.example',
+        });
+
+        // Exactly one fetch (the first hop); the second hop is blocked by the
+        // re-validation BEFORE any fetch to the private target.
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(res.snippet!.present).toBe(false);
+        expect(res.snippet!.detail).toContain('could not fetch site');
+        expect(res.verdict).toBe('ok');
+      });
     });
   });
 

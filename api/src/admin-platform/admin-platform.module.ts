@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AdminPlatformController } from './admin-platform.controller';
 import { AdminPlatformService } from './admin-platform.service';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
+import { SsrfGuard } from '../common/ssrf-guard';
 import { UsersModule } from '../users/users.module';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { ApiKeysModule } from '../api-keys/api-keys.module';
@@ -47,6 +48,6 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     forwardRef(() => WebhooksModule),
   ],
   controllers: [AdminPlatformController],
-  providers: [AdminPlatformService, PlatformAdminGuard],
+  providers: [AdminPlatformService, PlatformAdminGuard, SsrfGuard],
 })
 export class AdminPlatformModule {}
