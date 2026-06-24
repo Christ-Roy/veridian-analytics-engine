@@ -86,7 +86,11 @@ describe('SessionPayloadHandler', () => {
         },
         {
           provide: WorkspacesService,
-          useValue: { get: jest.fn().mockResolvedValue(mockWorkspace) },
+          useValue: {
+            get: jest.fn().mockResolvedValue(mockWorkspace),
+            // Best-effort initializing → active flip fired by the handler.
+            activateIfInitializing: jest.fn().mockResolvedValue(true),
+          },
         },
         {
           provide: GeoService,
@@ -1545,10 +1549,14 @@ describe('SessionPayloadHandler', () => {
     });
   });
 
-  describe('workspace kill-switch (inactive/suspended)', () => {
-    const inactiveStatuses = ['inactive', 'error', 'initializing'] as const;
+  describe('workspace kill-switch (inactive/error only) + initializing bootstrap', () => {
+    // P0 2026-06-24: the kill-switch must block ONLY genuinely inactive states.
+    // 'initializing' is the bootstrap state of every freshly-provisioned
+    // workspace and has NO other transition out — dropping its first event made
+    // it permanently stuck, dropping 100 % of a paying client's traffic.
+    const droppedStatuses = ['inactive', 'error'] as const;
 
-    for (const status of inactiveStatuses) {
+    for (const status of droppedStatuses) {
       it(`silently drops ingestion for status="${status}"`, async () => {
         workspacesService.get.mockResolvedValue({
           ...mockWorkspace,
@@ -1566,10 +1574,38 @@ describe('SessionPayloadHandler', () => {
         expect(result.success).toBe(true);
         expect(bufferService.addBatch).not.toHaveBeenCalled();
         expect(eventEmitter.emit).not.toHaveBeenCalled();
+        // A genuinely inactive workspace is NEVER (re)activated by traffic.
+        expect(
+          workspacesService.activateIfInitializing,
+        ).not.toHaveBeenCalled();
       });
     }
 
-    it('ingests normally for status="active"', async () => {
+    it('INGESTS an "initializing" workspace AND flips it to active (P0 regression guard)', async () => {
+      // This is THE test whose absence let the kill-switch ship: if anyone
+      // recasts the kill-switch to `status !== 'active'`, this goes red.
+      workspacesService.get.mockResolvedValue({
+        ...mockWorkspace,
+        status: 'initializing',
+      } as never);
+
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://example.com/' },
+      });
+
+      const result = await handler.handle(payload, '8.8.8.8');
+
+      expect(result.success).toBe(true);
+      // The first event MUST be ingested (no silent drop).
+      expect(bufferService.addBatch).toHaveBeenCalledTimes(1);
+      // …and it MUST trigger the initializing → active transition.
+      expect(workspacesService.activateIfInitializing).toHaveBeenCalledWith(
+        mockWorkspace.id,
+      );
+    });
+
+    it('ingests normally for status="active" without re-flipping', async () => {
       workspacesService.get.mockResolvedValue({
         ...mockWorkspace,
         status: 'active',
@@ -1584,6 +1620,8 @@ describe('SessionPayloadHandler', () => {
 
       expect(result.success).toBe(true);
       expect(bufferService.addBatch).toHaveBeenCalledTimes(1);
+      // An already-active workspace is not put back through the transition.
+      expect(workspacesService.activateIfInitializing).not.toHaveBeenCalled();
     });
   });
 });
