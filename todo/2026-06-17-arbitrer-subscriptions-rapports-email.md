@@ -107,3 +107,31 @@ doivent être gérés par les app elles-mêmes pour le transactionnel. »*
 3. Ajouter à la cartographie modules.
 
 → Conserver le ticket en pending (re-scopé), retirer le statut ARBITRER.
+
+---
+
+## MAJ 2026-06-25 — actions 1 + branding FAITES, reste le canal transac
+
+Livré sur staging (commit `feat(subscriptions): gate report cron + Veridian
+branding`, ticket d'action `2026-06-23-subscriptions-cron-non-gate` archivé) :
+
+- ✅ **Action 1 — cron gaté** : `processScheduledReports()` gaté sur
+  `SUBSCRIPTIONS_ENABLED` (modèle `VOIP_SYNC_ENABLED`, no-op si absent). ENV
+  câblée `${SUBSCRIPTIONS_ENABLED:-false}` dans `compose/base.yml` +
+  `api/.env.example`. Off par défaut → plus de run/échec/pollution `audit_logs`
+  tant que le flag n'est pas posé. Test unitaire de gating ajouté.
+- ✅ **Branding (partiel)** : favicon `report-generator.service.ts` (Staminads
+  → logo Veridian dérivé de l'origine `dashboardUrl`) + défauts
+  `smtp.service.ts` (`SMTP_FROM_NAME`/`SMTP_FROM_EMAIL` → Veridian, alignés sur
+  les défauts `compose/base.yml`). Tests anti-régression branding ajoutés.
+
+**RESTE À FAIRE (ce ticket reste pending pour ça)** :
+- ⏳ **Action 2 — canal transactionnel propre à l'engine** : provider dédié
+  (FROM Veridian, SPF/DKIM du domaine d'envoi), pas de dépendance cross-app.
+  Chantier à part, hors vague P1. Une fois câblé → poser `SUBSCRIPTIONS_ENABLED=true`
+  en ENV Dokploy prod (activation explicite).
+- ⏳ **Branding résiduel** : `api/src/mail/` (mail.service subjects « ... on
+  Staminads », templates `base.html`/`invitation.html`) porte encore Staminads.
+  Hors scope T3 (mails inertes tant que SMTP non posé) — à rebrander avec le
+  canal transac. Ticket de ménage à ouvrir si besoin.
+- ⏳ Ajouter à la cartographie modules.
