@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { createFileRoute, Outlet, Link, useNavigate, useRouterState } from '@tanstack/react-router'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useSuspenseQuery, useQuery } from '@tanstack/react-query'
 import { Select, Button, Avatar, Spin, Space, Popover, Tooltip, App, Dropdown } from 'antd'
 import type { RefSelectProps } from 'antd/es/select'
 import { LogoutOutlined, PlusOutlined, GlobalOutlined, QuestionCircleOutlined, MenuOutlined, CloseOutlined, LeftOutlined, RightOutlined, ExclamationCircleOutlined, UserOutlined } from '@ant-design/icons'
 import { ExternalLink } from 'lucide-react'
 import { workspacesQueryOptions, workspaceQueryOptions, backfillSummaryQueryOptions } from '../../../lib/queries'
+import { api } from '../../../lib/api'
 import { SyncStatusIcon } from '../../../components/layout/SyncStatusIcon'
 import { AssistantProvider } from '../../../contexts/AssistantContext'
 import { AssistantButton, AssistantPanel } from '../../../components/Assistant'
@@ -54,6 +55,14 @@ function WorkspaceLayout() {
   const { data: workspaces } = useSuspenseQuery(workspacesQueryOptions)
   const { data: workspace } = useSuspenseQuery(workspaceQueryOptions(workspaceId))
   const { logout, user, isDemo } = useAuth()
+  // Current user's role in this workspace — gates the owner-only "Zone
+  // dangereuse" settings tab in the mobile menu, mirroring the desktop page.
+  const { data: members = [] } = useQuery({
+    queryKey: ['members', workspaceId],
+    queryFn: () => api.members.list(workspaceId),
+  })
+  const isOwner =
+    (members.find((m) => m.user_id === user?.id)?.role ?? 'viewer') === 'owner'
   const { message } = App.useApp()
   const { timezone, setTimezone, workspaceTimezone } = useTimezone(workspace.timezone)
   const navigate = useNavigate()
@@ -126,17 +135,41 @@ function WorkspaceLayout() {
     }
   }
 
-  const settingsMenuItems = [
+  // Mirror EXACTLY the desktop Settings page menu (settings.tsx `menuItems`):
+  // same keys, same order, same gating (feature flags + ownerOnly). The mobile
+  // sub-menu previously omitted privacy / connectors / danger, so a client with
+  // the Connecteurs option could not reach it on mobile (vague-2 regression).
+  const settingsMenuItems: {
+    key:
+      | 'workspace'
+      | 'dimensions'
+      | 'team'
+      | 'integrations'
+      | 'smtp'
+      | 'api-keys'
+      | 'privacy'
+      | 'sdk'
+      | 'voip'
+      | 'search-console'
+      | 'connectors'
+      | 'danger'
+    label: string
+    feature?: 'voip' | 'gsc' | 'connectors'
+    ownerOnly?: boolean
+  }[] = [
     { key: 'workspace', label: 'Espace de travail' },
     { key: 'dimensions', label: 'Dimensions personnalisées' },
     { key: 'team', label: 'Équipe' },
     { key: 'integrations', label: 'Intégrations' },
     { key: 'smtp', label: 'Email (SMTP)' },
     { key: 'api-keys', label: 'Clés API' },
+    { key: 'privacy', label: 'Confidentialité' },
     { key: 'sdk', label: 'Installer le SDK' },
-    { key: 'voip', label: 'Téléphonie / VoIP' },
-    { key: 'search-console', label: 'Search Console' },
-  ] as const
+    { key: 'voip', label: 'Téléphonie / VoIP', feature: 'voip' },
+    { key: 'search-console', label: 'Search Console', feature: 'gsc' },
+    { key: 'connectors', label: 'Connecteurs', feature: 'connectors' },
+    { key: 'danger', label: 'Zone dangereuse', ownerOnly: true },
+  ]
 
   const closeMobileMenu = () => {
     setMobileMenuOpen(false)
@@ -146,13 +179,13 @@ function WorkspaceLayout() {
   // Per-client white-label logo (defaults to Veridian; never on the demo).
   const logo = brandLogo(workspace, isDemo)
 
-  // Settings tabs visibility per subscribed features (N2). The header settings
-  // sub-menu (mobile) must mirror what the Settings page shows.
-  const visibleSettingsItems = settingsMenuItems.filter((item) => {
-    if (item.key === 'voip') return isFeatureEnabled(workspace, 'voip')
-    if (item.key === 'search-console') return isFeatureEnabled(workspace, 'gsc')
-    return true
-  })
+  // Settings tabs visibility — same two filters as the desktop Settings page
+  // (settings.tsx): owner-only tabs hidden for non-owners, feature-gated tabs
+  // hidden when the option is not subscribed (hidden, never greyed — pricing
+  // vision). Keeps the mobile sub-menu a pixel-mirror of the desktop menu.
+  const visibleSettingsItems = settingsMenuItems
+    .filter((item) => !item.ownerOnly || isOwner)
+    .filter((item) => !item.feature || isFeatureEnabled(workspace, item.feature))
 
   return (
     <AssistantProvider workspaceId={workspaceId}>
