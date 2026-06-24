@@ -463,9 +463,13 @@
     - api/src/filters/filters.controller.ts
     - api/src/filters/filters.service.ts
     - api/src/filters/backfill/*.ts
+    - api/src/filters/backfill/channel-backfill.service.ts
   covered_by:
     - api/test/backfill.e2e-spec.ts
-  reason: Filters + backfill.
+    - api/test/channel-backfill.e2e-spec.ts
+  reason: |
+    Filters + backfill. channel-backfill.e2e couvre ChannelBackfillService
+    (re-dérivation historique du canal) + la route POST /api/filters.channelBackfill.
 
 - sources:
     - api/src/subscriptions/subscriptions.controller.ts
