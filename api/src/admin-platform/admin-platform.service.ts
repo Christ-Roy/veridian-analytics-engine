@@ -31,6 +31,7 @@ import {
 import { generateId, generateToken } from '../common/crypto';
 import { SsrfGuard } from '../common/ssrf-guard';
 import { toClickHouseDateTime } from '../common/utils/datetime.util';
+import { stripUndefined } from '../common/utils/strip-undefined.util';
 import {
   ProvisionTenantDto,
   PhoneNumberDto,
@@ -846,9 +847,17 @@ export class AdminPlatformService {
    */
   async setBranding(dto: SetBrandingDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
+    // Merge over the existing branding, dropping undefined keys the transformer
+    // materialised (see stripUndefined): a partial branding update must not
+    // clobber sibling keys nor persist `{ color: undefined }` garbage.
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    const merged = {
+      ...(ws.settings.branding ?? {}),
+      ...stripUndefined(dto.branding),
+    };
     await this.workspacesService.update({
       id: dto.workspace_id,
-      settings: { branding: dto.branding },
+      settings: { branding: merged },
     });
     return this.getCustomization({ workspace_id: dto.workspace_id });
   }
@@ -856,11 +865,20 @@ export class AdminPlatformService {
   /**
    * Set subscribed feature modules (N2). DEEP-merges over the existing flags so
    * `{ voip: false }` flips one module without clearing the rest.
+   *
+   * `stripUndefined(dto.features)` is load-bearing: the transformed `FeaturesDto`
+   * instance carries every declared flag as an OWN key (unset ones = undefined),
+   * and a raw spread would let those undefined values overwrite the persisted
+   * flags — silently wiping the modules the caller didn't mention (real staging
+   * bug 2026-06-24). We merge only the keys actually provided.
    */
   async setFeatures(dto: SetFeaturesDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
     const ws = await this.workspacesService.get(dto.workspace_id);
-    const merged = { ...(ws.settings.features ?? {}), ...dto.features };
+    const merged = {
+      ...(ws.settings.features ?? {}),
+      ...stripUndefined(dto.features),
+    };
     await this.workspacesService.update({
       id: dto.workspace_id,
       settings: { features: merged },
@@ -868,25 +886,41 @@ export class AdminPlatformService {
     return this.getCustomization({ workspace_id: dto.workspace_id });
   }
 
-  /** Set the native dashboard widget order/visibility (N3). Full replace. */
+  /**
+   * Set the native dashboard widget order/visibility (N3). Merges over the
+   * existing layout, dropping the undefined keys the transformer materialised so
+   * a partial update (e.g. only `order`) never wipes the sibling (`hidden_widgets`).
+   */
   async setLayout(dto: SetLayoutDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    const merged = {
+      ...(ws.settings.dashboard_layout ?? {}),
+      ...stripUndefined(dto.dashboard_layout),
+    };
     await this.workspacesService.update({
       id: dto.workspace_id,
-      settings: { dashboard_layout: dto.dashboard_layout },
+      settings: { dashboard_layout: merged },
     });
     return this.getCustomization({ workspace_id: dto.workspace_id });
   }
 
   /**
-   * Set the configurable analytics→CRM mapping (N4 + S4). Full replace of the
-   * `crm_mapping` object — the workspace owns its complete CRM vocabulary.
+   * Set the configurable analytics→CRM mapping (N4 + S4). Merges over the
+   * existing mapping, dropping the undefined keys the transformer materialised so
+   * a partial update never clobbers a sibling key it didn't mention. To fully
+   * clear a key, send it as `null` (a deliberate value, preserved by the merge).
    */
   async setCrmMapping(dto: SetCrmMappingDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    const merged = {
+      ...(ws.settings.crm_mapping ?? {}),
+      ...stripUndefined(dto.crm_mapping),
+    };
     await this.workspacesService.update({
       id: dto.workspace_id,
-      settings: { crm_mapping: dto.crm_mapping },
+      settings: { crm_mapping: merged },
     });
     return this.getCrmMapping({ workspace_id: dto.workspace_id });
   }

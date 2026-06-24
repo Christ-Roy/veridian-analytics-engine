@@ -140,6 +140,16 @@ async function bootstrap() {
     new ValidationPipe({
       whitelist: true,
       transform: true,
+      // Defense-in-depth against the silent settings-merge data loss
+      // (2026-06-24): class-transformer defaults `exposeUnsetFields` to true, so
+      // a transformed DTO instance carries EVERY declared optional field as an
+      // own key (unset = undefined). Any service that spreads such an instance
+      // over existing state (`{ ...existing, ...dto }`) would let those undefined
+      // values clobber persisted fields. Turning this off means the instance only
+      // exposes the keys actually present in the request body — partial updates
+      // stop wiping fields they never mentioned. The setters also defend
+      // explicitly via stripUndefined(); this kills the whole class at the door.
+      transformOptions: { exposeUnsetFields: false },
     }),
   );
   const port = process.env.PORT ?? 3000;

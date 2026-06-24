@@ -813,6 +813,109 @@ describe('Admin Platform — customization M2M (branding/features/crm)', () => {
       .send({ workspace_id: wsId, branding: { color: 'red' } })
       .expect(400);
   });
+
+  // ── REGRESSION GUARD: partial setFeatures must MERGE, not REPLACE ──────────
+  //
+  // Real staging bug (2026-06-24): `setFeatures({ voip: true })` after an earlier
+  // `setFeatures({ off: connectors,gsc,voip })` wiped gsc+connectors, persisting
+  // `{ voip: true }` alone. Root cause: class-transformer (transform: true)
+  // materialises EVERY declared optional flag on the DTO instance as an OWN key
+  // (unset = undefined), and the raw spread `{ ...existing, ...dto.features }`
+  // let those undefined values clobber the persisted flags (JSON.stringify then
+  // drops them — silent loss). Fix: stripUndefined(dto.features) before the merge.
+  //
+  // This test runs through the REAL e2e app: real ValidationPipe (transform on),
+  // real AdminPlatformService, real ClickHouse round-trip. A MOCKED test of the
+  // service would bypass the transformer and never see the undefined keys — which
+  // is exactly why the bug shipped green. SABOTAGE CHECK: drop stripUndefined()
+  // from setFeatures and this test goes red on the first expect below.
+  it('partial setFeatures MERGES over existing flags (no silent wipe)', async () => {
+    // Step 1: turn ALL three modules off (the staging repro's first call).
+    const off = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setFeatures')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({
+        workspace_id: wsId,
+        features: { connectors: false, gsc: false, voip: true },
+      })
+      .expect(200);
+    expect(off.body.features).toEqual({
+      connectors: false,
+      gsc: false,
+      voip: true,
+    });
+    await waitForMutations(ctx.systemClient, 'workspaces');
+
+    // Step 2: flip ONLY voip off. connectors + gsc were NOT mentioned → they
+    // MUST be preserved exactly (false), not wiped to absent.
+    const flip = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setFeatures')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, features: { voip: false } })
+      .expect(200);
+    expect(flip.body.features).toEqual({
+      connectors: false,
+      gsc: false,
+      voip: false,
+    });
+    await waitForMutations(ctx.systemClient, 'workspaces');
+
+    // Step 3: turn gsc back on. voip + connectors stay false (preserved).
+    const on = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setFeatures')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, features: { gsc: true } })
+      .expect(200);
+    expect(on.body.features).toEqual({
+      connectors: false,
+      gsc: true,
+      voip: false,
+    });
+    await waitForMutations(ctx.systemClient, 'workspaces');
+
+    // Final independent read through getCustomization (re-reads ClickHouse):
+    // the freshest persisted state must show the fully-merged flags.
+    const read = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.getCustomization')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId })
+      .expect(200);
+    expect(read.body.features).toEqual({
+      connectors: false,
+      gsc: true,
+      voip: false,
+    });
+  });
+
+  // ── REGRESSION GUARD: a setFeatures update must NOT clobber branding ───────
+  //
+  // Same undefined-clobber class, cross-key: setting features must leave a
+  // previously-set branding intact (the settings JSON deep-merge in
+  // WorkspacesService.update preserves sibling keys; this locks that contract
+  // end-to-end through the real door).
+  it('setFeatures preserves a previously-set branding (sibling settings key)', async () => {
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setBranding')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, branding: { color: '#123456' } })
+      .expect(200);
+    await waitForMutations(ctx.systemClient, 'workspaces');
+
+    await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.setFeatures')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId, features: { voip: true } })
+      .expect(200);
+    await waitForMutations(ctx.systemClient, 'workspaces');
+
+    const read = await request(ctx.app.getHttpServer())
+      .post('/api/admin/platform/workspaces.getCustomization')
+      .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+      .send({ workspace_id: wsId })
+      .expect(200);
+    expect(read.body.branding).toEqual({ color: '#123456' });
+    expect(read.body.features).toEqual({ voip: true });
+  });
 });
 
 // Surface M2M IA-first (workspaces.status, voip.*, gsc.*, webhooks.*,

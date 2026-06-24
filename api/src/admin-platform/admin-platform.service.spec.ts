@@ -944,6 +944,29 @@ describe('AdminPlatformService.provisionTenant', () => {
       );
     });
 
+    it('setFeatures ignores undefined flags so a partial update never wipes siblings', async () => {
+      // Reproduces the transformed-DTO shape (class-transformer materialises
+      // every declared flag; unset ones = undefined own keys). The merge must
+      // start from the persisted flags and apply ONLY the provided one — the
+      // staging data-loss bug (2026-06-24) was these undefined values clobbering
+      // gsc/connectors down to `{ voip: true }`.
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: { features: { voip: false, gsc: false, connectors: false } },
+      });
+      await service.setFeatures({
+        workspace_id: 'ws1',
+        // gsc + connectors arrive as undefined (not provided by the caller).
+        features: { voip: true, gsc: undefined, connectors: undefined } as never,
+      });
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: { features: { voip: true, gsc: false, connectors: false } },
+        }),
+      );
+    });
+
     it('setCrmMapping replaces the mapping and getCrmMapping reads it back', async () => {
       const mapping = {
         identity_resolver: 'field' as const,
