@@ -289,7 +289,7 @@ jobs:
               http://localhost:3000/api/trpc/compose.deploy && echo "deploy triggered"
           DEPLOY
 
-      - name: Health check (Dokploy status + engine 200)
+      - name: Health check (verdict fonctionnel — anti rollback parasite)
         env:
           SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           VPS_HOST: ${{ vars.PROD_VPS_HOST }}
@@ -297,35 +297,35 @@ jobs:
           DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
         run: |
           # Le `compose.deploy` Dokploy est ASYNCHRONE : il queue, puis clone+pull+
-          # recreate en arrière-plan (plusieurs min). Pendant le recreate, /api/health
-          # est momentanément DOWN (ancien container stoppé, nouveau pas encore healthy)
-          # → un health-check applicatif seul timeoute en FAUX NÉGATIF et déclenche un
-          # rollback parasite (vécu 3× : be8e2cb + 2× dbb7e65 le 2026-06-17). Et comparer
-          # APP_VERSION ne détecte rien quand le commit ne bumpe pas la version (fix-only).
+          # recreate en arrière-plan (plusieurs min). DEUX faux négatifs en prod :
+          #   1. un health-check applicatif lancé trop tôt timeoute pendant le
+          #      recreate (vécu 3× le 2026-06-17) ;
+          #   2. le STATUT Dokploy lui-même MENT : il peut marquer `error` un
+          #      déploiement dont le code finit servi et la prod healthy (vécu
+          #      2026-06-25, run 28134278276) → rollback parasite sur un deploy SAIN.
           #
-          # Source de vérité = le STATUT du déploiement Dokploy (deployment.allByCompose
-          # → status done/error), pas une heuristique applicative. On poll ce statut,
-          # PUIS un simple health 200 de confirmation. Cf ticket
-          # todo/2026-06-17-prod-ci-health-check-vs-dokploy-async.md.
+          # Le seul juge fiable = une CONFIRMATION FONCTIONNELLE STABLE de l'app
+          # (health 200 consécutifs + clickhouse:ok + version), faite EN LOOPBACK
+          # DANS le container prod (bypass Traefik/DNS qui flottent depuis un
+          # runner). Toute cette logique est dans wait-dokploy-deploy.sh, exécuté
+          # SUR le VPS : il poll Dokploy, et sur Dokploy `error`/`timeout` il
+          # NE conclut PAS échec — il laisse un grace fonctionnel de 5 min
+          # (5×200 consécutifs requis) avant de trancher. Verdict émis : DONE
+          # (deploy sain, qu'il soit Dokploy-done ou Dokploy-error-mais-fonctionnel)
+          # ou FAILED (prod réellement cassée → rollback légitime).
+          # Cf ticket todo/2026-06-25-prod-ci-deploy-faux-negatif-rollback-parasite.md.
           mkdir -p ~/.ssh; echo "$SSH_KEY" > ~/.ssh/deploy_key; chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          # Poll du statut Dokploy : script dédié exécuté sur le VPS via ssh bash -s
-          # (évite le heredoc/one-liner géant dans le YAML). 8 min de marge.
-          STATUS=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
+          # 15 min : 8 min poll Dokploy au pire + jusqu'à 5 min de grace fonctionnel.
+          VERDICT=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
             "COMPOSE_ID='$DOKPLOY_COMPOSE_ID' bash -s" < scripts/ci/wait-dokploy-deploy.sh)
-          echo "Dokploy deployment final status: $STATUS"
+          echo "Verdict déploiement prod: $VERDICT"
           rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
-          if [ "$STATUS" != "DONE" ]; then
-            echo "::error::déploiement Dokploy non 'done' (status=$STATUS) — deploy non effectif"
-            exit 1
+          if [ "$VERDICT" = "DONE" ]; then
+            echo "✓ deploy prod sain (confirmation fonctionnelle stable côté VPS)"
+            exit 0
           fi
-          # Confirmation applicative : engine répond 200 (court, le recreate est fini)
-          for i in $(seq 1 10); do
-            HTTP=$(curl -s -o /dev/null -w "%{http_code}" https://analytics-engine.app.veridian.site/api/health 2>/dev/null || echo 000)
-            [ "$HTTP" = "200" ] && { echo "✓ engine prod healthy (Dokploy done + /api/health 200)"; exit 0; }
-            sleep 6
-          done
-          echo "::error::Dokploy done mais /api/health pas 200 après 60s"
+          echo "::error::deploy prod réellement cassé (verdict=$VERDICT) — rollback légitime"
           exit 1
 
       - name: Cleanup
