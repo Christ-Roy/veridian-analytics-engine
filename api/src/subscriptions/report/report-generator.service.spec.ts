@@ -271,6 +271,29 @@ describe('ReportGeneratorService', () => {
       expect(html).toContain(reportData.workspace.name);
       expect(html).toContain('example.com'); // website without protocol
     });
+
+    it('routes MJML compile diagnostics through the NestJS Logger, not console', async () => {
+      // Regression guard for the console.* → Logger refactor: the MJML compile
+      // path must never reach raw console.warn. We spy on both and confirm a
+      // clean render emits nothing to console (and still yields valid HTML).
+      const consoleWarnSpy = jest
+        .spyOn(console, 'warn')
+        .mockImplementation(() => undefined);
+      const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
+
+      const reportData = await service.generate(mockSubscription);
+      const html = service.renderEmail(reportData, mockSubscription);
+
+      expect(html).toContain('<html');
+      // The refactored code uses this.logger.warn — never console.warn.
+      expect(consoleWarnSpy).not.toHaveBeenCalled();
+      // If MJML did warn, it went through the Logger (never console).
+      for (const call of loggerWarnSpy.mock.calls) {
+        expect(call[0]).toEqual(expect.stringContaining('MJML'));
+      }
+
+      consoleWarnSpy.mockRestore();
+    });
   });
 
   describe('generateUnsubscribeToken', () => {

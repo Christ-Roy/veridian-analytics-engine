@@ -608,6 +608,38 @@ describe('AssistantService', () => {
       );
     });
 
+    it('routes stream-creation errors through the NestJS Logger, not console', async () => {
+      // Regression guard for the console.* → Logger refactor: the stream error
+      // path must log via this.logger.error (structured, class-tagged) and
+      // never via raw console.error.
+      workspacesService.get.mockResolvedValue(mockWorkspace);
+      configService.get.mockReturnValue('test-encryption-key');
+      mockStream.mockImplementation(() => {
+        throw new Error('API error');
+      });
+      const consoleErrorSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+      const loggerErrorSpy = jest
+        .spyOn(service['logger'], 'error')
+        .mockImplementation(() => undefined);
+
+      const { job_id } = await service.createJob({
+        workspace_id: 'ws-1',
+        prompt: 'Test',
+      });
+      await service.streamJob(job_id, mockRes as any);
+
+      expect(loggerErrorSpy).toHaveBeenCalledWith(
+        'Failed to create Anthropic stream:',
+        expect.any(Error),
+      );
+      expect(consoleErrorSpy).not.toHaveBeenCalled();
+
+      consoleErrorSpy.mockRestore();
+      loggerErrorSpy.mockRestore();
+    });
+
     it('handles finalMessage error', async () => {
       workspacesService.get.mockResolvedValue(mockWorkspace);
       configService.get.mockReturnValue('test-encryption-key');

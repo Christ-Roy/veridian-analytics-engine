@@ -16,6 +16,16 @@ describe('ToolsService', () => {
     set: jest.Mock;
   };
 
+  // Stub DNS resolver backing the SsrfGuard. safeFetch / fetchFollowingRedirects
+  // now go through assertSafeUrlResolved (DNS-resolved), so without a stub the
+  // "legitimate public site" tests would do a REAL lookup of example.com and
+  // fail in a no-network CI sandbox. Default: every host resolves to a public
+  // IP; the resolved-IP SSRF test below repoints a host at a private address.
+  let ssrfResolve: (
+    hostname: string,
+  ) => Promise<Array<{ address: string; family: number }>>;
+  const PUBLIC_IP = '93.184.216.34';
+
   const FALLBACK_PNG_SIZE = 68; // 1x1 transparent PNG
 
   // Helper to create mock fetch response
@@ -59,11 +69,16 @@ describe('ToolsService', () => {
       get: jest.fn().mockResolvedValue(null),
       set: jest.fn().mockResolvedValue(undefined),
     };
+    ssrfResolve = async () => [{ address: PUBLIC_IP, family: 4 }];
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ToolsService,
-        SsrfGuard,
+        {
+          provide: SsrfGuard,
+          useFactory: () =>
+            new SsrfGuard((hostname: string) => ssrfResolve(hostname)),
+        },
         {
           provide: CACHE_MANAGER,
           useValue: mockCacheManager,
@@ -717,6 +732,33 @@ describe('ToolsService', () => {
         expect(result.buffer.length).toBe(FALLBACK_PNG_SIZE);
         // Exactly one fetch (the initial hop); the metadata hop is blocked.
         expect(mockFetch).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    // The capability the scale/secu patch added: safeFetch / followRedirects now
+    // use assertSafeUrlResolved (DNS-resolved), so a PUBLIC hostname that
+    // resolves to a private / metadata IP is blocked — the literal-only check
+    // could not catch this (evil.com → 127.0.0.1 / DNS-rebinding).
+    describe('DNS-resolved guard (public host → private IP)', () => {
+      it('getWebsiteMeta rejects a public host resolving to 169.254.169.254', async () => {
+        ssrfResolve = async () => [
+          { address: '169.254.169.254', family: 4 },
+        ];
+        await expect(
+          service.getWebsiteMeta('https://rebind.example'),
+        ).rejects.toThrow(ForbiddenException);
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('getFavicon falls back without fetching when host resolves to 127.0.0.1', async () => {
+        ssrfResolve = async () => [{ address: '127.0.0.1', family: 4 }];
+        const result = await service.getFavicon(
+          'https://rebind.example/favicon.png',
+        );
+        // getFavicon is fail-soft → fallback PNG, and the private target is
+        // never fetched.
+        expect(result.buffer.length).toBe(FALLBACK_PNG_SIZE);
+        expect(mockFetch).not.toHaveBeenCalled();
       });
     });
   });
