@@ -186,10 +186,35 @@ ticket → **erreur**.
 Ces features sont **désactivées commercialement**, pas en attente de
 réactivation automatique. Toute réactivation = décision business Robert.
 
+### 🧭 VERS OÙ ON REGARDE — docs de vision (lire en début de session)
+
+Source de vérité de la DIRECTION produit. Chemins absolus pour ouvrir direct :
+
+**Mémoires de vision** (`~/.claude/projects/-home-brunon5-Bureau-veridian-platform-veridian-analytics/memory/`) :
+- `project_analytics_vision_scope_final.md` — **SCOPE COMMERCIALISABLE MINIMAL**
+  (3 features : visiteurs uniques + Calls + GSC). Le plancher, figé 2026-05-23.
+- `project_vision_analytics_data_max_ui_custom_replay.md` — **VISION D'EXPANSION
+  LONG-TERME** (Robert 2026-06-25) : maximiser la data par tenant (GSC + Bing
+  Webmaster + tout), backend riche / UI condensée, affichage ULTRA-customisable
+  pilotable par agent IA (onglets/pages/rapports), + session replay. Le NORD.
+  *Principe : charcuter l'app sans timidité ; auditer l'existant AVANT de coder ;
+  dire aux agents de faire le nécessaire, large.*
+- `project_hunt_2026-06-25_prod_deploy.md` — dernier état prod (main=73aed30, v11)
+  + reste (backfill channel_group par workspace).
+- `feedback_lead_verifie_lui_meme_pas_sur_parole.md` — méthode team-lead.
+
+**Docs repo** : `VERIDIAN-README.md`, `docs/data-flow-architecture.md`,
+`docs/TUNNEL-IDENTITE.md` (identité/stitching), `docs/PLATFORM-ADMIN-API.md` (M2M),
+`docs/CI-ARCHITECTURE.md` (CI/CD + promo staging→main).
+
 ### Memories à charger pour comprendre la vision
 
 - `[[project_analytics_vision_scope_final]]` — scope figé 2026-05-23 (repo
   legacy), source de la vision répercutée ici
+- `[[project_vision_analytics_data_max_ui_custom_replay]]` — vision d'expansion
+  long-terme (data max + UI custom IA + session replay), méthode audit-d'abord
+- `[[feedback_lead_verifie_lui_meme_pas_sur_parole]]` — team-lead vérifie le réel
+  lui-même, creuse les rouges, distingue test-cassé vs prod-cassé
 - `[[project_session_handoff_2026-05-24]]` — état post-refonte UI native
   pure + i18n FR, tickets pending
 - `[[feedback_no_local_docker_build]]` — INTERDIT de build/test/install en
