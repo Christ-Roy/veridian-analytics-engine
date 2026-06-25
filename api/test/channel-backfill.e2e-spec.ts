@@ -11,6 +11,7 @@ import {
   createTestApp,
   closeTestApp,
   waitForClickHouse,
+  waitForMutations,
   TestAppContext,
 } from './helpers';
 import { ChannelBackfillService } from '../src/filters/backfill/channel-backfill.service';
@@ -173,8 +174,29 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
     return out;
   }
 
-  /** Force ReplacingMergeTree merges so post-mutation reads are stable. */
+  /**
+   * Make post-backfill reads deterministic.
+   *
+   * The backfill rewrites channel_group via `ALTER TABLE ... UPDATE` — a
+   * ClickHouse MUTATION, which is a distinct mechanism from a ReplacingMergeTree
+   * merge. `OPTIMIZE ... FINAL` only forces the merge; it does NOT force a
+   * pending mutation to finish. Until the mutation is done, the pre-mutation
+   * part (channel_group='') and the post-mutation part (channel_group='email')
+   * can both be active for the same row id. A `GROUP BY channel_group` then sees
+   * the same id in two buckets → the count is inflated (3 instead of 1).
+   *
+   * So we POLL system.mutations until is_done=1 for this workspace DB BEFORE we
+   * OPTIMIZE FINAL and read. This — not the OPTIMIZE — is what makes the
+   * assertions deterministic: drop the waitForMutations call and the
+   * channel-distribution reads go flaky/red again.
+   */
   async function settle() {
+    const dbName = `staminads_ws_${workspaceId}`;
+    await waitForMutations(workspaceClient, dbName, {
+      timeoutMs: 60000,
+      intervalMs: 500,
+      onTimeout: 'throw',
+    });
     await workspaceClient.command({ query: 'OPTIMIZE TABLE sessions FINAL' });
     await workspaceClient.command({ query: 'OPTIMIZE TABLE goals FINAL' });
     await waitForClickHouse();
@@ -208,19 +230,7 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
 
   it('re-derives channel/channel_group on historical sessions + goals', async () => {
     await seed();
-    // DEBUG: dump raw goals signals as actually stored, pre-backfill.
-    {
-      const dbg = await workspaceClient.query({
-        query: `SELECT session_id, utm_medium, utm_source, referrer_domain, referrer, channel_group
-                FROM staminads_ws_${workspaceId}.goals FINAL ORDER BY session_id`,
-        format: 'JSONEachRow',
-      });
-      // eslint-disable-next-line no-console
-      console.log('DEBUG goals signals pre-backfill:', JSON.stringify(await dbg.json()));
-    }
     const summary = await service.backfillChannel(workspaceId);
-    // eslint-disable-next-line no-console
-    console.log('DEBUG backfill summary:', JSON.stringify(summary));
     await settle();
 
     // 3 sessions + 3 goals all moved off the empty bucket.
