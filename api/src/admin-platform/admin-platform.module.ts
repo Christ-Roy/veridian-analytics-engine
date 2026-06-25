@@ -12,6 +12,7 @@ import { AnalyticsModule } from '../analytics/analytics.module';
 import { VoipModule } from '../voip/voip.module';
 import { GscModule } from '../gsc/gsc.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
+import { FiltersModule } from '../filters/filters.module';
 
 /**
  * Module exposing platform-level (M2M) admin endpoints.
@@ -46,6 +47,9 @@ import { WebhooksModule } from '../webhooks/webhooks.module';
     forwardRef(() => VoipModule),
     forwardRef(() => GscModule),
     forwardRef(() => WebhooksModule),
+    // S6 Lot C — IdentityBackfillService lives in FiltersModule (it re-uses
+    // IdentityStitchService for the historical re-stitch).
+    forwardRef(() => FiltersModule),
   ],
   controllers: [AdminPlatformController],
   providers: [AdminPlatformService, PlatformAdminGuard, SsrfGuard],

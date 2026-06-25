@@ -464,12 +464,16 @@
     - api/src/filters/filters.service.ts
     - api/src/filters/backfill/*.ts
     - api/src/filters/backfill/channel-backfill.service.ts
+    - api/src/filters/backfill/identity-backfill.service.ts
   covered_by:
     - api/test/backfill.e2e-spec.ts
     - api/test/channel-backfill.e2e-spec.ts
+    - api/test/identity-backfill.e2e-spec.ts
   reason: |
     Filters + backfill. channel-backfill.e2e couvre ChannelBackfillService
     (re-dérivation historique du canal) + la route POST /api/filters.channelBackfill.
+    identity-backfill.e2e couvre IdentityBackfillService (re-stitch first-touch
+    historique, S6 Lot C) + analytics.userProvenance / backfill.identity M2M.
 
 - sources:
     - api/src/subscriptions/subscriptions.controller.ts
@@ -526,10 +530,25 @@
 
 - sources:
     - api/src/export/export.controller.ts
+    - api/src/export/export.service.ts
     - api/src/export/dto/*.ts
   covered_by:
     - api/test/user-id-export.e2e-spec.ts
-  reason: Export user events (RGPD-like).
+  reason: |
+    Export user events (RGPD-like). user-id-export.e2e couvre ExportService,
+    y compris l'enrichissement S6 first_touch_*/referral_code (LEFT JOIN
+    user_attribution) ajouté au SELECT de export.userEvents.
+
+- sources:
+    - api/src/admin-platform/admin-platform.controller.ts
+    - api/src/admin-platform/admin-platform.service.ts
+  covered_by:
+    - api/test/admin-platform.e2e-spec.ts
+    - api/test/identity-backfill.e2e-spec.ts
+  reason: |
+    Surface M2M plateforme (/api/admin/platform/*). admin-platform.e2e couvre le
+    guard + le routing de toutes les routes M2M ; identity-backfill.e2e exerce
+    en plus userProvenance/backfillIdentity contre un vrai ClickHouse (S6 Lot C).
 
 - sources:
     - api/src/demo/demo.controller.ts

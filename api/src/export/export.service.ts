@@ -47,13 +47,15 @@ export class ExportService {
       }
     }
 
-    // Build WHERE conditions
-    const conditions: string[] = ['user_id IS NOT NULL'];
+    // Build WHERE conditions. Columns are prefixed `e.` because the events table
+    // is now LEFT JOINed with user_attribution (`ua`), which shares column names
+    // (user_id, updated_at) — unqualified refs would be ambiguous.
+    const conditions: string[] = ['e.user_id IS NOT NULL'];
 
     if (cursorData) {
       // Cursor-based pagination (timestamp ties use id as tiebreaker)
       conditions.push(
-        '(updated_at, id) > ({cursor_updated_at:String}, {cursor_id:String})',
+        '(e.updated_at, e.id) > ({cursor_updated_at:String}, {cursor_id:String})',
       );
       params.cursor_updated_at = cursorData.updated_at;
       params.cursor_id = cursorData.id;
@@ -61,77 +63,98 @@ export class ExportService {
       // Initial query with since timestamp
       const sinceDate = new Date(dto.since);
       const sinceClickhouse = this.toClickHouseDateTime(sinceDate);
-      conditions.push('updated_at >= {since:String}');
+      conditions.push('e.updated_at >= {since:String}');
       params.since = sinceClickhouse;
     }
 
     // Add until constraint (always applied, even with cursor)
     const untilDate = new Date(dto.until);
     const untilClickhouse = this.toClickHouseDateTime(untilDate);
-    conditions.push('updated_at <= {until:String}');
+    conditions.push('e.updated_at <= {until:String}');
     params.until = untilClickhouse;
 
     // Optional user_id filter
     if (dto.user_id) {
-      conditions.push('user_id = {user_id:String}');
+      conditions.push('e.user_id = {user_id:String}');
       params.user_id = dto.user_id;
     }
 
     const whereClause = conditions.join(' AND ');
 
+    // S6 Lot C — enrich each exported event with the user's STITCHED first-touch
+    // acquisition (+ referral_code). These columns do NOT live on the `events`
+    // table (events have a 7d TTL); they live on the canonical `user_attribution`
+    // table, one row per user_id (ReplacingMergeTree → read with FINAL). We
+    // LEFT JOIN by user_id so events of a not-yet-stitched user simply get empty
+    // first-touch fields (never dropped). The join table must be DB-qualified
+    // explicitly: ClickHouseService.qualifyTableNames only rewrites FROM/INTO,
+    // not JOIN. `events FINAL e` already resolves to the workspace DB via FROM.
+    const dbName = this.clickhouse.getWorkspaceDatabaseName(dto.workspace_id);
+
     const sql = `
       SELECT
-        toString(id) as id,
-        session_id,
-        user_id,
-        name,
-        path,
-        toString(created_at) as created_at,
-        toString(updated_at) as updated_at,
-        referrer,
-        referrer_domain,
-        is_direct,
-        landing_page,
-        landing_domain,
-        landing_path,
-        utm_source,
-        utm_medium,
-        utm_campaign,
-        utm_term,
-        utm_content,
-        utm_id,
-        utm_id_from,
-        channel,
-        channel_group,
-        stm_1,
-        stm_2,
-        stm_3,
-        stm_4,
-        stm_5,
-        stm_6,
-        stm_7,
-        stm_8,
-        stm_9,
-        stm_10,
-        device,
-        browser,
-        browser_type,
-        os,
-        country,
-        region,
-        city,
-        language,
-        timezone,
-        goal_name,
-        goal_value,
-        toString(goal_timestamp) as goal_timestamp,
-        page_number,
-        duration,
-        max_scroll,
-        properties
-      FROM events FINAL
+        toString(e.id) as id,
+        e.session_id as session_id,
+        e.user_id as user_id,
+        e.name as name,
+        e.path as path,
+        toString(e.created_at) as created_at,
+        toString(e.updated_at) as updated_at,
+        e.referrer as referrer,
+        e.referrer_domain as referrer_domain,
+        e.is_direct as is_direct,
+        e.landing_page as landing_page,
+        e.landing_domain as landing_domain,
+        e.landing_path as landing_path,
+        e.utm_source as utm_source,
+        e.utm_medium as utm_medium,
+        e.utm_campaign as utm_campaign,
+        e.utm_term as utm_term,
+        e.utm_content as utm_content,
+        e.utm_id as utm_id,
+        e.utm_id_from as utm_id_from,
+        e.channel as channel,
+        e.channel_group as channel_group,
+        ua.first_touch_channel as first_touch_channel,
+        ua.first_touch_channel_group as first_touch_channel_group,
+        ua.first_touch_referrer as first_touch_referrer,
+        ua.first_touch_referrer_domain as first_touch_referrer_domain,
+        ua.first_touch_landing_page as first_touch_landing_page,
+        ua.first_touch_utm_source as first_touch_utm_source,
+        ua.first_touch_utm_medium as first_touch_utm_medium,
+        ua.first_touch_utm_campaign as first_touch_utm_campaign,
+        ua.first_touch_method as first_touch_method,
+        ua.referral_code as referral_code,
+        e.stm_1 as stm_1,
+        e.stm_2 as stm_2,
+        e.stm_3 as stm_3,
+        e.stm_4 as stm_4,
+        e.stm_5 as stm_5,
+        e.stm_6 as stm_6,
+        e.stm_7 as stm_7,
+        e.stm_8 as stm_8,
+        e.stm_9 as stm_9,
+        e.stm_10 as stm_10,
+        e.device as device,
+        e.browser as browser,
+        e.browser_type as browser_type,
+        e.os as os,
+        e.country as country,
+        e.region as region,
+        e.city as city,
+        e.language as language,
+        e.timezone as timezone,
+        e.goal_name as goal_name,
+        e.goal_value as goal_value,
+        toString(e.goal_timestamp) as goal_timestamp,
+        e.page_number as page_number,
+        e.duration as duration,
+        e.max_scroll as max_scroll,
+        e.properties as properties
+      FROM events FINAL e
+      LEFT JOIN ${dbName}.user_attribution AS ua FINAL ON ua.user_id = e.user_id
       WHERE ${whereClause}
-      ORDER BY updated_at ASC, id ASC
+      ORDER BY e.updated_at ASC, e.id ASC
       LIMIT ${limit + 1}
     `;
 

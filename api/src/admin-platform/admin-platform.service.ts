@@ -20,6 +20,7 @@ import { VoipService } from '../voip/voip.service';
 import { VoipSyncService } from '../voip/voip-sync.service';
 import type { PhoneSource } from '../voip/voip.types';
 import { GscService } from '../gsc/gsc.service';
+import { IdentityBackfillService } from '../filters/backfill/identity-backfill.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
 import {
@@ -67,6 +68,11 @@ import {
   TrackingVerifySnippet,
   TrackingVerifyVerdict,
 } from './dto/tracking-verify-response.dto';
+import { UserProvenanceDto } from './dto/user-provenance.dto';
+import {
+  UserProvenanceResponseDto,
+  UserProvenanceRowRaw,
+} from './dto/user-provenance-response.dto';
 
 const PASSWORD_RESET_EXPIRY_HOURS = 24;
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
@@ -140,6 +146,7 @@ export class AdminPlatformService {
     private readonly voipService: VoipService,
     private readonly voipSyncService: VoipSyncService,
     private readonly gscService: GscService,
+    private readonly identityBackfillService: IdentityBackfillService,
     private readonly webhooksService: WebhooksService,
     private readonly webhookDeliveryWorker: WebhookDeliveryWorker,
     private readonly ssrf: SsrfGuard,
@@ -422,6 +429,98 @@ export class AdminPlatformService {
    */
   async analyticsConversionsByChannel(dto: ConversionsByChannelDto) {
     return this.analyticsService.conversionsByChannel(dto);
+  }
+
+  // ---------------------------------------------------------------------------
+  // S6 Lot C — user provenance (stitched first-touch per identified user)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Per-signup acquisition provenance (M2M). Reads the canonical
+   * `user_attribution` table (written by IdentityStitchService at ingestion +
+   * the identity backfill) and returns, for each identified user, WHERE THEY
+   * CAME FROM: stitched first-touch channel/channel_group, referral_code (?ref=
+   * parrain), first/last touch dates, and the join method that linked the chain.
+   *
+   * This is the answer to the S6 KPI "d'où viennent mes clients" — independent
+   * of the per-session channel taxonomy (which can legitimately read `direct` on
+   * the /login session): the first-touch lives in user_attribution, NOT on the
+   * session's `channel_group`. So provenance is correct even on a tenant whose
+   * session-level referral filter is not (yet) reconciled.
+   *
+   * ReplacingMergeTree → read with FINAL (one row per identity_key).
+   */
+  async userProvenance(dto: UserProvenanceDto): Promise<UserProvenanceResponseDto> {
+    await this.assertWorkspaceExists(dto.workspace_id);
+
+    const limit = dto.limit ?? 1000;
+    const params: Record<string, unknown> = { lim: limit };
+    let whereUser = '';
+    if (dto.user) {
+      whereUser = 'WHERE identity_key = {user:String}';
+      params.user = dto.user;
+    }
+
+    const rows = await this.clickhouse.queryWorkspace<UserProvenanceRowRaw>(
+      dto.workspace_id,
+      `SELECT
+         identity_key,
+         user_id,
+         first_touch_channel,
+         first_touch_channel_group,
+         first_touch_referrer,
+         first_touch_referrer_domain,
+         first_touch_landing_page,
+         first_touch_utm_source,
+         first_touch_utm_medium,
+         first_touch_utm_campaign,
+         first_touch_utm_content,
+         toString(first_touch_at) AS first_touch_at,
+         first_touch_method,
+         last_touch_channel,
+         last_touch_channel_group,
+         toString(last_touch_at) AS last_touch_at,
+         referral_code
+       FROM user_attribution FINAL
+       ${whereUser}
+       ORDER BY first_touch_at DESC
+       LIMIT {lim:UInt32}`,
+      params,
+    );
+
+    return {
+      workspace_id: dto.workspace_id,
+      count: rows.length,
+      users: rows.map((r) => ({
+        user_id: r.user_id || r.identity_key,
+        first_touch_channel: r.first_touch_channel || '',
+        first_touch_channel_group: r.first_touch_channel_group || '',
+        first_touch_referrer: r.first_touch_referrer || '',
+        first_touch_referrer_domain: r.first_touch_referrer_domain || '',
+        first_touch_landing_page: r.first_touch_landing_page || '',
+        first_touch_utm_source: r.first_touch_utm_source || '',
+        first_touch_utm_medium: r.first_touch_utm_medium || '',
+        first_touch_utm_campaign: r.first_touch_utm_campaign || '',
+        first_touch_utm_content: r.first_touch_utm_content || '',
+        first_touch_at: r.first_touch_at || null,
+        first_touch_method: r.first_touch_method || '',
+        last_touch_channel: r.last_touch_channel || '',
+        last_touch_channel_group: r.last_touch_channel_group || '',
+        last_touch_at: r.last_touch_at || null,
+        referral_code: r.referral_code || '',
+      })),
+    };
+  }
+
+  /**
+   * Re-stitch the first-touch of every historical identified user of a
+   * workspace (M2M). Delegates to IdentityBackfillService, which re-uses the
+   * SAME IdentityStitchService as real-time ingestion (zero matching-logic
+   * drift). Idempotent, total-preserving, scoped, emits backfill.completed.
+   */
+  async backfillIdentity(workspaceId: string) {
+    await this.assertWorkspaceExists(workspaceId);
+    return this.identityBackfillService.backfillIdentity(workspaceId);
   }
 
   // ---------------------------------------------------------------------------

@@ -58,6 +58,23 @@ export interface UserEventRow {
   utm_id_from: string;
   channel: string;
   channel_group: string;
+  /**
+   * S6 first-touch acquisition (stitched), joined from user_attribution by
+   * user_id. Empty for a user not yet stitched. The `channel`/`channel_group`
+   * above are the per-EVENT (last/session) attribution; these `first_touch_*`
+   * are the user's ORIGINAL acquisition (anonymous vitrine visit). referral_code
+   * = parrainage (?ref=) when present.
+   */
+  first_touch_channel: string;
+  first_touch_channel_group: string;
+  first_touch_referrer: string;
+  first_touch_referrer_domain: string;
+  first_touch_landing_page: string;
+  first_touch_utm_source: string;
+  first_touch_utm_medium: string;
+  first_touch_utm_campaign: string;
+  first_touch_method: string;
+  referral_code: string;
   stm_1: string;
   stm_2: string;
   stm_3: string;

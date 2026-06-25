@@ -46,6 +46,9 @@ import {
 import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
 import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
 import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
+import { UserProvenanceDto } from './dto/user-provenance.dto';
+import { UserProvenanceResponseDto } from './dto/user-provenance-response.dto';
+import { IdentityBackfillDto } from './dto/identity-backfill.dto';
 import {
   CreateWebhookDto,
   DeleteWebhookDto,
@@ -175,6 +178,41 @@ export class AdminPlatformController {
   })
   analyticsConversionsByChannel(@Body() dto: ConversionsByChannelDto) {
     return this.adminPlatformService.analyticsConversionsByChannel(dto);
+  }
+
+  // ─── S6 Lot C — user provenance + identity backfill ───────────────────
+
+  @Post('analytics.userProvenance')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Per-signup acquisition provenance (M2M, S6). Reads the stitched ' +
+      'user_attribution table and returns, for each identified user, their ' +
+      'first-touch channel/channel_group, referral_code (?ref= parrain), ' +
+      'first/last touch dates, and the stitch method. The KPI answer to ' +
+      '"d\'où viennent mes clients" — correct even when the /login session ' +
+      'reads `direct` (first-touch lives in user_attribution, not the session).',
+  })
+  analyticsUserProvenance(
+    @Body() dto: UserProvenanceDto,
+  ): Promise<UserProvenanceResponseDto> {
+    return this.adminPlatformService.userProvenance(dto);
+  }
+
+  @Post('backfill.identity')
+  @WriteM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Re-stitch the first-touch of every HISTORICAL identified user of a ' +
+      'workspace (M2M, S6). Re-runs the SAME IdentityStitchService over each ' +
+      'past signup so users who signed up before S6 shipped finally get their ' +
+      'acquisition written to user_attribution + denormalized onto ' +
+      'sessions/goals. Idempotent, total-preserving, scoped.',
+  })
+  backfillIdentity(@Body() dto: IdentityBackfillDto) {
+    return this.adminPlatformService.backfillIdentity(dto.workspace_id);
   }
 
   // ─── Lot A — Consolidated workspace status ────────────────────────────

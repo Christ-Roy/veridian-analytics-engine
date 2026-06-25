@@ -1001,6 +1001,9 @@ describe('Admin Platform — surface M2M IA-first : auth gate', () => {
     // Attribution M2M (funnel + conversions par canal)
     'analytics.funnel',
     'analytics.conversionsByChannel',
+    // S6 Lot C — provenance d'acquisition + re-stitch historique
+    'analytics.userProvenance',
+    'backfill.identity',
   ];
 
   it.each(M2M_ENDPOINTS)(

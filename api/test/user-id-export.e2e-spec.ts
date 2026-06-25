@@ -534,6 +534,80 @@ describe('User ID Tracking & Export E2E', () => {
       });
     });
 
+    it('enriches exported events with stitched first_touch_* + referral_code (S6 Lot C)', async () => {
+      const sessionId = `sess-ft-${Date.now()}`;
+      const userId = `user_ft_${Date.now()}`;
+
+      // Ingest a normal identified event chain.
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(
+          createSessionPayload({
+            session_id: sessionId,
+            actions: [createPageviewAction({ path: '/app', page_number: 1 })],
+            attributes: { landing_page: 'https://app.example.com/login' },
+            user_id: userId,
+          }),
+        )
+        .expect(200);
+
+      await eventBuffer.flushAll();
+      await waitForClickHouse();
+      await waitForRowCount(
+        workspaceClient,
+        `SELECT count() as count FROM events WHERE session_id = '${sessionId}'`,
+        1,
+      );
+
+      // Seed the canonical user_attribution row for this user (what the stitch /
+      // identity backfill writes). The export LEFT JOINs it by user_id.
+      const now = new Date().toISOString().replace('T', ' ').replace('Z', '');
+      await workspaceClient.insert({
+        table: 'staminads_ws_test_ws_user_id.user_attribution',
+        values: [
+          {
+            identity_key: userId,
+            user_id: userId,
+            first_touch_channel: 'organic_search',
+            first_touch_channel_group: 'seo',
+            first_touch_utm_content: 'PARRAIN42',
+            first_touch_at: now,
+            first_touch_method: 'fingerprint',
+            last_touch_channel: 'direct',
+            last_touch_channel_group: 'direct',
+            last_touch_at: now,
+            referral_code: 'PARRAIN42',
+            first_seen_at: now,
+            updated_at: now,
+          },
+        ],
+        format: 'JSONEachRow',
+      });
+      await workspaceClient.command({
+        query:
+          'OPTIMIZE TABLE staminads_ws_test_ws_user_id.user_attribution FINAL',
+      });
+      await waitForClickHouse();
+
+      const since = new Date(Date.now() - 60000).toISOString();
+      const response = await request(ctx.app.getHttpServer())
+        .get('/api/export.userEvents')
+        .query({ workspace_id: testWorkspaceId, since, until: getUntil() })
+        .set('Authorization', `Bearer ${userToken}`)
+        .expect(200);
+
+      const ev = response.body.data.find(
+        (e: { session_id: string }) => e.session_id === sessionId,
+      );
+      expect(ev).toBeDefined();
+      // The per-event channel can be anything; the FIRST-TOUCH columns come from
+      // the joined user_attribution row.
+      expect(ev.first_touch_channel_group).toBe('seo');
+      expect(ev.first_touch_channel).toBe('organic_search');
+      expect(ev.first_touch_method).toBe('fingerprint');
+      expect(ev.referral_code).toBe('PARRAIN42');
+    });
+
     it('excludes events without user_id', async () => {
       const sessionWithUser = `sess-with-user-${Date.now()}`;
       const sessionWithoutUser = `sess-without-user-${Date.now()}`;
