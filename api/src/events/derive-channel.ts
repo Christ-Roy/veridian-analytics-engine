@@ -70,6 +70,17 @@ export interface ChannelSignals {
   utm_id_from?: string | null;
   /** true si aucun referrer (navigation directe / bookmark / app). */
   is_direct?: boolean;
+  /**
+   * Code de parrainage interne extrait de `?ref=<code>` sur la landing page
+   * (param configurable `settings.referral_param`, défaut `ref`). Parsé EN AMONT
+   * (dans le handler d'ingestion), JAMAIS ici — deriveChannel reste pure/sans I/O.
+   * Non vide ⇒ ce visiteur arrive via un lien de parrainage interne (viralité du
+   * client). Sert UNIQUEMENT à récupérer du trafic autrement classé `direct` :
+   * il ne masque jamais un canal plus riche (gclid / utm payant / vrai referrer
+   * externe priment, cf branche 4bis). Le code lui-même est stocké à part dans
+   * `utm_content` par le handler, indépendamment du canal final.
+   */
+  referral_code?: string | null;
 }
 
 // ─── Référentiels de domaines (déterministes, France-aware) ────────────────────
@@ -242,8 +253,16 @@ function toChannelGroup(channel: Channel): ChannelGroup {
  *   3. utm_medium social / email / referral / organic → channel correspondant
  *   4. referrer = moteur / social / webmail           → organic_search / *_social / email
  *   5. referrer externe non classé                    → referral
+ *   5bis. `?ref=` parrainage interne (referral_code)  → referral
  *   6. is_direct / aucun signal                       → direct
  *   7. reste                                           → other
+ *
+ * La branche 5bis (parrainage interne) est volontairement placée APRÈS toute la
+ * classification par referrer/utm et AVANT `direct` : un parrainage qui s'ajoute
+ * à un vrai signal d'acquisition (gclid, utm payant, referrer externe) NE MASQUE
+ * PAS ce canal plus riche ; il ne récupère QUE du trafic qui serait sinon tombé
+ * en `direct` (referrer vide + aucun utm). Zéro régression sur l'attribution
+ * existante par design.
  */
 export function deriveChannel(signals: ChannelSignals): ChannelResult {
   const idFrom = norm(signals.utm_id_from);
@@ -295,6 +314,16 @@ export function deriveChannel(signals: ChannelSignals): ChannelResult {
     if (isSearchEngineDomain(domain)) return finalize('organic_search');
     if (isSocialDomain(domain)) return finalize('organic_social');
     // 5. Referrer externe non classé.
+    return finalize('referral');
+  }
+
+  // 5bis. Parrainage interne `?ref=<code>` (referral_code parsé en amont). On
+  //       n'arrive ici QUE si aucun click id, aucun utm explicite et aucun
+  //       referrer (externe) n'a matché — donc ce trafic serait sinon `direct`.
+  //       Un code parrain non vide le récupère en `referral` (acquisition la
+  //       plus rentable : virale, dérivée d'un lead payant). Conservateur par
+  //       construction : il ne peut jamais écraser un canal classé plus haut.
+  if (norm(signals.referral_code)) {
     return finalize('referral');
   }
 

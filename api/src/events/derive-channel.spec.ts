@@ -196,6 +196,56 @@ const cases: Case[] = [
     channel: 'email',
     group: 'email',
   },
+  // ── Parrainage interne ?ref= (branche 5bis : récupère du direct) ─────────
+  {
+    name: 'referral_code seul (sinon direct) → referral/referral',
+    in: { referral_code: 'VHCRPP6X', is_direct: true },
+    channel: 'referral',
+    group: 'referral',
+  },
+  {
+    name: 'referral_code + aucun autre signal → referral/referral',
+    in: { referral_code: 'ABC123' },
+    channel: 'referral',
+    group: 'referral',
+  },
+  // ── Conservatisme : le parrainage NE MASQUE JAMAIS un canal plus riche ───
+  {
+    name: 'referral_code + gclid → paid_search (click id prime)',
+    in: { referral_code: 'VHCRPP6X', utm_id_from: 'gclid' },
+    channel: 'paid_search',
+    group: 'ads',
+  },
+  {
+    name: 'referral_code + referrer google → organic_search (referrer prime)',
+    in: { referral_code: 'VHCRPP6X', referrer_domain: 'google.com' },
+    channel: 'organic_search',
+    group: 'seo',
+  },
+  {
+    name: 'referral_code + referrer externe → referral (referrer prime, même group)',
+    in: { referral_code: 'VHCRPP6X', referrer_domain: 'lemonde.fr' },
+    channel: 'referral',
+    group: 'referral',
+  },
+  {
+    name: 'referral_code + utm_medium=cpc → paid_search (utm payant prime)',
+    in: { referral_code: 'VHCRPP6X', utm_medium: 'cpc' },
+    channel: 'paid_search',
+    group: 'ads',
+  },
+  {
+    name: 'referral_code vide → direct (non régressif)',
+    in: { referral_code: '', is_direct: true },
+    channel: 'direct',
+    group: 'direct',
+  },
+  {
+    name: 'referral_code null → direct (non régressif)',
+    in: { referral_code: null, is_direct: true },
+    channel: 'direct',
+    group: 'direct',
+  },
 ];
 
 describe('deriveChannel', () => {

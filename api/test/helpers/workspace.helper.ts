@@ -12,6 +12,9 @@ import { waitForData } from './wait.helper';
 export interface WorkspaceSettings {
   timescore_reference?: number;
   bounce_threshold?: number;
+  allowed_domains?: string[];
+  /** Param d'URL du code de parrainage interne (S6 Lot B). '' / null = désactivé. */
+  referral_param?: string | null;
 }
 
 export interface CreateWorkspaceOptions {

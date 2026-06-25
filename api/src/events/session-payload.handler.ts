@@ -132,6 +132,7 @@ export class SessionPayloadHandler {
       version,
       needsCorrection ? skewMs : 0,
       clientIp,
+      workspace,
     );
 
     // 8. Deserialize actions to events
@@ -336,6 +337,7 @@ export class SessionPayloadHandler {
     version: number,
     skewMs: number,
     clientIp: string | null,
+    workspace: Workspace,
   ): Partial<TrackingEvent> {
     const attrs = payload.attributes;
     const now = toClickHouseDateTime();
@@ -343,6 +345,17 @@ export class SessionPayloadHandler {
     // Parse URLs for derived fields
     const referrerParsed = this.parseUrl(attrs?.referrer);
     const landingParsed = this.parseUrl(attrs?.landing_page);
+
+    // Parrainage interne `?ref=<code>` (S6 Lot B). Parsé EN AMONT depuis la
+    // landing page (deriveChannel reste pure) avec le param configurable
+    // `settings.referral_param` (défaut `ref` ; vide/null = désactivé). Fail-soft
+    // total : URL invalide / pas de query / param absent → code vide → canal
+    // inchangé. Sert à récupérer du trafic sinon `direct` en `referral`, et à
+    // garder QUI parraine dans `utm_content` (indépendamment du canal final).
+    const referralCode = this.extractReferralCode(
+      attrs?.landing_page,
+      workspace.settings.referral_param,
+    );
 
     // Derive acquisition channel (figé à l'ingestion) from the signals already
     // captured. channel = GA4-like fin ; channel_group = coarse aligné sur
@@ -356,6 +369,7 @@ export class SessionPayloadHandler {
       utm_medium: attrs?.utm_medium,
       utm_id_from: attrs?.utm_id_from,
       is_direct: !attrs?.referrer,
+      referral_code: referralCode,
     });
 
     // Apply skew correction to session timestamps
@@ -390,7 +404,11 @@ export class SessionPayloadHandler {
       utm_medium: attrs?.utm_medium ?? '',
       utm_campaign: attrs?.utm_campaign ?? '',
       utm_term: attrs?.utm_term ?? '',
-      utm_content: attrs?.utm_content ?? '',
+      // Code parrain → utm_content (S6 Lot B), INDÉPENDAMMENT du canal final, dès
+      // qu'un `?ref=` a été capté. À défaut, on conserve l'utm_content du SDK :
+      // un parrainage sans utm n'écrase rien, et on ne le perd jamais quand il
+      // est présent (utm_content est déjà colonne + dimension + export).
+      utm_content: referralCode || attrs?.utm_content || '',
       utm_id: attrs?.utm_id ?? '',
       utm_id_from: attrs?.utm_id_from ?? '',
 
@@ -550,6 +568,37 @@ export class SessionPayloadHandler {
       return { domain: url.hostname, path: url.pathname };
     } catch {
       return { domain: null, path: null };
+    }
+  }
+
+  /**
+   * Extrait le code de parrainage interne `?ref=<code>` de la landing page
+   * (S6 Lot B). Tout est fail-soft — un échec ne renvoie jamais d'erreur dans
+   * l'ingestion, juste une chaîne vide qui laisse le canal inchangé :
+   *
+   *   - `referralParam` absent / undefined → défaut `'ref'`
+   *   - `referralParam` vide ('') ou null  → feature DÉSACTIVÉE (renvoie '')
+   *   - landing_page absente / pas une URL valide / sans query string / param
+   *     absent → renvoie '' (le visiteur n'a pas de code parrain)
+   *
+   * Le code est trimmé (les valeurs de querystring sont déjà URL-decodées par
+   * URLSearchParams). On ne valide PAS le format du code ici : c'est un signal
+   * d'acquisition opaque, propre à chaque client.
+   */
+  private extractReferralCode(
+    landingPage: string | undefined,
+    referralParam: string | null | undefined,
+  ): string {
+    // Désactivé explicitement : '' ou null. `undefined` ⇒ défaut 'ref'.
+    if (referralParam === '' || referralParam === null) return '';
+    const param = (referralParam ?? 'ref').trim();
+    if (!param) return '';
+    if (!landingPage) return '';
+    try {
+      const url = new URL(landingPage);
+      return (url.searchParams.get(param) ?? '').trim();
+    } catch {
+      return '';
     }
   }
 

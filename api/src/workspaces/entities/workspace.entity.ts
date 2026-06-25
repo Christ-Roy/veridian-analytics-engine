@@ -153,6 +153,21 @@ export interface WorkspaceSettings {
   // Domain restriction (optional)
   allowed_domains?: string[];
 
+  /**
+   * Nom du paramètre d'URL portant le code de parrainage interne (`?ref=CODE`),
+   * parsé à l'ingestion depuis `landing_page` pour dériver le canal `referral`
+   * et stocker le code parrain dans `utm_content` (S6 Lot B). Configurable par
+   * workspace car le param varie d'un client à l'autre.
+   *
+   *   - absent / undefined → défaut `ref`
+   *   - chaîne non vide     → ce param est utilisé (ex. `parrain`, `aff`)
+   *   - '' / null explicite → DÉSACTIVÉ : on ne parse aucun code de parrainage
+   *                           (un client peut couper la feature)
+   *
+   * Stocké dans le JSON `settings` (pas une colonne) → zéro migration.
+   */
+  referral_param?: string | null;
+
   // ─── White-label / multi-industrie configuration (pilotable M2M) ───────
   /** Per-client visual branding (accent color). Logo/name = top-level columns. */
   branding?: WorkspaceBranding;

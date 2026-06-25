@@ -438,6 +438,126 @@ describe('SessionPayloadHandler', () => {
     });
   });
 
+  // S6 Lot B — parsing du code parrain `?ref=` + dérivation referral.
+  // (le couvert e2e VRAI ClickHouse vit dans session-payload.e2e-spec.ts ;
+  //  ici on verrouille le fail-soft du parsing, fin et déterministe.)
+  describe('referral code parsing (?ref=, S6 Lot B)', () => {
+    const firstEvent = () => bufferService.addBatch.mock.calls[0][0][0];
+
+    function withSettings(settings: Record<string, unknown>): void {
+      workspacesService.get.mockResolvedValue({
+        ...mockWorkspace,
+        settings: { ...mockWorkspace.settings, ...settings },
+      } as never);
+    }
+
+    it('default param "ref": ?ref=CODE → referral + utm_content=CODE', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://app.example.com/login?ref=VHCRPP6X' },
+      });
+      await handler.handle(payload, null);
+      const ev = firstEvent();
+      expect(ev.channel).toBe('referral');
+      expect(ev.channel_group).toBe('referral');
+      expect(ev.utm_content).toBe('VHCRPP6X');
+    });
+
+    it('?ref= NE MASQUE PAS un referrer plus riche (google → organic_search), code conservé', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: {
+          landing_page: 'https://app.example.com/login?ref=VHCRPP6X',
+          referrer: 'https://www.google.com/search?q=x',
+        },
+      });
+      await handler.handle(payload, null);
+      const ev = firstEvent();
+      expect(ev.channel).toBe('organic_search');
+      expect(ev.utm_content).toBe('VHCRPP6X');
+    });
+
+    it('landing sans ?ref= → direct, utm_content vide (non régressif)', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://app.example.com/login' },
+      });
+      await handler.handle(payload, null);
+      const ev = firstEvent();
+      expect(ev.channel).toBe('direct');
+      expect(ev.utm_content).toBe('');
+    });
+
+    it('fail-soft: landing_page n\'est pas une URL valide → direct, pas de crash', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'not a url ?ref=NOPE' },
+      });
+      const result = await handler.handle(payload, null);
+      expect(result.success).toBe(true);
+      const ev = firstEvent();
+      expect(ev.channel).toBe('direct');
+      expect(ev.utm_content).toBe('');
+    });
+
+    it('fail-soft: landing_page absente → direct, pas de crash', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        // no attributes at all
+      });
+      const result = await handler.handle(payload, null);
+      expect(result.success).toBe(true);
+      expect(firstEvent().channel).toBe('direct');
+    });
+
+    it('param custom via settings.referral_param ("parrain")', async () => {
+      withSettings({ referral_param: 'parrain' });
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://app.example.com/?parrain=ABC&ref=ZZZ' },
+      });
+      await handler.handle(payload, null);
+      const ev = firstEvent();
+      // "parrain" lu (→ referral + code), "ref" ignoré.
+      expect(ev.channel).toBe('referral');
+      expect(ev.utm_content).toBe('ABC');
+    });
+
+    it('referral_param="" DÉSACTIVE le parsing (?ref= ignoré → direct)', async () => {
+      withSettings({ referral_param: '' });
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://app.example.com/login?ref=VHCRPP6X' },
+      });
+      await handler.handle(payload, null);
+      const ev = firstEvent();
+      expect(ev.channel).toBe('direct');
+      expect(ev.utm_content).toBe('');
+    });
+
+    it('referral_param=null DÉSACTIVE le parsing', async () => {
+      withSettings({ referral_param: null });
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: { landing_page: 'https://app.example.com/login?ref=VHCRPP6X' },
+      });
+      await handler.handle(payload, null);
+      expect(firstEvent().channel).toBe('direct');
+    });
+
+    it('un utm_content fourni par le SDK est conservé si pas de ?ref=', async () => {
+      const payload = createPayload({
+        actions: [createPageviewAction({ page_number: 1 })],
+        attributes: {
+          landing_page: 'https://app.example.com/login',
+          utm_content: 'sdk_banner',
+        },
+      });
+      await handler.handle(payload, null);
+      expect(firstEvent().utm_content).toBe('sdk_banner');
+    });
+  });
+
   describe('geo lookup', () => {
     it('applies geo data from IP lookup', async () => {
       geoService.lookupWithSettings.mockReturnValue({

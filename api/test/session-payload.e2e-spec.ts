@@ -685,4 +685,172 @@ describe('V3 Session Payload E2E', () => {
       expect(session.goal_count).toBe(1);
     });
   });
+
+  // ─── S6 Lot B — Canal referral interne `?ref=` (VRAI ClickHouse) ──────────
+  //
+  // Prouve que la branche 5bis de deriveChannel est CONSERVATRICE : elle
+  // récupère du `direct` perdu en `referral` SANS jamais masquer un canal plus
+  // riche. Le code parrain atterrit dans utm_content. 4 cas du ticket + 1 cas
+  // de désactivation par workspace.
+  //
+  // ⚠️ Sabotage : retirer le parsing `?ref=` dans buildBaseEvent OU la branche
+  //    5bis dans deriveChannel fait passer le cas (a) `referral` → `direct`
+  //    (channel) et vide utm_content → la spec vire au ROUGE. C'est la preuve
+  //    que le test mesure bien le fix et pas un mock.
+  describe('POST /api/track — canal referral interne ?ref= (S6 Lot B)', () => {
+    async function trackAndReadSession(
+      wsId: string,
+      key: string,
+      landingPage: string,
+      referrer?: string,
+    ): Promise<{
+      channel: string;
+      channel_group: string;
+      utm_content: string;
+    }> {
+      const sessionId = `sess-ref-${Date.now()}-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      const payload = createSessionPayload({
+        workspace_id: wsId,
+        session_id: sessionId,
+        actions: [createPageviewAction({ path: '/login', page_number: 1 })],
+        attributes: { landing_page: landingPage, ...(referrer ? { referrer } : {}) },
+      });
+
+      await request(ctx.app.getHttpServer())
+        .post('/api/track')
+        .send(payload)
+        .expect(200);
+
+      await eventBuffer.flushAll();
+      await waitForClickHouse();
+
+      // events row carries the derived channel + utm_content.
+      const evRes = await workspaceClient.query({
+        query: `SELECT channel, channel_group, utm_content
+                FROM events WHERE session_id = {sid:String} LIMIT 1`,
+        query_params: { sid: sessionId },
+        format: 'JSONEachRow',
+      });
+      const ev = (
+        await evRes.json<{
+          channel: string;
+          channel_group: string;
+          utm_content: string;
+        }>()
+      )[0];
+
+      // and it fans out to the sessions MV (any(e.channel) / any(e.utm_content)).
+      await waitForRowCount(
+        workspaceClient,
+        `SELECT count() as count FROM sessions FINAL WHERE id = '${sessionId}'`,
+        1,
+      );
+      const sessRes = await workspaceClient.query({
+        query: `SELECT channel, channel_group, utm_content
+                FROM sessions FINAL WHERE id = {sid:String} LIMIT 1`,
+        query_params: { sid: sessionId },
+        format: 'JSONEachRow',
+      });
+      const sess = (
+        await sessRes.json<{
+          channel: string;
+          channel_group: string;
+          utm_content: string;
+        }>()
+      )[0];
+
+      // events row IS the source of truth; assert the MV agrees with it.
+      expect(sess?.channel).toBe(ev?.channel);
+      expect(sess?.channel_group).toBe(ev?.channel_group);
+      expect(sess?.utm_content).toBe(ev?.utm_content);
+      return ev;
+    }
+
+    // (a) landing /login?ref=VHCRPP6X (referrer vide) → referral + utm_content.
+    it('(a) ?ref=VHCRPP6X seul → channel=referral, group=referral, utm_content=code', async () => {
+      const r = await trackAndReadSession(
+        testWorkspaceId,
+        apiKey,
+        'https://app.example.com/login?ref=VHCRPP6X',
+      );
+      expect(r.channel).toBe('referral');
+      expect(r.channel_group).toBe('referral');
+      expect(r.utm_content).toBe('VHCRPP6X');
+    });
+
+    // (c) ?ref= + vrai referrer Google → reste search-organic (referrer prime).
+    //     Le code parrain est tout de même conservé dans utm_content.
+    it('(c) ?ref= + referrer google.com → reste organic_search/seo (canal riche non masqué)', async () => {
+      const r = await trackAndReadSession(
+        testWorkspaceId,
+        apiKey,
+        'https://app.example.com/login?ref=VHCRPP6X',
+        'https://www.google.com/search?q=yoga',
+      );
+      expect(r.channel).toBe('organic_search');
+      expect(r.channel_group).toBe('seo');
+      // utm_content garde QUI parraine même si le canal est plus riche.
+      expect(r.utm_content).toBe('VHCRPP6X');
+    });
+
+    // (d) landing sans ?ref= → direct inchangé, utm_content vide.
+    it('(d) landing sans ?ref= → direct inchangé, utm_content vide', async () => {
+      const r = await trackAndReadSession(
+        testWorkspaceId,
+        apiKey,
+        'https://app.example.com/login',
+      );
+      expect(r.channel).toBe('direct');
+      expect(r.channel_group).toBe('direct');
+      expect(r.utm_content).toBe('');
+    });
+
+    // Configurable + désactivable par workspace (settings.referral_param).
+    describe('referral_param configurable par workspace', () => {
+      it('param custom "parrain" est parsé, "ref" ignoré', async () => {
+        const wsId = 'test_ws_ref_custom';
+        await createTestWorkspace(systemClient, wsId, {
+          settings: { referral_param: 'parrain' },
+        });
+        const key = await createTestApiKey(systemClient, wsId);
+
+        // ?parrain=ABC → referral
+        const r1 = await trackAndReadSession(
+          wsId,
+          key,
+          'https://app.example.com/login?parrain=ABC123',
+        );
+        expect(r1.channel).toBe('referral');
+        expect(r1.utm_content).toBe('ABC123');
+
+        // ?ref=ZZZ avec param custom "parrain" → le `ref` n'est PAS lu → direct
+        const r2 = await trackAndReadSession(
+          wsId,
+          key,
+          'https://app.example.com/login?ref=ZZZ',
+        );
+        expect(r2.channel).toBe('direct');
+        expect(r2.utm_content).toBe('');
+      });
+
+      it('referral_param="" DÉSACTIVE le parsing (?ref= ignoré → direct)', async () => {
+        const wsId = 'test_ws_ref_disabled';
+        await createTestWorkspace(systemClient, wsId, {
+          settings: { referral_param: '' },
+        });
+        const key = await createTestApiKey(systemClient, wsId);
+
+        const r = await trackAndReadSession(
+          wsId,
+          key,
+          'https://app.example.com/login?ref=VHCRPP6X',
+        );
+        expect(r.channel).toBe('direct');
+        expect(r.channel_group).toBe('direct');
+        expect(r.utm_content).toBe('');
+      });
+    });
+  });
 });
