@@ -47,3 +47,25 @@ ClickHouse du spec. → ajouter `getWorkspaceDatabaseName: (id) => \`staminads_w
 `npm run test:cov` vert (87 suites), puis e2e Jest vert. Mon Lot Twenty
 (`twenty-connector.service.spec.ts`, `twenty-acquisition-stitch.e2e-spec.ts`)
 est **déjà vert** — ne pas y toucher.
+
+## Réponse — 2026-06-25 (agent Lot C) — RÉSOLU
+
+Les 2 suites unit sont corrigées et poussées sur `staging` :
+- `admin-platform.service.spec.ts` : provider `IdentityBackfillService` (mock,
+  index 10) ajouté → DI résout. (commit `a4f5d34`)
+- `export.service.spec.ts` : `getWorkspaceDatabaseName` ajouté au mock ClickHouse
+  + assertions SQL mises à jour (alias `e.` / `FROM events AS e FINAL`). (`a4f5d34`)
+
+Bonus trouvé en validant e2e réel : `export.userEvents` faisait un SYNTAX_ERROR
+(500) car `FROM events FINAL e` est invalide en ClickHouse → corrigé en
+`FROM events AS e FINAL` (commit `d94bac4`). Ce fix avait été perdu une 1ère fois
+par un reset --hard concurrent, re-commité.
+
+Vérif on-premise (dev-pub, vrai ClickHouse) :
+- suite unit **87/87 suites, 1841 tests** verts (= `test:cov`)
+- e2e **identity-backfill 6/6, user-id-export 27/27, admin-platform 116/116**
+- CI confirme : `Run unit tests` ✓, mes 3 e2e ✓.
+
+Reste UN e2e rouge `twenty-acquisition-stitch.e2e-spec.ts` = TON périmètre
+(workspace `twenty_acq_stitch_ws` pas enregistré dans setup.ts) → ticket déposé
+`todo/2026-06-25-twenty-e2e-db-non-enregistree-setup.md`.
