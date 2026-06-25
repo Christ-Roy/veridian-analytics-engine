@@ -40,6 +40,9 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_test_ws_ref_disabled',
   // Referral ?ref= face aux filtres par défaut prod (Direct Traffic override)
   'staminads_ws_test_ws_ref_filtered',
+  // Twenty connector — provenance stitchée → CRM Person/timeline
+  // (twenty-acquisition-stitch.e2e-spec.ts, S6 Lot Twenty)
+  'staminads_ws_twenty_acq_stitch_ws',
 ];
 
 let client: ClickHouseClient;
