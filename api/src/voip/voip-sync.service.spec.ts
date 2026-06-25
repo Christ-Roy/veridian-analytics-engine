@@ -182,23 +182,35 @@ describe('VoipSyncService', () => {
   });
 
   it('uses an incremental window from lastSyncAt (pulls less than the 7d floor)', async () => {
-    const { sync, voip } = makeHarness(true);
-    const lastSyncAt = new Date('2026-06-20T12:00:00.000Z');
-    voip.findAllActiveCredentials.mockResolvedValue([
-      {
-        workspaceId: 'ws_1',
-        kind: 'voip_telnyx',
-        creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
-        lastSyncAt,
-      },
-    ]);
-    mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([]);
+    // Le window = max(lastSyncAt - overlap(2d), now - floor(7d)). Pour prouver
+    // que c'est bien la branche INCRÉMENTALE qui gagne, on fige l'horloge à un
+    // instant où `lastSyncAt - 2d` est PLUS RÉCENT que `now - 7d`. Sans gel,
+    // ce test devenait rouge dès que le wall-clock dépassait lastSyncAt+5j
+    // (le floor 7d rattrapait l'incrémental) — flake temporel pré-existant
+    // sans rapport avec la logique de prod (le clamp 7d est correct).
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-06-20T12:00:00.000Z'));
+    try {
+      const { sync, voip } = makeHarness(true);
+      const lastSyncAt = new Date('2026-06-20T12:00:00.000Z');
+      voip.findAllActiveCredentials.mockResolvedValue([
+        {
+          workspaceId: 'ws_1',
+          kind: 'voip_telnyx',
+          creds: { apiKey: 'KEYaaaabbbbcccc' } as never,
+          lastSyncAt,
+        },
+      ]);
+      mockedTelnyx.fetchTelnyxCdr.mockResolvedValue([]);
 
-    await sync.syncAll();
+      await sync.syncAll();
 
-    const opts = mockedTelnyx.fetchTelnyxCdr.mock.calls[0][1];
-    // since = lastSyncAt - overlap(2d) = 2026-06-18T12:00:00Z
-    expect(opts.since.toISOString()).toBe('2026-06-18T12:00:00.000Z');
+      const opts = mockedTelnyx.fetchTelnyxCdr.mock.calls[0][1];
+      // now - 7d = 2026-06-13 ; lastSyncAt - overlap(2d) = 2026-06-18 → incrémental gagne.
+      expect(opts.since.toISOString()).toBe('2026-06-18T12:00:00.000Z');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('falls back to the default 7d lookback when never synced', async () => {
