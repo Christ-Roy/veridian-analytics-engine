@@ -73,6 +73,32 @@ const AUDIT_SCROLL_THRESHOLD = 75;
 /** Identity resolution strategy resolved for a single event. */
 export type IdentityKind = 'email' | 'slug' | 'field';
 
+/**
+ * First-touch acquisition of an identified user, read by the CONNECTOR from the
+ * `user_attribution` table (Lot A identity stitching) and handed to the mapper.
+ *
+ * WHY this exists. The S4 `acquisitionSource(p)` below derives the channel from
+ * the EVENT itself. For a `signup` goal the event is the /login session, whose
+ * channel is legitimately `direct` → S4 returns `direct`, which is FALSE for the
+ * user's real acquisition. The TRUE acquisition lives on the user's FIRST
+ * (anonymous vitrine) session, recovered by `IdentityStitchService` into
+ * `user_attribution`. When the connector has that record, it passes it here so
+ * BOTH the timeline `acquisitionSource` property AND the Person field carry the
+ * stitched provenance instead of the brute /login channel. Best-effort: when no
+ * record exists yet (stitch async not done), the connector omits it → S4 fallback.
+ *
+ * `channel_group` is the coarse value (`ads|seo|social|email|referral|direct|
+ * other`) from `derive-channel.ts`; `channel` is the fine value (`paid_search`…).
+ */
+export interface FirstTouchAttribution {
+  /** user_attribution.first_touch_channel_group (coarse). */
+  channelGroup: string;
+  /** user_attribution.first_touch_channel (fine). */
+  channel: string;
+  /** user_attribution.referral_code (parrainage `?ref=`). */
+  referralCode: string;
+}
+
 export interface TrackedEventContext {
   workspace_id: string;
   event_type: string; // 'screen_view' | 'goal' | … (engine event.name)
@@ -126,6 +152,7 @@ export class TwentyEventMapper {
   mapAll(
     event: TrackedEventContext,
     config?: WorkspaceCrmMapping,
+    firstTouch?: FirstTouchAttribution,
   ): MappedTimelineEvent[] {
     const p = event.payload ?? {};
     const { identity, identityKind, identityField } = this.resolveIdentity(
@@ -162,7 +189,7 @@ export class TwentyEventMapper {
     if (names.length === 0) return [];
 
     const happensAt = this.resolveHappensAt(p);
-    const properties = this.buildProperties(event, p);
+    const properties = this.buildProperties(event, p, firstTouch);
     return names.map((name) => ({
       name,
       identity,
@@ -382,6 +409,39 @@ export class TwentyEventMapper {
     return 'direct';
   }
 
+  /**
+   * Normalize a STITCHED first-touch (`user_attribution`) into the SAME CRM
+   * vocabulary as `acquisitionSource(p)` so the timeline property and the Person
+   * field are consistent whether the value came from the event or the stitch.
+   *
+   * The stitch stores a coarse `channel_group` (`derive-channel.ts`:
+   * ads|seo|social|email|referral|direct|other) + a fine `channel`. We map the
+   * coarse group to the S4 acquisition vocabulary:
+   *   ads → google_ads ; seo → organic_seo ; social → social ;
+   *   email → email ; referral → referral ; direct/other/'' → direct.
+   *
+   * Returns '' when the first-touch carries no usable acquisition (direct/other/
+   * empty) — the caller then keeps the S4 event-based value (which may itself be
+   * direct, but we never DOWNGRADE a real source to direct here).
+   */
+  acquisitionFromFirstTouch(ft: FirstTouchAttribution): string {
+    const group = (ft.channelGroup || '').toLowerCase();
+    switch (group) {
+      case 'ads':
+        return 'google_ads';
+      case 'seo':
+        return 'organic_seo';
+      case 'social':
+        return 'social';
+      case 'email':
+        return 'email';
+      case 'referral':
+        return 'referral';
+      default:
+        return ''; // direct / other / empty → no acquisition to surface
+    }
+  }
+
   private isSearchEngine(domain: string): boolean {
     return /(^|\.)(google|bing|yahoo|duckduckgo|ecosia|qwant|yandex|baidu)\./.test(
       domain + '.',
@@ -417,6 +477,7 @@ export class TwentyEventMapper {
   private buildProperties(
     event: TrackedEventContext,
     p: Record<string, unknown>,
+    firstTouch?: FirstTouchAttribution,
   ): Record<string, unknown> {
     const props: Record<string, unknown> = {
       // Audit trail §4.3 — duplicates detectable, replay verifiable.
@@ -428,9 +489,18 @@ export class TwentyEventMapper {
     const utm = p.utm as Record<string, unknown> | undefined;
     if (utm?.source) props.utmSource = utm.source;
     if (utm?.campaign) props.utmCampaign = utm.campaign;
-    // S4 — normalized acquisition source + phone source on every milestone.
-    const acq = this.acquisitionSource(p);
+    // S6 — when the connector stitched a real first-touch (user_attribution),
+    // it is the TRUTH of the user's acquisition; it overrides the event-based S4
+    // value (which is the /login session = direct for a signup). We never
+    // DOWNGRADE: an empty stitched acquisition falls back to the S4 value.
+    const stitched = firstTouch
+      ? this.acquisitionFromFirstTouch(firstTouch)
+      : '';
+    const acq = stitched || this.acquisitionSource(p);
     if (acq) props.acquisitionSource = acq;
+    // Surface the parrainage code on the milestone too (Lot B `?ref=`), so the
+    // timeline carries it alongside the Person field.
+    if (firstTouch?.referralCode) props.referralCode = firstTouch.referralCode;
     const phoneSource = (p.properties as Record<string, unknown> | undefined)
       ?.source;
     if (

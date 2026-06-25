@@ -6,12 +6,14 @@ import {
   TwentyEventMapper,
   TrackedEventContext,
   MappedTimelineEvent,
+  FirstTouchAttribution,
 } from './twenty-event-mapper';
 import { TwentyClient } from './twenty-client';
 import { TwentyBudget } from './twenty-budget';
 import { deterministicTimelineId } from './deterministic-id';
 import { SsrfGuard } from '../../common/ssrf-guard';
 import { WorkspacesService } from '../../workspaces/workspaces.service';
+import { ClickHouseService } from '../../database/clickhouse.service';
 import type { WorkspaceCrmMapping } from '../../workspaces/entities/workspace.entity';
 
 /**
@@ -45,6 +47,13 @@ export interface ConnectorOutcome {
 const BATCH_SIZE = 60; // §4c.2
 const PERSON_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /**
+ * first-touch (`user_attribution`) read cache TTL. The record is first-touch =
+ * immutable once stitched, so a long TTL is safe; it only governs how soon a
+ * NEWLY-stitched record becomes visible to the connector (worst case: the user's
+ * next signup-class event after the TTL). Keyed per (workspace,user).
+ */
+const FIRST_TOUCH_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+/**
  * Default hard cap on the Person resolution cache. The key embeds the visitor
  * identity (email / slug), so on a high-traffic workspace the number of distinct
  * keys is effectively unbounded — TTL only governs reuse, it never evicts.
@@ -66,6 +75,12 @@ interface CachedCrmConfig {
   resolvedAt: number;
 }
 
+interface CachedFirstTouch {
+  /** undefined = looked up, no record yet (negative cache). */
+  attribution: FirstTouchAttribution | undefined;
+  resolvedAt: number;
+}
+
 /** Discriminated result of a Person resolution attempt. */
 type PersonResolution =
   | { status: 'found'; personId: string }
@@ -79,6 +94,15 @@ export class TwentyConnectorService {
   private readonly personCache = new Map<string, CachedPerson>();
   /** Per-workspace crm_mapping config cache (60s TTL). */
   private readonly crmConfigCache = new Map<string, CachedCrmConfig>();
+  /** first-touch (user_attribution) read cache, keyed by `${ws}:${userId}`. */
+  private readonly firstTouchCache = new Map<string, CachedFirstTouch>();
+  /**
+   * Marker set of `${ws}:${userId}` Persons whose acquisition has already been
+   * patched in this process with a given value — avoids re-PATCHing the same
+   * Person on every repeated signup-class event. Value = the acquisition string
+   * last written (so a NEW stitch value still re-patches).
+   */
+  private readonly acquisitionPatched = new Map<string, string>();
   /** Hard size cap for personCache (oldest-first eviction). ENV-overridable. */
   private readonly personCacheMaxSize: number;
 
@@ -87,6 +111,7 @@ export class TwentyConnectorService {
     private readonly config: ConfigService,
     private readonly workspaces: WorkspacesService,
     private readonly ssrf: SsrfGuard,
+    private readonly clickhouse: ClickHouseService,
   ) {
     const raw = parseInt(
       this.config.get<string>('TWENTY_PERSON_CACHE_MAX_SIZE') || '',
@@ -169,9 +194,32 @@ export class TwentyConnectorService {
     const crmConfig = await this.getCrmConfig(webhook.workspace_id);
 
     const activities: Array<{ deliveryId: string; mapped: MappedTimelineEvent; personId: string }> = [];
+    // Signup-class deliveries whose Person must receive the acquisition patch
+    // AFTER a successful timeline batch (personId + stitched provenance).
+    const acquisitionPatches = new Map<
+      string,
+      { personId: string; userId: string; firstTouch: FirstTouchAttribution }
+    >();
 
     for (const delivery of deliveries) {
-      const mappedList = this.mapDelivery(webhook, delivery, crmConfig);
+      const payload = this.parseBody(delivery.request_body);
+      const userId =
+        typeof payload.user_id === 'string' ? payload.user_id.trim() : '';
+
+      // S6 — read the user's stitched first-touch (user_attribution) so BOTH the
+      // timeline acquisitionSource property AND the Person field carry the real
+      // provenance instead of the /login channel. Best-effort: a missing record
+      // (stitch async not done yet) → undefined → S4 event-based fallback.
+      const firstTouch = userId
+        ? await this.getFirstTouch(webhook.workspace_id, userId)
+        : undefined;
+
+      const mappedList = this.mapDelivery(
+        webhook,
+        delivery,
+        crmConfig,
+        firstTouch,
+      );
       if (mappedList.length === 0) {
         // Not a timeline milestone (raw noise / unknown goal / no identity).
         // Treated as a success no-op so the delivery is not retried forever.
@@ -213,6 +261,18 @@ export class TwentyConnectorService {
       for (const mapped of mappedList) {
         activities.push({ deliveryId: delivery.id, mapped, personId: resolution.personId });
       }
+
+      // S6 — a signup-class event with a stitched acquisition → schedule a
+      // Person acquisition patch (deduped by Person; applied post-batch). We key
+      // on the GOAL (`signup`), not the milestone name (configurable per ws), so
+      // it works whatever timeline_name the workspace declared.
+      if (userId && firstTouch && this.isSignupClass(payload)) {
+        acquisitionPatches.set(resolution.personId, {
+          personId: resolution.personId,
+          userId,
+          firstTouch,
+        });
+      }
     }
 
     if (activities.length === 0) return outcome;
@@ -241,7 +301,20 @@ export class TwentyConnectorService {
     } catch (err) {
       this.logger.error(`Twenty batchTimeline failed (ws=${webhook.workspace_id}): ${(err as Error).message}`);
       for (const id of new Set(activities.map((a) => a.deliveryId))) outcome.failed.push(id);
+      // Timeline batch failed → do NOT patch Persons (the deliveries will retry,
+      // re-scheduling the patch). Acquisition is enrichment, never a failure.
+      return outcome;
     }
+
+    // S6 — enrich the Person fiche with the stitched acquisition (best-effort,
+    // AFTER a successful timeline batch). Never affects delivery classification:
+    // a patch failure leaves the timeline written and retries on the next signup.
+    await this.patchAcquisitions(
+      webhook.workspace_id,
+      acquisitionPatches,
+      client,
+      budget,
+    );
 
     return outcome;
   }
@@ -254,6 +327,7 @@ export class TwentyConnectorService {
     webhook: WebhookDefinition,
     delivery: WebhookDelivery,
     crmConfig: WorkspaceCrmMapping | undefined,
+    firstTouch?: FirstTouchAttribution,
   ): MappedTimelineEvent[] {
     const payload = this.parseBody(delivery.request_body);
     const ctx: TrackedEventContext = {
@@ -264,7 +338,12 @@ export class TwentyConnectorService {
       // request_body; the mapper reads payload fields (path, goal_name, user_id…).
       payload,
     };
-    return this.mapper.mapAll(ctx, crmConfig);
+    return this.mapper.mapAll(ctx, crmConfig, firstTouch);
+  }
+
+  /** A delivery is signup-class when its goal is `signup` (drives the Person patch). */
+  private isSignupClass(payload: Record<string, unknown>): boolean {
+    return String(payload.goal_name ?? '') === 'signup';
   }
 
   /**
@@ -292,6 +371,121 @@ export class TwentyConnectorService {
     }
     this.crmConfigCache.set(workspaceId, { config, resolvedAt: Date.now() });
     return config;
+  }
+
+  /**
+   * Read (and cache) a user's first-touch acquisition from `user_attribution`
+   * (Lot A identity stitching). Scoped to the workspace DB, parameterized,
+   * read-only. Returns undefined when no record exists yet (the stitch is async
+   * & best-effort — the user's next signup-class event picks it up) OR when the
+   * first-touch carries no usable acquisition. Never throws into the flush: a
+   * read failure degrades to the S4 event-based fallback.
+   *
+   * Negative results are cached too (short TTL) so a flush of many non-stitched
+   * deliveries doesn't hammer ClickHouse once per delivery.
+   */
+  private async getFirstTouch(
+    workspaceId: string,
+    userId: string,
+  ): Promise<FirstTouchAttribution | undefined> {
+    const key = `${workspaceId}:${userId}`;
+    const cached = this.firstTouchCache.get(key);
+    if (cached && Date.now() - cached.resolvedAt < FIRST_TOUCH_CACHE_TTL_MS) {
+      return cached.attribution;
+    }
+    let attribution: FirstTouchAttribution | undefined;
+    try {
+      const rows = await this.clickhouse.queryWorkspace<{
+        first_touch_channel: string;
+        first_touch_channel_group: string;
+        referral_code: string;
+      }>(
+        workspaceId,
+        `SELECT
+           argMax(first_touch_channel, updated_at)       AS first_touch_channel,
+           argMax(first_touch_channel_group, updated_at) AS first_touch_channel_group,
+           argMax(referral_code, updated_at)             AS referral_code
+         FROM user_attribution
+         WHERE identity_key = {user_id:String}`,
+        { user_id: userId },
+      );
+      const row = rows[0];
+      // A row with an empty/direct channel_group AND no referral_code carries no
+      // acquisition worth surfacing → treat as "no record" (S4 fallback).
+      if (
+        row &&
+        ((row.first_touch_channel_group &&
+          row.first_touch_channel_group !== 'direct' &&
+          row.first_touch_channel_group !== 'not-mapped') ||
+          row.referral_code)
+      ) {
+        attribution = {
+          channel: row.first_touch_channel || '',
+          channelGroup: row.first_touch_channel_group || '',
+          referralCode: row.referral_code || '',
+        };
+      }
+    } catch (err) {
+      this.logger.warn(
+        `user_attribution read failed (ws=${workspaceId}, user=${userId}): ${(err as Error).message} — S4 fallback`,
+      );
+      attribution = undefined;
+    }
+    this.cacheBounded(this.firstTouchCache, key, {
+      attribution,
+      resolvedAt: Date.now(),
+    });
+    return attribution;
+  }
+
+  /**
+   * Patch the acquisition fields of the signup-class Persons collected during
+   * this flush. Deduped by Person via the `acquisitionPatched` marker (skips a
+   * re-PATCH when the same Person already carries the same acquisition value).
+   * Each PATCH costs one budget token; out of budget → skipped (retried on the
+   * user's next signup). Best-effort: a failure never bubbles into delivery.
+   */
+  private async patchAcquisitions(
+    workspaceId: string,
+    patches: Map<
+      string,
+      { personId: string; userId: string; firstTouch: FirstTouchAttribution }
+    >,
+    client: TwentyClient,
+    budget: TwentyBudget,
+  ): Promise<void> {
+    for (const { personId, userId, firstTouch } of patches.values()) {
+      const acquisition = this.mapper.acquisitionFromFirstTouch(firstTouch);
+      // Build the acquisition-only field set. firstTouchChannel uses the same
+      // CRM vocabulary as the timeline acquisitionSource (google_ads/…). We
+      // never write an empty/direct acquisition (no DOWNGRADE).
+      const fields: Record<string, string> = {};
+      if (acquisition) fields.firstTouchChannel = acquisition;
+      if (firstTouch.referralCode) fields.referralCode = firstTouch.referralCode;
+      if (Object.keys(fields).length === 0) continue;
+
+      const markerKey = `${workspaceId}:${personId}`;
+      const signature = `${fields.firstTouchChannel ?? ''}|${fields.referralCode ?? ''}`;
+      if (this.acquisitionPatched.get(markerKey) === signature) continue; // already done
+
+      if (!budget.take()) {
+        // Out of budget for the patch → leave it for the next signup event.
+        return;
+      }
+      try {
+        const ok = await client.patchPersonAcquisition(personId, fields);
+        if (ok) {
+          this.cacheBounded(this.acquisitionPatched, markerKey, signature);
+          this.logger.log(
+            `acquisition patched ws=${workspaceId} user=${userId} person=${personId} ${signature}`,
+          );
+        }
+      } catch (err) {
+        this.logger.warn(
+          `patchPersonAcquisition failed (ws=${workspaceId}, person=${personId}): ${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   /**
@@ -341,6 +535,19 @@ export class TwentyConnectorService {
     this.personCache.set(key, { id, resolvedAt: Date.now() });
   }
 
+  /**
+   * Insert into any insertion-ordered Map with the same hard size cap + oldest-
+   * first eviction as `cachePerson`. Used for the first-touch read cache and the
+   * acquisition-patched marker set (both keyed by unbounded identities).
+   */
+  private cacheBounded<V>(map: Map<string, V>, key: string, value: V): void {
+    if (map.size >= this.personCacheMaxSize && !map.has(key)) {
+      const oldest = map.keys().next().value;
+      if (oldest !== undefined) map.delete(oldest);
+    }
+    map.set(key, value);
+  }
+
   private parseBody(raw: string): Record<string, unknown> {
     try {
       const parsed = JSON.parse(raw);
@@ -350,9 +557,11 @@ export class TwentyConnectorService {
     }
   }
 
-  /** Test seam — clears the per-tenant Person cache + crm config cache. */
+  /** Test seam — clears all per-tenant caches. */
   clearCache(): void {
     this.personCache.clear();
     this.crmConfigCache.clear();
+    this.firstTouchCache.clear();
+    this.acquisitionPatched.clear();
   }
 }

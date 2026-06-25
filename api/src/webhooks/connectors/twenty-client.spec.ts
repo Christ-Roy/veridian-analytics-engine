@@ -161,6 +161,55 @@ describe('TwentyClient', () => {
     });
   });
 
+  describe('patchPersonAcquisition (S6 — acquisition-only Person patch)', () => {
+    it('PATCHes /rest/people/:id with the acquisition fields', async () => {
+      fetchMock.mockResolvedValue(ok({}));
+      const okRes = await makeClient().patchPersonAcquisition('pJo', {
+        firstTouchChannel: 'google_ads',
+        referralCode: 'AB12',
+      });
+      expect(okRes).toBe(true);
+      const [url, init] = fetchMock.mock.calls[0];
+      expect(new URL(url).pathname).toBe('/rest/people/pJo');
+      expect(init.method).toBe('PATCH');
+      expect(JSON.parse(init.body)).toEqual({
+        firstTouchChannel: 'google_ads',
+        referralCode: 'AB12',
+      });
+    });
+
+    it('drops any non-acquisition field (single-writer guard — never writes score)', async () => {
+      fetchMock.mockResolvedValue(ok({}));
+      await makeClient().patchPersonAcquisition('p1', {
+        firstTouchChannel: 'referral',
+        score: '99', // must be stripped
+      } as Record<string, string>);
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+        firstTouchChannel: 'referral',
+      });
+    });
+
+    it('no-ops (no fetch) when there is no acquisition field to write', async () => {
+      const res = await makeClient().patchPersonAcquisition('p1', { score: '99' } as Record<string, string>);
+      expect(res).toBe(false);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('DRY_RUN logs and does NOT PATCH', async () => {
+      const res = await makeClient({ dryRun: true }).patchPersonAcquisition('p1', {
+        firstTouchChannel: 'google_ads',
+      });
+      expect(res).toBe(true);
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it('returns false on a non-ok response (never throws into the flush)', async () => {
+      fetchMock.mockResolvedValue(err(422, 'unknown field'));
+      const res = await makeClient().patchPersonAcquisition('p1', { firstTouchChannel: 'google_ads' });
+      expect(res).toBe(false);
+    });
+  });
+
   describe('multi-tenant isolation', () => {
     it('uses the per-instance baseUrl + bearer (no shared state)', async () => {
       fetchMock.mockResolvedValue(ok({ data: { people: [] } }));

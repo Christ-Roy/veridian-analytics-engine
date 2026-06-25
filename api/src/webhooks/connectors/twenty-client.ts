@@ -5,12 +5,18 @@ import { Logger } from '@nestjs/common';
  * `bridge/src/twenty-client.ts` TIMELINE path. The QUOI is frozen by
  * CONTRATS-TUNNEL §4c; this class is pure I/O against the Twenty REST API.
  *
- * ⚠️ SCOPE: timeline activities ONLY. The engine NEVER writes person.score —
- * the bridge tunnel is the single authority for the score (it fuses Notifuse
- * signals + uses a compare-and-set). Adding a patchPerson(score) here would
- * (a) break the "2 clics = 30 = chaud" invariant (engine has no Notifuse data)
- * and (b) create a double-writer lost-update. Frozen team-lead decision —
- * see CONTRATS-TUNNEL §4c.4 + task #5. Do NOT add a score write here.
+ * ⚠️ SCOPE: timeline activities + an ACQUISITION-ONLY Person patch. The engine
+ * NEVER writes person.score — the bridge tunnel is the single authority for the
+ * score (it fuses Notifuse signals + uses a compare-and-set). Adding a
+ * patchPerson(score) here would (a) break the "2 clics = 30 = chaud" invariant
+ * (engine has no Notifuse data) and (b) create a double-writer lost-update.
+ * Frozen team-lead decision — see CONTRATS-TUNNEL §4c.4 + task #5.
+ *
+ * S6 (2026-06-25): `patchPersonAcquisition` writes ONLY the first-touch
+ * acquisition fields (`firstTouchChannel` / `referralCode`) — a DISJOINT field
+ * set from `score`. Single-writer per field is preserved (engine owns
+ * acquisition, bridge owns score), so there is no lost-update. Do NOT add a
+ * `score` write here.
  *
  * Multi-tenant by construction: it is instantiated PER WEBHOOK with that
  * workspace's own base URL + decrypted Bearer. No shared singleton, no cross-
@@ -188,8 +194,54 @@ export class TwentyClient {
     throw new Error(`Twenty batchTimeline ${res.status}: ${body}`);
   }
 
-  // NOTE: no patchPerson() — the engine never writes person.score (the bridge
-  // is the single score authority). Cf class header + CONTRATS-TUNNEL §4c.4.
+  /**
+   * S6: patch the ACQUISITION fields of a Person — and ONLY those. The engine is
+   * the single writer of `firstTouchChannel` / `referralCode`; it NEVER touches
+   * `score` (bridge authority). The field set is whitelisted by the caller
+   * (connector) which builds it from the stitched `user_attribution` record.
+   *
+   * DRY_RUN: logged, not sent (same gate as batchTimeline). On success → true.
+   * A non-2xx is logged and returns false — a failed Person patch must NEVER
+   * fail the timeline batch (acquisition enrichment is best-effort, retried on
+   * the user's next signup-class event).
+   *
+   * @param personId resolved Twenty Person id.
+   * @param fields   acquisition-only fields, e.g. { firstTouchChannel, referralCode }.
+   */
+  async patchPersonAcquisition(
+    personId: string,
+    fields: Record<string, string>,
+  ): Promise<boolean> {
+    // Defensive: refuse anything that is not an acquisition field. Guarantees
+    // single-writer even if a future caller passes the wrong key (e.g. score).
+    const allowed = new Set(['firstTouchChannel', 'referralCode']);
+    const body: Record<string, string> = {};
+    for (const [k, v] of Object.entries(fields)) {
+      if (allowed.has(k) && v) body[k] = v;
+    }
+    if (Object.keys(body).length === 0) return false;
+
+    if (this.config.dryRun) {
+      this.logger.log(
+        `[DRY_RUN] PATCH /rest/people/${personId} acquisition=${JSON.stringify(body)}`,
+      );
+      return true;
+    }
+    const res = await fetch(
+      new URL(`/rest/people/${personId}`, this.config.baseUrl),
+      {
+        method: 'PATCH',
+        headers: this.headers,
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.timeout),
+      },
+    );
+    if (res.ok) return true;
+    this.logger.warn(
+      `Twenty patchPersonAcquisition ${res.status} (person=${personId}): ${await this.safeText(res)}`,
+    );
+    return false;
+  }
 
   /** Health probe used by the connector before a flush. */
   async reachable(): Promise<boolean> {

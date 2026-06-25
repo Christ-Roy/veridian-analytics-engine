@@ -83,10 +83,12 @@ function fakeClient(
   batches: any[][];
   resolves: string[];
   resolveCalls: Array<{ identity: string; kind?: string; field?: string }>;
+  patches: Array<{ personId: string; fields: Record<string, string> }>;
 } {
   const batches: any[][] = [];
   const resolves: string[] = [];
   const resolveCalls: Array<{ identity: string; kind?: string; field?: string }> = [];
+  const patches: Array<{ personId: string; fields: Record<string, string> }> = [];
   const client = {
     async resolvePerson(identity: string, kind?: string, field?: string) {
       resolves.push(identity);
@@ -96,8 +98,12 @@ function fakeClient(
     async batchTimeline(items: any[]) {
       batches.push(items);
     },
+    async patchPersonAcquisition(personId: string, fields: Record<string, string>) {
+      patches.push({ personId, fields });
+      return true;
+    },
   } as unknown as TwentyClient;
-  return { client, batches, resolves, resolveCalls };
+  return { client, batches, resolves, resolveCalls, patches };
 }
 
 /** Fake WorkspacesService returning a configurable crm_mapping per workspace. */
@@ -105,6 +111,43 @@ function fakeWorkspaces(crmByWs: Record<string, unknown> = {}) {
   return {
     async get(id: string) {
       return { id, settings: { crm_mapping: crmByWs[id] } };
+    },
+  } as any;
+}
+
+/**
+ * Fake ClickHouseService for the S6 first-touch read. By default
+ * `queryWorkspace` returns [] → no user_attribution record → the connector
+ * falls back to the S4 event-based acquisition (preserving every pre-S6 test).
+ * Tests that exercise stitching pass an `attribution` map keyed by user_id.
+ */
+function fakeClickhouse(
+  attribution: Record<
+    string,
+    {
+      first_touch_channel?: string;
+      first_touch_channel_group?: string;
+      referral_code?: string;
+    }
+  > = {},
+) {
+  return {
+    async queryWorkspace(
+      _ws: string,
+      _sql: string,
+      params?: Record<string, unknown>,
+    ) {
+      const userId = String(params?.user_id ?? '');
+      const row = attribution[userId];
+      return row
+        ? [
+            {
+              first_touch_channel: row.first_touch_channel ?? '',
+              first_touch_channel_group: row.first_touch_channel_group ?? '',
+              referral_code: row.referral_code ?? '',
+            },
+          ]
+        : [];
     },
   } as any;
 }
@@ -120,6 +163,7 @@ describe('TwentyConnectorService', () => {
       config,
       fakeWorkspaces(),
       stubSsrf(),
+      fakeClickhouse(),
     );
   });
 
@@ -147,7 +191,7 @@ describe('TwentyConnectorService', () => {
 
     it('global TWENTY_CONNECTOR_DRY_RUN forces dry-run', async () => {
       config = { get: (k: string) => (k === 'TWENTY_CONNECTOR_DRY_RUN' ? 'true' : undefined) } as unknown as ConfigService;
-      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf(), fakeClickhouse());
       expect(await connector.buildClient(twentyWebhook(), 's')).toBeInstanceOf(TwentyClient);
     });
 
@@ -181,14 +225,14 @@ describe('TwentyConnectorService', () => {
       config = {
         get: (k: string) => (k === 'WEBHOOK_ALLOW_PRIVATE_IPS' ? 'true' : undefined),
       } as unknown as ConfigService;
-      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf(), fakeClickhouse());
       const wh = twentyWebhook({ url: 'http://10.0.0.5' });
       // allowHttp also needed for an http:// private target.
       config = {
         get: (k: string) =>
           k === 'WEBHOOK_ALLOW_PRIVATE_IPS' || k === 'WEBHOOK_ALLOW_HTTP' ? 'true' : undefined,
       } as unknown as ConfigService;
-      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf());
+      connector = new TwentyConnectorService(new TwentyEventMapper(), config, fakeWorkspaces(), stubSsrf(), fakeClickhouse());
       const client = await connector.buildClient(wh, 's');
       expect(client).toBeInstanceOf(TwentyClient);
     });
@@ -413,6 +457,7 @@ describe('TwentyConnectorService', () => {
         config,
         fakeWorkspaces({ ws_yoga: crm }),
         stubSsrf(),
+        fakeClickhouse(),
       );
       const { client, batches } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
       const budget = new TwentyBudget(100, () => 0);
@@ -434,6 +479,7 @@ describe('TwentyConnectorService', () => {
         config,
         fakeWorkspaces({ ws_yoga: crm }),
         stubSsrf(),
+        fakeClickhouse(),
       );
       const { client, resolveCalls } = fakeClient(async () => ({ id: 'p9', doNotContact: false }));
       const budget = new TwentyBudget(100, () => 0);
@@ -463,6 +509,117 @@ describe('TwentyConnectorService', () => {
     });
   });
 
+  // ─── S6 — stitched first-touch in timeline + Person field (Lot Twenty) ────
+  describe('S6 stitched acquisition (user_attribution → timeline + Person)', () => {
+    function s6Connector(
+      attribution: Record<string, { first_touch_channel_group?: string; referral_code?: string }>,
+    ) {
+      return new TwentyConnectorService(
+        new TwentyEventMapper(),
+        config,
+        fakeWorkspaces(),
+        stubSsrf(),
+        fakeClickhouse(attribution),
+      );
+    }
+    const signup = (id: string, userId: string, over: Record<string, unknown> = {}) =>
+      delivery(id, { event_type: 'goal', goal_name: 'signup', user_id: userId, ...over });
+
+    it('signup with first_touch=ads → timeline AND Person field carry google_ads (not direct)', async () => {
+      // /login event carries NO referrer → S4 alone would emit `direct`. The
+      // stitched user_attribution row says the user's first touch was `ads`.
+      const conn = s6Connector({ 'jo@yoga.fr': { first_touch_channel_group: 'ads' } });
+      const { client, batches, patches } = fakeClient(async () => ({ id: 'pJo', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const out = await conn.flushBatch(twentyWebhook(), [signup('d1', 'jo@yoga.fr')], client, budget);
+
+      expect(out.written).toEqual(['d1']);
+      // Timeline property = stitched provenance, NOT the /login direct channel.
+      expect(batches[0][0]).toMatchObject({ name: 'signup', targetPersonId: 'pJo' });
+      expect(batches[0][0].properties.acquisitionSource).toBe('google_ads');
+      // Person field patched with the SAME vocabulary as the timeline.
+      expect(patches).toEqual([
+        { personId: 'pJo', fields: { firstTouchChannel: 'google_ads' } },
+      ]);
+    });
+
+    it('SABOTAGE: no user_attribution row → timeline keeps S4 fallback (direct) + NO Person patch', async () => {
+      // Empty attribution map → fakeClickhouse returns [] → S4 fallback on the
+      // /login event (no referrer) = direct, and no acquisition to patch.
+      const conn = s6Connector({});
+      const { client, batches, patches } = fakeClient(async () => ({ id: 'pX', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      await conn.flushBatch(twentyWebhook(), [signup('d1', 'x@y.fr')], client, budget);
+
+      // Proves the override is what produces `google_ads` above — without a
+      // stitch row the value is genuinely `direct`, not magically right.
+      expect(batches[0][0].properties.acquisitionSource).toBe('direct');
+      expect(patches).toEqual([]);
+    });
+
+    it('referral first-touch → Person carries firstTouchChannel=referral + referralCode', async () => {
+      const conn = s6Connector({
+        'val@yoga.fr': { first_touch_channel_group: 'referral', referral_code: 'VHCRPP6X' },
+      });
+      const { client, batches, patches } = fakeClient(async () => ({ id: 'pVal', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      await conn.flushBatch(twentyWebhook(), [signup('d1', 'val@yoga.fr')], client, budget);
+
+      expect(batches[0][0].properties).toMatchObject({
+        acquisitionSource: 'referral',
+        referralCode: 'VHCRPP6X',
+      });
+      expect(patches).toEqual([
+        { personId: 'pVal', fields: { firstTouchChannel: 'referral', referralCode: 'VHCRPP6X' } },
+      ]);
+    });
+
+    it('first_touch=direct → no acquisition surfaced, no DOWNGRADE patch', async () => {
+      // A stitched `direct`/`other` is no better than the /login channel → the
+      // connector treats it as "no record" and never patches a direct value.
+      const conn = s6Connector({ 'd@y.fr': { first_touch_channel_group: 'direct' } });
+      const { client, patches } = fakeClient(async () => ({ id: 'pD', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      await conn.flushBatch(twentyWebhook(), [signup('d1', 'd@y.fr')], client, budget);
+      expect(patches).toEqual([]);
+    });
+
+    it('non-signup goal is NOT patched even with a stitched row (patch is signup-class only)', async () => {
+      const conn = s6Connector({ 'a@b.com': { first_touch_channel_group: 'ads' } });
+      const { client, batches, patches } = fakeClient(async () => ({ id: 'p1', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      const d = delivery('d1', { event_type: 'goal', goal_name: 'rdv_booked', user_id: 'a@b.com' });
+      await conn.flushBatch(twentyWebhook(), [d], client, budget);
+      // The timeline STILL gets the stitched provenance (every milestone)…
+      expect(batches[0][0].properties.acquisitionSource).toBe('google_ads');
+      // …but the Person patch is reserved for signup-class events.
+      expect(patches).toEqual([]);
+    });
+
+    it('repeated signup for the same Person → patched once (deduped)', async () => {
+      const conn = s6Connector({ 'jo@yoga.fr': { first_touch_channel_group: 'ads' } });
+      const { client, patches } = fakeClient(async () => ({ id: 'pJo', doNotContact: false }));
+      const budget = new TwentyBudget(100, () => 0);
+      await conn.flushBatch(twentyWebhook(), [signup('d1', 'jo@yoga.fr')], client, budget);
+      await conn.flushBatch(twentyWebhook(), [signup('d2', 'jo@yoga.fr')], client, budget);
+      expect(patches).toHaveLength(1); // second flush is a no-op patch
+    });
+
+    it('a failed timeline batch does NOT patch the Person (acquisition follows the timeline)', async () => {
+      const conn = s6Connector({ 'jo@yoga.fr': { first_touch_channel_group: 'ads' } });
+      const { client, patches } = fakeClient(async () => ({ id: 'pJo', doNotContact: false }));
+      // Force the batch to throw.
+      (client as unknown as { batchTimeline: () => Promise<void> }).batchTimeline =
+        async () => {
+          throw new Error('boom');
+        };
+      const budget = new TwentyBudget(100, () => 0);
+      const out = await conn.flushBatch(twentyWebhook(), [signup('d1', 'jo@yoga.fr')], client, budget);
+      expect(out.failed).toEqual(['d1']);
+      expect(patches).toEqual([]);
+    });
+  });
+
   describe('personCache bounded (scale / OOM guard)', () => {
     it('never grows past the cap, evicting oldest-first', async () => {
       // Tiny cap so we exercise eviction with a handful of identities. The key
@@ -476,6 +633,7 @@ describe('TwentyConnectorService', () => {
         cappedConfig,
         fakeWorkspaces(),
         stubSsrf(),
+        fakeClickhouse(),
       );
 
       // Resolve 10 DISTINCT identities in one flush → 10 cache inserts, cap 3.

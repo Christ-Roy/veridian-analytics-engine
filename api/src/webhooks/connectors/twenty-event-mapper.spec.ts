@@ -346,4 +346,43 @@ describe('TwentyEventMapper', () => {
       expect(mapper.acquisitionSource({})).toBe('direct');
     });
   });
+
+  // ─── S6 — stitched first-touch overrides the event-based S4 channel ───────
+  describe('first-touch attribution (S6)', () => {
+    it('maps a stitched channel_group to the S4 vocabulary', () => {
+      const fp = (g: string) => ({ channelGroup: g, channel: '', referralCode: '' });
+      expect(mapper.acquisitionFromFirstTouch(fp('ads'))).toBe('google_ads');
+      expect(mapper.acquisitionFromFirstTouch(fp('seo'))).toBe('organic_seo');
+      expect(mapper.acquisitionFromFirstTouch(fp('social'))).toBe('social');
+      expect(mapper.acquisitionFromFirstTouch(fp('email'))).toBe('email');
+      expect(mapper.acquisitionFromFirstTouch(fp('referral'))).toBe('referral');
+      // direct / other / empty → '' (no acquisition to surface, S4 fallback)
+      expect(mapper.acquisitionFromFirstTouch(fp('direct'))).toBe('');
+      expect(mapper.acquisitionFromFirstTouch(fp('other'))).toBe('');
+      expect(mapper.acquisitionFromFirstTouch(fp(''))).toBe('');
+    });
+
+    it('a signup /login event (direct) gets the stitched provenance, not direct', () => {
+      // No referrer / utm on the event → S4 alone = direct. With a stitched
+      // first-touch the property becomes the real acquisition + referralCode.
+      const out = mapper.mapAll(
+        ctx({ payload: { goal_name: 'signup', user_id: 'jo@yoga.fr' } }),
+        undefined,
+        { channelGroup: 'ads', channel: 'paid_search', referralCode: 'AB12' },
+      );
+      expect(out[0].name).toBe('signup');
+      expect(out[0].properties).toMatchObject({
+        acquisitionSource: 'google_ads',
+        referralCode: 'AB12',
+      });
+    });
+
+    it('without a stitched first-touch the signup stays S4 direct', () => {
+      const out = mapper.mapAll(
+        ctx({ payload: { goal_name: 'signup', user_id: 'jo@yoga.fr' } }),
+      );
+      expect(out[0].properties.acquisitionSource).toBe('direct');
+      expect(out[0].properties.referralCode).toBeUndefined();
+    });
+  });
 });
