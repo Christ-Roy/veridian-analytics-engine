@@ -32,6 +32,10 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_funnel_conv_parity_ws',
   // Identity stitching first-touch e2e (identity-stitch.e2e-spec.ts)
   'staminads_ws_identity_stitch_ws',
+  // Canal referral interne ?ref= — configurabilité par workspace
+  // (session-payload.e2e-spec.ts, S6 Lot B)
+  'staminads_ws_test_ws_ref_custom',
+  'staminads_ws_test_ws_ref_disabled',
 ];
 
 let client: ClickHouseClient;
