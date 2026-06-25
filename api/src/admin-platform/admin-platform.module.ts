@@ -13,6 +13,7 @@ import { VoipModule } from '../voip/voip.module';
 import { GscModule } from '../gsc/gsc.module';
 import { WebhooksModule } from '../webhooks/webhooks.module';
 import { FiltersModule } from '../filters/filters.module';
+import { ExportModule } from '../export/export.module';
 
 /**
  * Module exposing platform-level (M2M) admin endpoints.
@@ -50,6 +51,9 @@ import { FiltersModule } from '../filters/filters.module';
     // S6 Lot C — IdentityBackfillService lives in FiltersModule (it re-uses
     // IdentityStitchService for the historical re-stitch).
     forwardRef(() => FiltersModule),
+    // prospect360 — reuses ExportService.getUserEvents (the per-user journey)
+    // under the platform key. ExportModule exports ExportService.
+    forwardRef(() => ExportModule),
   ],
   controllers: [AdminPlatformController],
   providers: [AdminPlatformService, PlatformAdminGuard, SsrfGuard],

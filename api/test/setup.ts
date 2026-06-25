@@ -43,6 +43,9 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // Twenty connector — provenance stitchée → CRM Person/timeline
   // (twenty-acquisition-stitch.e2e-spec.ts, S6 Lot Twenty)
   'staminads_ws_twenty_acq_stitch_ws',
+  // PROSPECT 360 — fiche 360 d'un prospect en 1 call M2M plateforme
+  // (prospect360.e2e-spec.ts) : provenance + journey + ads_conversions.
+  'staminads_ws_prospect360_test_ws',
 ];
 
 let client: ClickHouseClient;

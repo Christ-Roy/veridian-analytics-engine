@@ -48,6 +48,8 @@ import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
 import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
 import { UserProvenanceDto } from './dto/user-provenance.dto';
 import { UserProvenanceResponseDto } from './dto/user-provenance-response.dto';
+import { Prospect360Dto } from './dto/prospect360.dto';
+import { Prospect360ResponseDto } from './dto/prospect360-response.dto';
 import { IdentityBackfillDto } from './dto/identity-backfill.dto';
 import {
   CreateWebhookDto,
@@ -198,6 +200,27 @@ export class AdminPlatformController {
     @Body() dto: UserProvenanceDto,
   ): Promise<UserProvenanceResponseDto> {
     return this.adminPlatformService.userProvenance(dto);
+  }
+
+  @Post('analytics.prospect360')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'PROSPECT 360 (M2M) — the giga-complete fiche of ONE identified prospect ' +
+      'in a SINGLE platform-key call: provenance (où il vient), account (a-t-il ' +
+      'un compte), journey (ce qu\'il a fait, chronologique), ads_conversions ' +
+      '(ses conversions Google Ads). Composes the already-shipped reads under ' +
+      'ONE key — notably the per-user journey (export.userEvents) which was ' +
+      'reachable only with the WORKSPACE key, so the IA/Hub (platform key) could ' +
+      'never read the parcours. The detailed journey is bounded to the events ' +
+      'TTL (7d); the response echoes journey_window_days. Unknown user → ' +
+      'found:false + empty blocks (never a 500).',
+  })
+  analyticsProspect360(
+    @Body() dto: Prospect360Dto,
+  ): Promise<Prospect360ResponseDto> {
+    return this.adminPlatformService.prospect360(dto);
   }
 
   @Post('backfill.identity')
