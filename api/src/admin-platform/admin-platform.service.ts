@@ -38,6 +38,10 @@ import {
   PhoneNumberDto,
 } from './dto/provision-tenant.dto';
 import {
+  getWorkspaceTemplate,
+  type WorkspaceTemplateId,
+} from './templates/workspace-templates';
+import {
   PhoneNumberProvisionStatus,
   ProvisionTenantResponseDto,
 } from './dto/provision-tenant-response.dto';
@@ -280,6 +284,19 @@ export class AdminPlatformService {
       dto.phoneNumbers,
     );
 
+    // 6b. Provisioning template (optional). When the caller picked a per-industry
+    // template, apply its preset (accent color + feature flags + dashboard widget
+    // order + CRM funnel) right after the workspace exists. ONE settings update
+    // through the same path the M2M set* verbs use — the preset keys are fresh
+    // siblings on a workspace that has none, so the top-level merge in
+    // WorkspacesService.update only ADDS them (defaults untouched). Omitting the
+    // template = no preset = strictly the current back-compat behaviour.
+    //
+    // Best-effort: a preset is cosmetic/config — it must NEVER roll back an
+    // already-created tenant. On failure we log and continue; the workspace is
+    // live, the agent can re-apply the preset via the M2M set* verbs.
+    await this.applyProvisioningTemplate(workspaceId, dto.template);
+
     // 7. Magic-link password reset email.
     const passwordResetUrl = await this.createPasswordResetAndEmail(
       createdUserId!,
@@ -301,6 +318,47 @@ export class AdminPlatformService {
       phone_numbers: phoneStatus,
       user_created: true,
     };
+  }
+
+  /**
+   * Apply a per-industry provisioning template preset to a freshly-created
+   * workspace (step 6b of provisionTenant). Writes branding + features +
+   * dashboard_layout + crm_mapping in ONE settings update — the same path the
+   * M2M set* verbs use.
+   *
+   * Best-effort by design: a preset is config/cosmetic, so a failure here must
+   * NEVER unwind an already-live tenant (the user + workspace + key already
+   * exist and the magic-link is about to be sent). On failure we log and return;
+   * the workspace is fully usable and the agent can re-apply the preset via the
+   * customization verbs. A no-op when `template` is absent or unknown (the DTO
+   * already 400s an unknown id, so `getWorkspaceTemplate` returning undefined
+   * here means simply "no template requested").
+   */
+  private async applyProvisioningTemplate(
+    workspaceId: string,
+    template?: WorkspaceTemplateId,
+  ): Promise<void> {
+    const preset = getWorkspaceTemplate(template);
+    if (!preset) return;
+    try {
+      await this.workspacesService.update({
+        id: workspaceId,
+        settings: {
+          branding: preset.branding,
+          features: preset.features,
+          dashboard_layout: preset.dashboard_layout,
+          crm_mapping: preset.crm_mapping,
+        },
+      });
+      this.logger.log(
+        `[provision] applied template "${template}" preset to ${workspaceId}`,
+      );
+    } catch (err) {
+      this.logger.error(
+        `[provision] template "${template}" preset failed for ${workspaceId} ` +
+          `(workspace is live; re-apply via set* verbs): ${(err as Error).message}`,
+      );
+    }
   }
 
   /**

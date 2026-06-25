@@ -13,6 +13,10 @@ import { Type } from 'class-transformer';
 import { IsIanaTimezone } from '../../common/validators/timezone.validator';
 import { IsIso4217Currency } from '../../common/validators/currency.validator';
 import { IsE164 } from '../../common/validators/e164.validator';
+import {
+  WORKSPACE_TEMPLATE_IDS,
+  type WorkspaceTemplateId,
+} from '../templates/workspace-templates';
 
 /** Workspace id slug regex — must match CreateWorkspaceDto (`^[a-z][a-z0-9_]*$`). */
 export const WORKSPACE_ID_REGEX = /^[a-z][a-z0-9_]*$/;
@@ -125,4 +129,23 @@ export class ProvisionTenantDto {
   @ValidateNested({ each: true })
   @Type(() => PhoneNumberDto)
   phoneNumbers?: PhoneNumberDto[];
+
+  /**
+   * OPTIONAL per-industry provisioning template. When provided, the matching
+   * preset (branding accent + feature flags + dashboard widget order + CRM
+   * funnel) is applied to the fresh workspace right after creation — adapting
+   * the native staminads app to the client's business WITHOUT a code change
+   * (vision figée 2026-05-23: customise via settings/onglets, jamais de page
+   * custom). Closed list validated here so a typo (e.g. "ecom") is a 400, never
+   * a silently-ignored preset.
+   *
+   * Omitted → NO preset = strictly the current behaviour (back-compat): a fresh
+   * workspace keeps the default Veridian branding, every tab visible, default
+   * widget order, built-in prospection CRM fallback.
+   */
+  @IsOptional()
+  @IsIn([...WORKSPACE_TEMPLATE_IDS], {
+    message: `template must be one of: ${WORKSPACE_TEMPLATE_IDS.join(', ')}`,
+  })
+  template?: WorkspaceTemplateId;
 }

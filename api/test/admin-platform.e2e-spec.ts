@@ -266,6 +266,157 @@ describe('Admin Platform — POST /api/admin/platform/tenants.provision', () => 
     expect(response.body.phone_numbers[1].status).toBe('skipped_no_bridge');
   });
 
+  // ─── Provisioning templates (per-industry presets) ───────────────────────
+  // Real ClickHouse: provision WITH a template → getCustomization reflects the
+  // preset (branding + features + layout + crm). SABOTAGE: provision WITHOUT a
+  // template → customization stays empty (back-compat). A typo'd template = 400.
+  describe('tenants.provision with --template (per-industry preset)', () => {
+    const getCustomization = (wsId: string) =>
+      request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/workspaces.getCustomization')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({ workspace_id: wsId })
+        .expect(200)
+        .then((r) => r.body);
+
+    it('applies the ecommerce preset (branding+features+layout+crm) at provisioning', async () => {
+      const prov = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: 'shop@example.com',
+          siteUrl: 'https://shop.example.com',
+          name: 'E2E Shop',
+          template: 'ecommerce',
+        })
+        .expect(201);
+
+      const wsId = prov.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+      const cust = await getCustomization(wsId);
+
+      // Branding accent applied.
+      expect(cust.branding).toEqual({ color: '#2563eb' });
+      // E-commerce sells online → VoIP off, GSC + connectors on.
+      expect(cust.features).toEqual({
+        voip: false,
+        gsc: true,
+        connectors: true,
+      });
+      // Dashboard reordered conversion-first (goals on top), all 8 native widgets.
+      expect(cust.dashboard_layout.order).toEqual([
+        'goals',
+        'pages',
+        'sources',
+        'campaigns',
+        'devices',
+        'countries',
+        'page_views',
+        'heatmap',
+      ]);
+      expect(cust.dashboard_layout.hidden_widgets).toBeUndefined();
+      // CRM funnel = the purchase journey.
+      expect(cust.crm_mapping.identity_resolver).toBe('auto');
+      expect(cust.crm_mapping.map_phone_calls).toBe(true);
+      expect(cust.crm_mapping.phone_call_timeline_name).toBe('appel');
+      expect(cust.crm_mapping.goals).toEqual([
+        { match: 'goal:add_to_cart', timeline_name: 'panier' },
+        { match: 'goal:checkout_start', timeline_name: 'checkout' },
+        { match: 'goal:purchase', timeline_name: 'achat' },
+        { match: 'goal:newsletter_signup', timeline_name: 'newsletter' },
+      ]);
+    });
+
+    it('applies the vitrine preset (VoIP on + contact/rdv funnel)', async () => {
+      const prov = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: 'resto@example.com',
+          siteUrl: 'https://resto.example.com',
+          name: 'E2E Resto',
+          template: 'vitrine',
+        })
+        .expect(201);
+
+      const wsId = prov.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+      const cust = await getCustomization(wsId);
+
+      expect(cust.branding).toEqual({ color: '#0d9488' });
+      // The phone is THE conversion channel for a local vitrine → VoIP ON.
+      expect(cust.features.voip).toBe(true);
+      // Contact/rdv/appel funnel.
+      expect(cust.crm_mapping.goals).toEqual([
+        { match: 'goal:appointment_click', timeline_name: 'demande_rdv' },
+        { match: 'goal:rdv_booked', timeline_name: 'rdv_confirme' },
+        { match: 'goal:form_submission', timeline_name: 'contact' },
+      ]);
+      expect(cust.crm_mapping.map_phone_calls).toBe(true);
+    });
+
+    it('applies the webapp preset (email identity, signup→activation, no phone funnel)', async () => {
+      const prov = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: 'saas@example.com',
+          siteUrl: 'https://saas.example.com',
+          name: 'E2E Saas',
+          template: 'webapp',
+        })
+        .expect(201);
+
+      const wsId = prov.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+      const cust = await getCustomization(wsId);
+
+      expect(cust.features.voip).toBe(false);
+      expect(cust.crm_mapping.identity_resolver).toBe('email');
+      expect(cust.crm_mapping.map_phone_calls).toBe(false);
+      expect(cust.crm_mapping.goals).toEqual([
+        { match: 'goal:signup', timeline_name: 'inscription' },
+        { match: 'goal:app_started', timeline_name: 'activation' },
+      ]);
+    });
+
+    // SABOTAGE — without a template, the workspace must keep ZERO customization
+    // (back-compat). If this ever returns a preset, the default behaviour broke.
+    it('applies NO preset when --template is omitted (back-compat)', async () => {
+      const prov = await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: 'plain@example.com',
+          siteUrl: 'https://plain.example.com',
+          name: 'E2E Plain',
+        })
+        .expect(201);
+
+      const wsId = prov.body.workspace_id;
+      await waitForMutations(ctx.systemClient, 'workspaces');
+      const cust = await getCustomization(wsId);
+
+      expect(cust.branding).toBeNull();
+      expect(cust.features).toBeNull();
+      expect(cust.dashboard_layout).toBeNull();
+      expect(cust.crm_mapping).toBeNull();
+    });
+
+    it('rejects an unknown template id with 400 (closed list)', async () => {
+      await request(ctx.app.getHttpServer())
+        .post('/api/admin/platform/tenants.provision')
+        .set('Authorization', `Bearer ${PLATFORM_KEY}`)
+        .send({
+          email: 'bad@example.com',
+          siteUrl: 'https://bad.example.com',
+          name: 'E2E Bad Template',
+          template: 'ecom', // not a known id
+        })
+        .expect(400);
+    });
+  });
+
   describe('POST /api/admin/platform/workspaces.provisionApiKey', () => {
     it('returns 401 without a Bearer token', async () => {
       await request(ctx.app.getHttpServer())
