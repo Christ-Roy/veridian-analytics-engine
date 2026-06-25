@@ -77,6 +77,13 @@ import {
   UserProvenanceResponseDto,
   UserProvenanceRowRaw,
 } from './dto/user-provenance-response.dto';
+import { Prospect360Dto } from './dto/prospect360.dto';
+import {
+  Prospect360JourneyStep,
+  Prospect360ResponseDto,
+} from './dto/prospect360-response.dto';
+import { ExportService } from '../export/export.service';
+import { UserEventRow } from '../export/dto/user-events-query.dto';
 
 const PASSWORD_RESET_EXPIRY_HOURS = 24;
 const MAX_SLUG_COLLISION_ATTEMPTS = 50;
@@ -154,6 +161,7 @@ export class AdminPlatformService {
     private readonly webhooksService: WebhooksService,
     private readonly webhookDeliveryWorker: WebhookDeliveryWorker,
     private readonly ssrf: SsrfGuard,
+    private readonly exportService: ExportService,
   ) {}
 
   /**
@@ -567,6 +575,185 @@ export class AdminPlatformService {
         last_touch_at: r.last_touch_at || null,
         referral_code: r.referral_code || '',
       })),
+    };
+  }
+
+  /**
+   * `analytics.prospect360` (M2M) — the giga-complete fiche of ONE identified
+   * prospect in a SINGLE platform-key call. Pure composition over three
+   * already-shipped read paths (zero query duplicated, zero collection added):
+   *
+   *   • provenance      → this.userProvenance (user_attribution, first/last touch)
+   *   • journey         → this.exportService.getUserEvents (chronological events)
+   *   • ads_conversions → this.getAdsConversions, filtered on this user
+   *
+   * THE TROU IT FIXES: getUserEvents (the journey) was reachable only with the
+   * WORKSPACE key (stam_live_*). The IA / the Hub hold the PLATFORM key
+   * (PLATFORM_ADMIN_API_KEY) and therefore could never read the parcours.
+   * prospect360 lives under PlatformAdminGuard → unblocks them.
+   *
+   * Fail-soft per block (same pattern as getConsolidatedStatus): an unknown
+   * user yields found:false + empty blocks, never a 500. Each sub-read is
+   * isolated so one empty/failing block degrades to its safe default instead of
+   * sinking the whole fiche.
+   *
+   * JOURNEY WINDOW: events carry a 7-day TTL (raw rows are deleted past that),
+   * so the DETAILED parcours is bounded to the last `journey_days` (≤7) and the
+   * response echoes `journey_window_days` so the consumer knows the parcours is
+   * "last N days" only — aggregates (sessions 30d, user_attribution, ads) live
+   * beyond. We do NOT change the TTL here (business arbitration).
+   */
+  async prospect360(dto: Prospect360Dto): Promise<Prospect360ResponseDto> {
+    await this.assertWorkspaceExists(dto.workspace_id);
+
+    const journeyDays = dto.journey_days ?? 7;
+    const journeyLimit = dto.journey_limit ?? 500;
+
+    // 1. Provenance — reuse userProvenance (one-row filter on this user).
+    const provenanceResp = await this.userProvenance({
+      workspace_id: dto.workspace_id,
+      user: dto.user,
+      limit: 1,
+    });
+    const provenance = provenanceResp.users[0] ?? null;
+
+    // 2. Journey — reuse ExportService.getUserEvents (chronological events of
+    //    THIS user_id), paginating the cursor until the cap is reached. The
+    //    export requires `since`/`until`; we bound `since` at the TTL window so
+    //    we never scan beyond what exists.
+    const until = new Date();
+    const since = new Date(until.getTime() - journeyDays * 86_400_000);
+    const { steps: journey, truncated: journeyTruncated } =
+      await this.collectJourney(
+        dto.workspace_id,
+        dto.user,
+        since.toISOString(),
+        until.toISOString(),
+        journeyLimit,
+      );
+
+    // 3. Ads conversions — reuse getAdsConversions, then keep only this user's.
+    //    Look back over the journey window so the Ads block aligns with the
+    //    parcours the consumer sees (gclid/phone conversions of this prospect).
+    let adsConversions: Prospect360ResponseDto['ads_conversions'] = [];
+    try {
+      const adsResp = await this.getAdsConversions({
+        workspace_id: dto.workspace_id,
+        from: since.toISOString(),
+        to: until.toISOString(),
+        limit: ADS_MAX_LIMIT,
+      });
+      adsConversions = adsResp.conversions.filter(
+        (c) => c.user_id === dto.user,
+      );
+    } catch (err) {
+      // Fail-soft: a failing Ads sub-read must not sink the whole fiche.
+      this.logger.warn(
+        `prospect360: ads sub-read failed for ${dto.workspace_id}/${dto.user}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    const found =
+      provenance !== null || journey.length > 0 || adsConversions.length > 0;
+
+    return {
+      workspace_id: dto.workspace_id,
+      user: dto.user,
+      found,
+      provenance,
+      account: {
+        created: provenance !== null,
+        user_id: provenance ? provenance.user_id : found ? dto.user : null,
+        first_seen_at: provenance ? provenance.first_touch_at : null,
+      },
+      journey_window_days: journeyDays,
+      journey_truncated: journeyTruncated,
+      journey,
+      ads_conversions: adsConversions,
+    };
+  }
+
+  /**
+   * Drain ExportService.getUserEvents for ONE user across cursor pages until the
+   * cap is hit or the source is exhausted, then project each raw event onto the
+   * lean chronological journey step. Events come back oldest→newest already
+   * (export ORDER BY updated_at ASC), so concatenation preserves chronology.
+   */
+  private async collectJourney(
+    workspaceId: string,
+    userId: string,
+    since: string,
+    until: string,
+    cap: number,
+  ): Promise<{ steps: Prospect360JourneyStep[]; truncated: boolean }> {
+    const steps: Prospect360JourneyStep[] = [];
+    let cursor: string | undefined;
+    let truncated = false;
+
+    // Hard ceiling on pages to bound the loop even if the source misbehaves.
+    // Each page returns ≤ export limit (we ask for the remaining budget, capped
+    // at the export DTO max of 1000).
+    const MAX_PAGES = 50;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const remaining = cap - steps.length;
+      if (remaining <= 0) {
+        truncated = true;
+        break;
+      }
+      const pageLimit = Math.min(remaining, 1000);
+
+      let resp;
+      try {
+        resp = await this.exportService.getUserEvents({
+          workspace_id: workspaceId,
+          user_id: userId,
+          since: cursor ? undefined : since,
+          until,
+          cursor,
+          limit: pageLimit,
+        });
+      } catch (err) {
+        // Fail-soft: a failing journey read degrades to whatever we gathered.
+        this.logger.warn(
+          `prospect360: journey sub-read failed for ${workspaceId}/${userId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        break;
+      }
+
+      for (const e of resp.data) {
+        steps.push(this.toJourneyStep(e));
+      }
+
+      if (!resp.has_more || !resp.next_cursor) break;
+      cursor = resp.next_cursor;
+      if (steps.length >= cap) {
+        truncated = true;
+        break;
+      }
+    }
+
+    return { steps, truncated };
+  }
+
+  /** Project a raw export event row onto the lean prospect360 journey step. */
+  private toJourneyStep(e: UserEventRow): Prospect360JourneyStep {
+    const isGoal = e.name === 'goal';
+    return {
+      type: e.name,
+      at: e.created_at,
+      path: e.path,
+      session_id: e.session_id,
+      goal_name: isGoal ? e.goal_name || null : null,
+      goal_value: isGoal ? Number(e.goal_value ?? 0) : null,
+      channel_group: e.channel_group || '',
+      duration: Number(e.duration ?? 0),
+      max_scroll: Number(e.max_scroll ?? 0),
+      page_number: Number(e.page_number ?? 0),
+      properties: e.properties ?? {},
     };
   }
 

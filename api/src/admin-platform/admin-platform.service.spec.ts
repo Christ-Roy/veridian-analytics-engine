@@ -24,6 +24,7 @@ import { IdentityBackfillService } from '../filters/backfill/identity-backfill.s
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
 import { SsrfGuard } from '../common/ssrf-guard';
+import { ExportService } from '../export/export.service';
 
 describe('AdminPlatformService.provisionTenant', () => {
   let service: AdminPlatformService;
@@ -39,6 +40,7 @@ describe('AdminPlatformService.provisionTenant', () => {
   let gscService: jest.Mocked<GscService>;
   let webhooksService: jest.Mocked<WebhooksService>;
   let webhookDeliveryWorker: jest.Mocked<WebhookDeliveryWorker>;
+  let exportService: jest.Mocked<ExportService>;
 
   /**
    * Stub DNS resolver backing the injected SsrfGuard. Mutable so individual
@@ -196,6 +198,15 @@ describe('AdminPlatformService.provisionTenant', () => {
               ssrfResolve(hostname),
             ),
         },
+        // prospect360 injects ExportService (reuses getUserEvents for the
+        // per-user journey). Mock it so this unit module resolves; the real
+        // journey composition is covered by prospect360.e2e-spec.ts.
+        {
+          provide: ExportService,
+          useValue: {
+            getUserEvents: jest.fn(),
+          },
+        },
       ],
     }).compile();
 
@@ -212,6 +223,7 @@ describe('AdminPlatformService.provisionTenant', () => {
     gscService = module.get(GscService);
     webhooksService = module.get(WebhooksService);
     webhookDeliveryWorker = module.get(WebhookDeliveryWorker);
+    exportService = module.get(ExportService);
 
     jest.clearAllMocks();
     // Re-stub after clearAllMocks
@@ -1018,6 +1030,195 @@ describe('AdminPlatformService.provisionTenant', () => {
       await expect(
         service.getCustomization({ workspace_id: 'ghost' }),
       ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+    });
+  });
+
+  // ─── PROSPECT 360 — fiche par prospect (compose provenance+journey+ads) ──
+
+  describe('prospect360 (M2M)', () => {
+    it('404s on a missing workspace (no sub-read)', async () => {
+      clickhouse.querySystem.mockResolvedValue([]); // not exists
+      await expect(
+        service.prospect360({ workspace_id: 'ws_ghost', user: 'a@b.c' }),
+      ).rejects.toMatchObject({ response: { error: 'workspace_not_found' } });
+      expect(clickhouse.queryWorkspace).not.toHaveBeenCalled();
+      expect(exportService.getUserEvents).not.toHaveBeenCalled();
+    });
+
+    it('unknown user → found:false, empty blocks, no throw (sabotage)', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      clickhouse.queryWorkspace.mockResolvedValue([] as never); // no provenance, no ads
+      exportService.getUserEvents.mockResolvedValue({
+        data: [],
+        next_cursor: null,
+        has_more: false,
+      });
+
+      const res = await service.prospect360({
+        workspace_id: 'ws1',
+        user: 'ghost@x.y',
+      });
+
+      expect(res.found).toBe(false);
+      expect(res.provenance).toBeNull();
+      expect(res.account).toMatchObject({ created: false, user_id: null });
+      expect(res.journey).toEqual([]);
+      expect(res.ads_conversions).toEqual([]);
+      expect(res.journey_window_days).toBe(7);
+    });
+
+    it('composes provenance + journey + this-user ads in one shape', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      // queryWorkspace serves TWO reads: userProvenance then getAdsConversions.
+      (clickhouse.queryWorkspace as jest.Mock)
+        // 1) userProvenance → one stitched row
+        .mockResolvedValueOnce([
+          {
+            identity_key: 'lea@client.fr',
+            user_id: 'lea@client.fr',
+            first_touch_channel: 'organic_search',
+            first_touch_channel_group: 'seo',
+            first_touch_at: '2026-06-20 09:00:00.000',
+            first_touch_method: 'fingerprint',
+            referral_code: '',
+          },
+        ])
+        // 2) getAdsConversions → one gclid conversion for THIS user + one for another
+        .mockResolvedValueOnce([
+          {
+            click_id_source: 'gclid',
+            click_id: 'GCLID_LEA',
+            conversion_type: 'form_submission',
+            timestamp: '2026-06-24 12:00:00.000',
+            value: 99,
+            user_id: 'lea@client.fr',
+            path: '/lp',
+            phone_number: '',
+          },
+          {
+            click_id_source: 'gclid',
+            click_id: 'GCLID_OTHER',
+            conversion_type: 'form_submission',
+            timestamp: '2026-06-24 13:00:00.000',
+            value: 10,
+            user_id: 'someone-else@x.y',
+            path: '/lp',
+            phone_number: '',
+          },
+        ]);
+      // journey: 2 events for this user, single page (no more)
+      exportService.getUserEvents.mockResolvedValue({
+        data: [
+          {
+            id: 'e1',
+            session_id: 's1',
+            user_id: 'lea@client.fr',
+            name: 'screen_view',
+            path: '/blog',
+            created_at: '2026-06-24 11:58:00.000',
+            updated_at: '2026-06-24 11:58:00.000',
+            channel_group: 'seo',
+            duration: 5000,
+            max_scroll: 60,
+            page_number: 1,
+            goal_name: '',
+            goal_value: 0,
+            properties: {},
+          },
+          {
+            id: 'e2',
+            session_id: 's1',
+            user_id: 'lea@client.fr',
+            name: 'goal',
+            path: '/lp',
+            created_at: '2026-06-24 12:00:00.000',
+            updated_at: '2026-06-24 12:00:00.000',
+            channel_group: 'ads',
+            duration: 0,
+            max_scroll: 0,
+            page_number: 1,
+            goal_name: 'form_submission',
+            goal_value: 99,
+            properties: { source: 'ads' },
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      } as never);
+
+      const res = await service.prospect360({
+        workspace_id: 'ws1',
+        user: 'lea@client.fr',
+      });
+
+      expect(res.found).toBe(true);
+      expect(res.account).toMatchObject({
+        created: true,
+        user_id: 'lea@client.fr',
+      });
+      expect(res.provenance).toMatchObject({
+        first_touch_channel_group: 'seo',
+      });
+      // journey projected + chronological
+      expect(res.journey).toHaveLength(2);
+      expect(res.journey[0]).toMatchObject({ type: 'screen_view', path: '/blog' });
+      expect(res.journey[1]).toMatchObject({
+        type: 'goal',
+        goal_name: 'form_submission',
+        goal_value: 99,
+      });
+      // ads filtered to THIS user only (the other-user conversion is dropped)
+      expect(res.ads_conversions).toHaveLength(1);
+      expect(res.ads_conversions[0]).toMatchObject({
+        click_id: 'GCLID_LEA',
+        user_id: 'lea@client.fr',
+      });
+      // journey read was scoped to the user
+      const journeyArg = (exportService.getUserEvents as jest.Mock).mock
+        .calls[0][0];
+      expect(journeyArg.workspace_id).toBe('ws1');
+      expect(journeyArg.user_id).toBe('lea@client.fr');
+    });
+
+    it('a failing ads sub-read degrades to [] without sinking the fiche', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      (clickhouse.queryWorkspace as jest.Mock)
+        .mockResolvedValueOnce([]) // provenance empty
+        .mockRejectedValueOnce(new Error('clickhouse boom')); // ads read throws
+      exportService.getUserEvents.mockResolvedValue({
+        data: [
+          {
+            id: 'e1',
+            session_id: 's1',
+            user_id: 'u@x.y',
+            name: 'screen_view',
+            path: '/',
+            created_at: '2026-06-24 11:00:00.000',
+            updated_at: '2026-06-24 11:00:00.000',
+            channel_group: 'direct',
+            duration: 1000,
+            max_scroll: 10,
+            page_number: 1,
+            goal_name: '',
+            goal_value: 0,
+            properties: {},
+          },
+        ],
+        next_cursor: null,
+        has_more: false,
+      } as never);
+
+      const res = await service.prospect360({
+        workspace_id: 'ws1',
+        user: 'u@x.y',
+      });
+
+      // journey present → found:true even though ads threw and provenance empty
+      expect(res.found).toBe(true);
+      expect(res.ads_conversions).toEqual([]);
+      expect(res.journey).toHaveLength(1);
+      expect(res.provenance).toBeNull();
+      expect(res.account.created).toBe(false);
     });
   });
 
