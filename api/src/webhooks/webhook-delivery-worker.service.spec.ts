@@ -10,6 +10,7 @@ import { TwentyConnectorService } from './connectors/twenty-connector.service';
 import { TwentyEventMapper } from './connectors/twenty-event-mapper';
 import { TwentyBudget } from './connectors/twenty-budget';
 import { WorkspacesService } from '../workspaces/workspaces.service';
+import { ClickHouseService } from '../database/clickhouse.service';
 
 const baseWebhook: WebhookDefinition = {
   id: 'wh_unit_1',
@@ -98,6 +99,15 @@ describe('WebhookDeliveryWorker', () => {
           provide: WorkspacesService,
           useValue: {
             get: async (id: string) => ({ id, settings: {} }),
+          },
+        },
+        {
+          // S6: the connector reads user_attribution (first-touch) via ClickHouse.
+          // Stub it as "no row" so these worker tests keep their pre-S6 behaviour
+          // (S4 event-based acquisition fallback), no real CH dependency.
+          provide: ClickHouseService,
+          useValue: {
+            queryWorkspace: async () => [],
           },
         },
       ],
