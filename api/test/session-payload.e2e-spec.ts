@@ -2,7 +2,7 @@
 import { setupTestEnv } from './constants/test-config';
 setupTestEnv();
 
-import { ClickHouseClient } from '@clickhouse/client';
+import { ClickHouseClient, createClient } from '@clickhouse/client';
 import request from 'supertest';
 import { EventBufferService } from '../src/events/event-buffer.service';
 import {
@@ -15,8 +15,10 @@ import {
   getService,
   waitForClickHouse,
   waitForRowCount,
+  getWorkspaceDatabaseName,
   TestAppContext,
 } from './helpers';
+import { getSystemClientConfig } from './constants/test-config';
 
 const testWorkspaceId = 'test_ws_v3';
 
@@ -698,6 +700,24 @@ describe('V3 Session Payload E2E', () => {
   //    (channel) et vide utm_content → la spec vire au ROUGE. C'est la preuve
   //    que le test mesure bien le fix et pas un mock.
   describe('POST /api/track — canal referral interne ?ref= (S6 Lot B)', () => {
+    // Pour les workspaces autres que le défaut (test_ws_v3), le client par défaut
+    // `workspaceClient` pointe sur la MAUVAISE DB → on ouvre un client scoped sur
+    // la DB du workspace ciblé. On les ferme en afterEach pour ne pas fuiter.
+    const extraClients: ClickHouseClient[] = [];
+    function clientFor(wsId: string): ClickHouseClient {
+      if (wsId === testWorkspaceId) return workspaceClient;
+      const c = createClient({
+        ...getSystemClientConfig(),
+        database: getWorkspaceDatabaseName(wsId),
+      });
+      extraClients.push(c);
+      return c;
+    }
+    afterEach(async () => {
+      await Promise.all(extraClients.map((c) => c.close()));
+      extraClients.length = 0;
+    });
+
     async function trackAndReadSession(
       wsId: string,
       key: string,
@@ -708,6 +728,7 @@ describe('V3 Session Payload E2E', () => {
       channel_group: string;
       utm_content: string;
     }> {
+      const wsClient = clientFor(wsId);
       const sessionId = `sess-ref-${Date.now()}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
@@ -727,7 +748,7 @@ describe('V3 Session Payload E2E', () => {
       await waitForClickHouse();
 
       // events row carries the derived channel + utm_content.
-      const evRes = await workspaceClient.query({
+      const evRes = await wsClient.query({
         query: `SELECT channel, channel_group, utm_content
                 FROM events WHERE session_id = {sid:String} LIMIT 1`,
         query_params: { sid: sessionId },
@@ -743,11 +764,11 @@ describe('V3 Session Payload E2E', () => {
 
       // and it fans out to the sessions MV (any(e.channel) / any(e.utm_content)).
       await waitForRowCount(
-        workspaceClient,
+        wsClient,
         `SELECT count() as count FROM sessions FINAL WHERE id = '${sessionId}'`,
         1,
       );
-      const sessRes = await workspaceClient.query({
+      const sessRes = await wsClient.query({
         query: `SELECT channel, channel_group, utm_content
                 FROM sessions FINAL WHERE id = {sid:String} LIMIT 1`,
         query_params: { sid: sessionId },
