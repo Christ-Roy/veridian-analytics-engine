@@ -20,6 +20,7 @@ import { AnalyticsService } from '../analytics/analytics.service';
 import { VoipService } from '../voip/voip.service';
 import { VoipSyncService } from '../voip/voip-sync.service';
 import { GscService } from '../gsc/gsc.service';
+import { IdentityBackfillService } from '../filters/backfill/identity-backfill.service';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { WebhookDeliveryWorker } from '../webhooks/webhook-delivery-worker.service';
 import { SsrfGuard } from '../common/ssrf-guard';
@@ -151,6 +152,19 @@ describe('AdminPlatformService.provisionTenant', () => {
               last_sync_at: null,
             }),
             resync: jest.fn().mockResolvedValue({ skipped: 'not_connected' }),
+          },
+        },
+        {
+          // S6 Lot C — re-stitch historique (constructeur index 10).
+          provide: IdentityBackfillService,
+          useValue: {
+            backfillIdentity: jest.fn().mockResolvedValue({
+              workspace_id: 'ws',
+              users_scanned: 0,
+              users_stitched: 0,
+              users_unresolved: 0,
+              by_method: { session_id: 0, visitor_id: 0, fingerprint: 0 },
+            }),
           },
         },
         {

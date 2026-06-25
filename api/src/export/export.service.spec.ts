@@ -77,6 +77,11 @@ describe('ExportService', () => {
           provide: ClickHouseService,
           useValue: {
             queryWorkspace: jest.fn().mockResolvedValue([]),
+            // S6 Lot C — export now resolves the workspace DB name for the
+            // user_attribution LEFT JOIN.
+            getWorkspaceDatabaseName: jest.fn(
+              (id: string) => `staminads_ws_${id}`,
+            ),
           },
         },
         {
@@ -122,7 +127,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('FROM events FINAL'),
+        expect.stringContaining('FROM events AS e FINAL'),
         expect.any(Object),
       );
     });
@@ -154,7 +159,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('user_id IS NOT NULL'),
+        expect.stringContaining('e.user_id IS NOT NULL'),
         expect.any(Object),
       );
     });
@@ -170,7 +175,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('updated_at >='),
+        expect.stringContaining('e.updated_at >='),
         expect.objectContaining({
           since: expect.any(String),
         }),
@@ -196,7 +201,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('(updated_at, id) >'),
+        expect.stringContaining('(e.updated_at, e.id) >'),
         expect.objectContaining({
           cursor_updated_at: '2025-01-25 10:05:00.000',
           cursor_id: 'event-123',
@@ -216,7 +221,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('user_id = {user_id:String}'),
+        expect.stringContaining('e.user_id = {user_id:String}'),
         expect.objectContaining({
           user_id: 'specific-user',
         }),
@@ -331,7 +336,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('ORDER BY updated_at ASC, id ASC'),
+        expect.stringContaining('ORDER BY e.updated_at ASC, e.id ASC'),
         expect.any(Object),
       );
     });
@@ -453,7 +458,7 @@ describe('ExportService', () => {
 
       expect(clickhouseService.queryWorkspace).toHaveBeenCalledWith(
         'test-ws',
-        expect.stringContaining('(updated_at, id) >'),
+        expect.stringContaining('(e.updated_at, e.id) >'),
         expect.not.objectContaining({
           since: expect.any(String),
         }),
