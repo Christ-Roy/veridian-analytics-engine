@@ -106,6 +106,13 @@ describe('ChannelBackfillService (E2E real ClickHouse)', () => {
       hour: d.getUTCHours(),
       is_weekend: false,
       _version: 1,
+      // Acquisition signals (utm_*/referrer*) — real goals carry their OWN
+      // signal columns, populated from the event at ingestion by goals_mv
+      // (schemas.ts), and the backfill reads them straight off the goals table.
+      // The spread MUST come last so per-row overrides win over the empty
+      // defaults above — without it the seeded goals stay signal-less and the
+      // backfill correctly classifies all of them as `direct`.
+      ...overrides,
     };
   }
 
