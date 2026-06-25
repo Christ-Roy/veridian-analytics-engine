@@ -339,7 +339,13 @@ describe('IdentityBackfillService (E2E real ClickHouse, S6 Lot C)', () => {
   });
 
   it('counts unresolved users (direct-only chain invents no acquisition)', async () => {
-    await truncateWorkspaceTables(workspaceClient, ['sessions'], 0);
+    // Reset BOTH sessions and the attribution written by prior tests so the
+    // global attribution count is a clean assertion for this isolated case.
+    await truncateWorkspaceTables(
+      workspaceClient,
+      ['sessions', 'user_attribution'],
+      0,
+    );
     // One user whose only sessions are direct → nothing to recover.
     const rows = [
       ...chainRows({

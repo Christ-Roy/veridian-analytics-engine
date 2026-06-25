@@ -151,7 +151,7 @@ export class ExportService {
         e.duration as duration,
         e.max_scroll as max_scroll,
         e.properties as properties
-      FROM events FINAL e
+      FROM events AS e FINAL
       LEFT JOIN ${dbName}.user_attribution AS ua FINAL ON ua.user_id = e.user_id
       WHERE ${whereClause}
       ORDER BY e.updated_at ASC, e.id ASC
