@@ -1005,8 +1005,11 @@ describe('Migrations E2E', () => {
           /^\s*(?:first_touch_channel|first_touch_channel_group)\s+LowCardinality\(String\)\s+DEFAULT\s+''\s*,?\s*$/gim,
           '',
         )
+        // Longest alternative FIRST + word boundary so `first_touch_channel`
+        // never matches as a prefix of `first_touch_channel_group` (which would
+        // leave a dangling `_group` token in the MV — flaky regex bug).
         .replace(
-          /CAST\('' AS LowCardinality\(String\)\) as (?:first_touch_channel|first_touch_channel_group),?\s*/gim,
+          /CAST\('' AS LowCardinality\(String\)\) as (?:first_touch_channel_group|first_touch_channel)\b,?\s*/gim,
           '',
         )
         .replace(/,(\s*)\)/g, '$1)');
