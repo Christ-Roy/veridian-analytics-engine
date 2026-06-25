@@ -12,11 +12,12 @@ describe('getDefaultFilters', () => {
     expect(filters.length).toBeGreaterThan(0);
   });
 
-  it('returns approximately 39 filters', () => {
+  it('returns approximately 40 filters', () => {
     const filters = getDefaultFilters();
 
-    // 10 click ID + 7 UTM paid + 1 referrer paid + 2 direct + 7 search organic + 10 social organic + 1 email + 1 default = 39
-    expect(filters.length).toBe(39);
+    // 10 click ID + 7 UTM paid + 1 referrer paid + 1 referral interne + 2 direct
+    // + 7 search organic + 10 social organic + 1 email + 1 default = 40
+    expect(filters.length).toBe(40);
   });
 
   it('generates unique IDs for each filter', () => {
@@ -207,5 +208,50 @@ describe('getDefaultFilters', () => {
 
     expect(hasDirectChannel).toBe(true);
     expect(hasEmailChannel).toBe(true);
+  });
+
+  // S6 Lot B — le filtre referral interne doit primer sur Direct Traffic, sinon
+  // un parrainage ?ref= (is_direct + utm_content) retombe en `direct`.
+  describe('Referral interne (?ref=) — S6 Lot B', () => {
+    it('exists, sets channel/channel_group=referral, prime sur Direct Traffic', () => {
+      const filters = getDefaultFilters();
+      const ref = filters.find((f) => f.name === 'Referral interne (?ref=)');
+      const direct = filters.find((f) => f.name === 'Direct Traffic');
+
+      expect(ref).toBeDefined();
+      expect(direct).toBeDefined();
+      // Priorité STRICTEMENT supérieure → le set_value referral gagne sur direct.
+      expect(ref!.priority).toBeGreaterThan(direct!.priority);
+      // Conditions ANDées : is_direct=true ET utm_content non vide (= code parrain).
+      expect(ref!.conditions).toEqual(
+        expect.arrayContaining([
+          { field: 'is_direct', operator: 'equals', value: 'true' },
+          { field: 'utm_content', operator: 'regex', value: '.+' },
+        ]),
+      );
+      expect(ref!.operations).toEqual(
+        expect.arrayContaining([
+          { dimension: 'channel_group', action: 'set_value', value: 'referral' },
+          { dimension: 'channel', action: 'set_value', value: 'referral' },
+        ]),
+      );
+    });
+
+    it('reste SOUS les sources plus riches (ads/organic) — zéro régression', () => {
+      const filters = getDefaultFilters();
+      const ref = filters.find((f) => f.name === 'Referral interne (?ref=)')!;
+      // Toutes les sources riches PAR REFERRER/UTM-PAYANT (ads click-id, organic
+      // search/social) ont priorité > ref → un ?ref= qui s'ajoute à un vrai canal
+      // ne le masque jamais (ces sources ont un referrer/utm, donc is_direct=false
+      // ET priorité supérieure : double garde-fou). NB : Email (300) est déjà sous
+      // les filtres is_direct (740) dans CETTE taxonomie ; on n'aggrave rien.
+      const richer = filters.filter(
+        (f) => f.name.includes('Ads') || f.name.includes('Organic'),
+      );
+      expect(richer.length).toBeGreaterThan(0);
+      for (const f of richer) {
+        expect(f.priority).toBeGreaterThan(ref.priority);
+      }
+    });
   });
 });

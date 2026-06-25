@@ -19,6 +19,7 @@ import {
   TestAppContext,
 } from './helpers';
 import { getSystemClientConfig } from './constants/test-config';
+import { getDefaultFilters } from '../src/workspaces/fixtures/default-filters';
 
 const testWorkspaceId = 'test_ws_v3';
 
@@ -867,6 +868,56 @@ describe('V3 Session Payload E2E', () => {
           wsId,
           key,
           'https://app.example.com/login?ref=VHCRPP6X',
+        );
+        expect(r.channel).toBe('direct');
+        expect(r.channel_group).toBe('direct');
+        expect(r.utm_content).toBe('');
+      });
+    });
+
+    // PROD PATH : avec les filtres par défaut seedés au provisioning, le filtre
+    // "Direct Traffic" (is_direct) ÉCRASE le channel après buildBaseEvent. Sans
+    // le filtre "Referral interne (?ref=)" (prio 745 > 740), un parrainage
+    // retomberait en `direct` (cas réel Valentin / Yoga Sculpt). Ce test prouve
+    // que le filtre referral prime et survit à la couche filtres en VRAI CH.
+    //
+    // ⚠️ Sabotage : retirer le filtre "Referral interne (?ref=)" de
+    //    default-filters.ts → "Direct Traffic" gagne → channel='direct' → ROUGE.
+    describe('referral ?ref= face aux filtres par défaut prod', () => {
+      const wsId = 'test_ws_ref_filtered';
+
+      // L'outer beforeEach truncate la table `workspaces` → on (re)crée le
+      // workspace filtré DANS chaque test (sinon il disparaît entre les it).
+      async function setupFiltered(): Promise<string> {
+        await createTestWorkspace(systemClient, wsId, {
+          // On seed la MÊME taxonomie de filtres que le provisioning réel.
+          settings: { filters: getDefaultFilters() } as never,
+        });
+        return createTestApiKey(systemClient, wsId);
+      }
+
+      it('le filtre referral interne prime sur Direct Traffic (?ref= + is_direct → referral)', async () => {
+        const key = await setupFiltered();
+        // ?ref= sans referrer → is_direct=true + utm_content=code → le filtre
+        // "Referral interne" (745) gagne sur "Direct Traffic" (740).
+        const r = await trackAndReadSession(
+          wsId,
+          key,
+          'https://app.example.com/login?ref=VHCRPP6X',
+        );
+        expect(r.channel).toBe('referral');
+        expect(r.channel_group).toBe('referral');
+        expect(r.utm_content).toBe('VHCRPP6X');
+      });
+
+      it('sans ?ref= (is_direct nu) → Direct Traffic gagne → direct', async () => {
+        const key = await setupFiltered();
+        // Une vraie session directe (sans code) reste direct — le filtre referral
+        // ne se déclenche que si utm_content non vide.
+        const r = await trackAndReadSession(
+          wsId,
+          key,
+          'https://app.example.com/login',
         );
         expect(r.channel).toBe('direct');
         expect(r.channel_group).toBe('direct');

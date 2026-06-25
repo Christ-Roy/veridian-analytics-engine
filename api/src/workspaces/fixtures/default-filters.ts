@@ -233,6 +233,29 @@ export function getDefaultFilters(): FilterDefinition[] {
     ),
   );
 
+  // === REFERRAL INTERNE ?ref= (priority 745, AU-DESSUS de Direct Traffic) ===
+  // S6 Lot B : un parrainage interne arrive sans referrer externe ni utm
+  // payant → il tomberait en `direct` (filtre "Direct Traffic" 740). Le handler
+  // d'ingestion a parsé `?ref=<code>` dans utm_content (cf
+  // session-payload.handler.extractReferralCode). On reconnaît donc le couple
+  // (is_direct=true ET utm_content non vide) comme du `referral` — l'acquisition
+  // virale la plus rentable, à ne PAS noyer dans le direct (cas réel Valentin /
+  // Yoga Sculpt). Priorité 745 > 740 pour primer sur "Direct Traffic", mais
+  // SOUS toutes les sources plus riches (ads/organic/social) qui restent
+  // prioritaires : zéro régression, on ne récupère QUE du direct perdu.
+  filters.push(
+    createChannelFilter(
+      'Referral interne (?ref=)',
+      [
+        { field: 'is_direct', operator: 'equals', value: 'true' },
+        { field: 'utm_content', operator: 'regex', value: '.+' },
+      ],
+      'referral',
+      'referral',
+      745,
+    ),
+  );
+
   // === DIRECT TRAFFIC (priority 750-740) ===
 
   filters.push(

@@ -36,6 +36,8 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // (session-payload.e2e-spec.ts, S6 Lot B)
   'staminads_ws_test_ws_ref_custom',
   'staminads_ws_test_ws_ref_disabled',
+  // Referral ?ref= face aux filtres par défaut prod (Direct Traffic override)
+  'staminads_ws_test_ws_ref_filtered',
 ];
 
 let client: ClickHouseClient;
