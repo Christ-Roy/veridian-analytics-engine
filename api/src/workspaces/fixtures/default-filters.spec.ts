@@ -237,20 +237,38 @@ describe('getDefaultFilters', () => {
       );
     });
 
-    it('reste SOUS les sources plus riches (ads/organic) — zéro régression', () => {
+    it('ne co-déclenche jamais avec une source referrer/utm (mutuellement exclusif via is_direct)', () => {
       const filters = getDefaultFilters();
       const ref = filters.find((f) => f.name === 'Referral interne (?ref=)')!;
-      // Toutes les sources riches PAR REFERRER/UTM-PAYANT (ads click-id, organic
-      // search/social) ont priorité > ref → un ?ref= qui s'ajoute à un vrai canal
-      // ne le masque jamais (ces sources ont un referrer/utm, donc is_direct=false
-      // ET priorité supérieure : double garde-fou). NB : Email (300) est déjà sous
-      // les filtres is_direct (740) dans CETTE taxonomie ; on n'aggrave rien.
-      const richer = filters.filter(
-        (f) => f.name.includes('Ads') || f.name.includes('Organic'),
+      // Garde-fou réel de la non-régression : le filtre referral exige
+      // is_direct=true. Toute source plus riche (ads/organic) déclenche sur un
+      // referrer_domain ou un utm → is_direct=false. Les deux ne matchent JAMAIS
+      // la même session → l'ordre de priorité entre eux est sans effet, le
+      // parrainage ne peut pas masquer un canal référé. On VÉRIFIE donc l'exclusion
+      // par condition, pas par priorité (les filtres organic vont jusqu'à 510).
+      expect(ref.conditions).toContainEqual({
+        field: 'is_direct',
+        operator: 'equals',
+        value: 'true',
+      });
+      const referrerOrUtmDriven = filters.filter(
+        (f) =>
+          f.name !== 'Referral interne (?ref=)' &&
+          f.conditions.some(
+            (c) =>
+              c.field === 'referrer_domain' ||
+              c.field === 'utm_source' ||
+              c.field === 'utm_id_from' ||
+              c.field === 'utm_medium',
+          ),
       );
-      expect(richer.length).toBeGreaterThan(0);
-      for (const f of richer) {
-        expect(f.priority).toBeGreaterThan(ref.priority);
+      expect(referrerOrUtmDriven.length).toBeGreaterThan(0);
+      // Aucune de ces sources ne conditionne sur is_direct=true → exclusion mutuelle.
+      for (const f of referrerOrUtmDriven) {
+        const requiresDirect = f.conditions.some(
+          (c) => c.field === 'is_direct' && c.value === 'true',
+        );
+        expect(requiresDirect).toBe(false);
       }
     });
   });
