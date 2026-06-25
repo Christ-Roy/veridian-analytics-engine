@@ -445,6 +445,13 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       utm_id_from String DEFAULT '',
       channel LowCardinality(String) DEFAULT '',
       channel_group LowCardinality(String) DEFAULT '',
+      -- First-touch acquisition (S6 identity stitching, 2026-06-25). Denormalized
+      -- onto the session by IdentityStitchService once the user is identified and
+      -- their first cross-domain session is reachable. Empty otherwise. Canonical
+      -- record lives in user_attribution. NOT fed by the MV (events carry no such
+      -- column) — written post-hoc via ALTER TABLE ... UPDATE scoped to user_id.
+      first_touch_channel LowCardinality(String) DEFAULT '',
+      first_touch_channel_group LowCardinality(String) DEFAULT '',
       stm_1 String DEFAULT '',
       stm_2 String DEFAULT '',
       stm_3 String DEFAULT '',
@@ -531,6 +538,12 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       any(e.utm_id_from) as utm_id_from,
       any(e.channel) as channel,
       any(e.channel_group) as channel_group,
+      -- First-touch acquisition (S6). The events table carries no first_touch_*
+      -- column, so the MV emits empty strings; the value is backfilled onto the
+      -- session by IdentityStitchService (ALTER TABLE ... UPDATE) once the user
+      -- is identified. Listed explicitly so the MV→sessions name mapping is exact.
+      CAST('' AS LowCardinality(String)) as first_touch_channel,
+      CAST('' AS LowCardinality(String)) as first_touch_channel_group,
       any(e.stm_1) as stm_1,
       any(e.stm_2) as stm_2,
       any(e.stm_3) as stm_3,
@@ -672,6 +685,11 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       utm_content String DEFAULT '',
       channel LowCardinality(String) DEFAULT '',
       channel_group LowCardinality(String) DEFAULT '',
+      -- First-touch acquisition (S6 identity stitching, 2026-06-25). Same design
+      -- as on sessions: denormalized by IdentityStitchService for the identified
+      -- user, empty otherwise. Canonical record in user_attribution.
+      first_touch_channel LowCardinality(String) DEFAULT '',
+      first_touch_channel_group LowCardinality(String) DEFAULT '',
       stm_1 String DEFAULT '',
       stm_2 String DEFAULT '',
       stm_3 String DEFAULT '',
@@ -764,6 +782,11 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       e.utm_content,
       e.channel,
       e.channel_group,
+      -- First-touch acquisition (S6) — empty from events, backfilled onto the
+      -- goal by IdentityStitchService. Explicit literals keep the MV→goals name
+      -- mapping exact.
+      CAST('' AS LowCardinality(String)) as first_touch_channel,
+      CAST('' AS LowCardinality(String)) as first_touch_channel_group,
       e.stm_1,
       e.stm_2,
       e.stm_3,
@@ -820,5 +843,66 @@ export const WORKSPACE_SCHEMAS: Record<string, string> = {
       e._version
     FROM {database}.events e
     WHERE e.name = 'goal'
+  `,
+
+  // ── user_attribution (S6 identity stitching, 2026-06-25) ──────────────────
+  // Canonical per-user first-touch / last-touch acquisition record. One row per
+  // identified user (identity_key = user_id / email), maintained by
+  // IdentityStitchService at the first event carrying a user_id. Decoupled from
+  // sessions/goals so the existing per-session attribution (and all the
+  // visiteurs-uniques/funnel metrics) stay UNTOUCHED — zero regression.
+  //
+  // first_touch_*  = the acquisition of the user's VERY FIRST session in the
+  //                  cross-domain chain (anonymous vitrine visit, real channel).
+  // last_touch_*   = the acquisition of the session where they identified (the
+  //                  /login session, usually `direct`). GA4 exposes both.
+  // first_touch_method = which join key linked the chain (session_id |
+  //                  visitor_id | fingerprint) — audit/confidence of the stitch.
+  // referral_code  = parrainage code (`?ref=`), filled by Lot B at ingestion and
+  //                  propagated here; also mirrored into first_touch_utm_content.
+  //
+  // ReplacingMergeTree(updated_at): a re-stitch is an INSERT with a newer
+  // updated_at; reads use FINAL / argMax. Idempotent by construction.
+  user_attribution: `
+    CREATE TABLE IF NOT EXISTS {database}.user_attribution (
+      identity_key String,
+      user_id String,
+
+      -- First touch (first session of the chain)
+      first_touch_channel LowCardinality(String) DEFAULT '',
+      first_touch_channel_group LowCardinality(String) DEFAULT '',
+      first_touch_referrer String DEFAULT '',
+      first_touch_referrer_domain String DEFAULT '',
+      first_touch_landing_page String DEFAULT '',
+      first_touch_landing_domain String DEFAULT '',
+      first_touch_utm_source String DEFAULT '',
+      first_touch_utm_medium String DEFAULT '',
+      first_touch_utm_campaign String DEFAULT '',
+      first_touch_utm_content String DEFAULT '',
+      first_touch_at DateTime64(3),
+      first_touch_session_id String DEFAULT '',
+      first_touch_method LowCardinality(String) DEFAULT '',
+
+      -- Last touch (the identified / login session)
+      last_touch_channel LowCardinality(String) DEFAULT '',
+      last_touch_channel_group LowCardinality(String) DEFAULT '',
+      last_touch_referrer String DEFAULT '',
+      last_touch_landing_page String DEFAULT '',
+      last_touch_utm_source String DEFAULT '',
+      last_touch_utm_medium String DEFAULT '',
+      last_touch_at DateTime64(3),
+      last_touch_session_id String DEFAULT '',
+
+      -- Parrainage (Lot B)
+      referral_code String DEFAULT '',
+
+      -- B2B identity propagated for resolution / re-stitch
+      visitor_id String DEFAULT '',
+      fingerprint String DEFAULT '',
+
+      first_seen_at DateTime64(3),
+      updated_at DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY identity_key
   `,
 };

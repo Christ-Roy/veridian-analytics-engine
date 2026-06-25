@@ -30,6 +30,8 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_channel_backfill_ws',
   // Funnel vs conversions parity e2e (funnel-conversions-parity.e2e-spec.ts)
   'staminads_ws_funnel_conv_parity_ws',
+  // Identity stitching first-touch e2e (identity-stitch.e2e-spec.ts)
+  'staminads_ws_identity_stitch_ws',
 ];
 
 let client: ClickHouseClient;

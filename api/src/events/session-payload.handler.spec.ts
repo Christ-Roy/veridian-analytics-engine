@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { SessionPayloadHandler } from './session-payload.handler';
+import { IdentityStitchService } from './identity-stitch.service';
 import { EventBufferService } from './event-buffer.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { GeoService } from '../geo/geo.service';
@@ -101,6 +102,10 @@ describe('SessionPayloadHandler', () => {
         {
           provide: EventEmitter2,
           useValue: { emit: jest.fn() },
+        },
+        {
+          provide: IdentityStitchService,
+          useValue: { scheduleStitch: jest.fn() },
         },
       ],
     }).compile();

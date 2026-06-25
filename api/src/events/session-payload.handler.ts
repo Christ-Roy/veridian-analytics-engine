@@ -19,6 +19,7 @@ import {
   applyFilterResults,
 } from '../filters/lib/filter-evaluator';
 import { deriveChannel } from './derive-channel';
+import { IdentityStitchService } from './identity-stitch.service';
 
 export interface HandleResult {
   success: boolean;
@@ -43,6 +44,7 @@ export class SessionPayloadHandler {
     private readonly workspacesService: WorkspacesService,
     private readonly geoService: GeoService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly identityStitch: IdentityStitchService,
   ) {}
 
   async handle(
@@ -187,6 +189,22 @@ export class SessionPayloadHandler {
     //      ne pas reflipper en boucle sur la fenêtre TTL.
     if (workspace.status === 'initializing') {
       this.activateWorkspace(workspace.id);
+    }
+
+    // 11c. Identity stitching — first-touch acquisition (S6, 2026-06-25).
+    //      When this payload carries a user_id, the visitor has just identified
+    //      (or is browsing identified). Recover the acquisition channel of their
+    //      FIRST session in the cross-domain chain (the anonymous vitrine visit
+    //      with the real channel) and attribute it to the user — the /login
+    //      session is legitimately `direct`, so without this the user's
+    //      acquisition is lost. Fire-and-forget & locally de-duped: NEVER awaited
+    //      by the ingestion path, NEVER throws into it (same contract as
+    //      activateWorkspace). The sessions written by addBatch above are visible
+    //      to the stitch via the sessions_mv (best-effort eventual consistency;
+    //      retried on the user's next event if the row isn't materialized yet).
+    const stitchUserId = payload.user_id;
+    if (stitchUserId) {
+      this.identityStitch.scheduleStitch(workspace.id, stitchUserId);
     }
 
     return { success: true };

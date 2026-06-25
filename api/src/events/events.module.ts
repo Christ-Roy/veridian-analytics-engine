@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { EventsController } from './events.controller';
 import { EventBufferService } from './event-buffer.service';
 import { SessionPayloadHandler } from './session-payload.handler';
+import { IdentityStitchService } from './identity-stitch.service';
 import { WorkspacesModule } from '../workspaces/workspaces.module';
 import { MembersModule } from '../members/members.module';
 import { GeoModule } from '../geo';
@@ -9,7 +10,7 @@ import { GeoModule } from '../geo';
 @Module({
   imports: [WorkspacesModule, MembersModule, GeoModule],
   controllers: [EventsController],
-  providers: [EventBufferService, SessionPayloadHandler],
-  exports: [EventBufferService],
+  providers: [EventBufferService, SessionPayloadHandler, IdentityStitchService],
+  exports: [EventBufferService, IdentityStitchService],
 })
 export class EventsModule {}

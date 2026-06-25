@@ -1,5 +1,5 @@
-export const APP_VERSION = '11.0.0';
-export const APP_MAJOR_VERSION = 11;
+export const APP_VERSION = '12.0.0';
+export const APP_MAJOR_VERSION = 12;
 
 /**
  * SHA du commit déployé, injecté au build Docker (ARG/ENV GIT_SHA depuis

@@ -92,6 +92,31 @@ export const DIMENSIONS: Record<string, DimensionDefinition> = {
     tables: ['sessions', 'goals'],
   },
 
+  // First-touch acquisition (S6 identity stitching, 2026-06-25).
+  // The session/goal `channel`/`channel_group` is the acquisition of THAT
+  // session (the /login session is legitimately `direct`). first_touch_* is a
+  // SEPARATE dimension: the channel of the user's VERY FIRST session in the
+  // cross-domain chain (e.g. the anonymous vitrine visit via Google Ads),
+  // stitched onto the identified user by `IdentityStitchService` and
+  // denormalized onto that user's sessions/goals rows. The canonical per-user
+  // record lives in the `user_attribution` table (read by the M2M provenance
+  // endpoint + the Twenty connector). Empty until a user is identified AND
+  // their first-touch session is reachable (same session_id/visitor_id chain).
+  first_touch_channel: {
+    name: 'first_touch_channel',
+    column: 'first_touch_channel',
+    type: 'string',
+    category: 'Channel',
+    tables: ['sessions', 'goals'],
+  },
+  first_touch_channel_group: {
+    name: 'first_touch_channel_group',
+    column: 'first_touch_channel_group',
+    type: 'string',
+    category: 'Channel',
+    tables: ['sessions', 'goals'],
+  },
+
   // Session Pages (sessions and some on goals)
   landing_page: {
     name: 'landing_page',

@@ -33,6 +33,7 @@ jest.mock('../src/migrations/migrations.registry', () => ({
 import { MigrationsRunner } from '../src/migrations/migrations.service';
 import { V8VoipMigration } from '../src/migrations/v8-voip-migration';
 import { V10VisitorIdMigration } from '../src/migrations/v10-visitor-id-migration';
+import { V12IdentityAttributionMigration } from '../src/migrations/v12-identity-attribution-migration';
 import { WORKSPACE_SCHEMAS } from '../src/database/schemas';
 
 describe('Migrations E2E', () => {
@@ -979,6 +980,176 @@ describe('Migrations E2E', () => {
     it('no-op workspace migration resolves without error', async () => {
       await expect(
         V11WorkspacesReplacingMigration.migrateWorkspace(),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  describe('V12 Identity Attribution Migration', () => {
+    // V12 is additive (workspace-level): it creates the user_attribution table,
+    // adds first_touch_channel / first_touch_channel_group to sessions + goals,
+    // and recreates sessions_mv / goals_mv so the new columns flow (empty) from
+    // events. We build a workspace DB WITHOUT any of that (simulating a v11
+    // install), run the real migrateWorkspace, and assert the additive result.
+    const V12_DB = `${TEST_SYSTEM_DATABASE}_ws_v12`;
+
+    afterAll(async () => {
+      await systemClient.command({
+        query: `DROP DATABASE IF EXISTS ${V12_DB}`,
+      });
+    });
+
+    /** Strip the first_touch_* columns so the table looks like a pre-v12 install. */
+    function stripFirstTouchColumns(ddl: string): string {
+      return ddl
+        .replace(
+          /^\s*(?:first_touch_channel|first_touch_channel_group)\s+LowCardinality\(String\)\s+DEFAULT\s+''\s*,?\s*$/gim,
+          '',
+        )
+        .replace(
+          /CAST\('' AS LowCardinality\(String\)\) as (?:first_touch_channel|first_touch_channel_group),?\s*/gim,
+          '',
+        )
+        .replace(/,(\s*)\)/g, '$1)');
+    }
+
+    /**
+     * Build events + sessions + goals + their MVs from the real schemas, stripped
+     * of first_touch_* and WITHOUT user_attribution. Simulates a v11 install.
+     */
+    async function buildPreV12Schema(): Promise<void> {
+      await systemClient.command({ query: `DROP DATABASE IF EXISTS ${V12_DB}` });
+      await systemClient.command({ query: `CREATE DATABASE ${V12_DB}` });
+
+      // Order matters: base tables before their MVs.
+      for (const table of [
+        'events',
+        'sessions',
+        'sessions_mv',
+        'goals',
+        'goals_mv',
+      ] as const) {
+        const ddl = stripFirstTouchColumns(
+          WORKSPACE_SCHEMAS[table].replace(/{database}/g, V12_DB),
+        );
+        await systemClient.command({ query: ddl });
+      }
+      await waitForClickHouse();
+    }
+
+    it('declares itself a workspace-level migration to version 12', () => {
+      expect(V12IdentityAttributionMigration.majorVersion).toBe(12);
+      expect(V12IdentityAttributionMigration.hasWorkspaceMigration()).toBe(true);
+      expect(V12IdentityAttributionMigration.hasSystemMigration()).toBe(false);
+    });
+
+    it('creates user_attribution and adds first_touch_* to sessions + goals', async () => {
+      await buildPreV12Schema();
+
+      // Pre-condition: no user_attribution table, no first_touch columns.
+      const beforeTable = await systemClient.query({
+        query: `SELECT count() AS c FROM system.tables
+                WHERE database = {db:String} AND name = 'user_attribution'`,
+        query_params: { db: V12_DB },
+        format: 'JSONEachRow',
+      });
+      expect(Number((await beforeTable.json<{ c: number }>())[0]?.c ?? 0)).toBe(
+        0,
+      );
+
+      await V12IdentityAttributionMigration.migrateWorkspace(
+        systemClient,
+        V12_DB,
+      );
+      await waitForClickHouse();
+
+      // user_attribution now exists, ReplacingMergeTree, keyed by identity_key.
+      const tbl = await systemClient.query({
+        query: `SELECT engine FROM system.tables
+                WHERE database = {db:String} AND name = 'user_attribution'`,
+        query_params: { db: V12_DB },
+        format: 'JSONEachRow',
+      });
+      const engineRows = await tbl.json<{ engine: string }>();
+      expect(engineRows.length).toBe(1);
+      expect(engineRows[0].engine).toBe('ReplacingMergeTree');
+
+      // first_touch_* present on sessions AND goals.
+      for (const table of ['sessions', 'goals']) {
+        const cols = await systemClient.query({
+          query: `SELECT name FROM system.columns
+                  WHERE database = {db:String} AND table = {t:String}`,
+          query_params: { db: V12_DB, t: table },
+          format: 'JSONEachRow',
+        });
+        const names = (await cols.json<{ name: string }>()).map((r) => r.name);
+        expect(names).toEqual(
+          expect.arrayContaining([
+            'first_touch_channel',
+            'first_touch_channel_group',
+          ]),
+        );
+      }
+    });
+
+    it('total-preserving: existing sessions survive the additive migration', async () => {
+      await buildPreV12Schema();
+
+      // Seed a session BEFORE migrating.
+      const now = toClickHouseDateTime();
+      await systemClient.insert({
+        table: `${V12_DB}.sessions`,
+        values: [
+          {
+            id: 'sess_v12',
+            workspace_id: 'ws_v12',
+            created_at: now,
+            updated_at: now,
+            is_direct: true,
+            landing_page: 'https://test.com/',
+            year: 2026,
+            month: 6,
+            day: 25,
+            day_of_week: 4,
+            week_number: 26,
+            hour: 10,
+            is_weekend: false,
+            channel: 'organic_search',
+            channel_group: 'seo',
+          },
+        ],
+        format: 'JSONEachRow',
+      });
+      await waitForClickHouse();
+
+      await V12IdentityAttributionMigration.migrateWorkspace(
+        systemClient,
+        V12_DB,
+      );
+      await waitForClickHouse();
+
+      // The row survives, its existing channel untouched, first_touch empty.
+      const res = await systemClient.query({
+        query: `SELECT channel_group, first_touch_channel_group
+                FROM ${V12_DB}.sessions FINAL WHERE id = 'sess_v12'`,
+        format: 'JSONEachRow',
+      });
+      const rows = await res.json<{
+        channel_group: string;
+        first_touch_channel_group: string;
+      }>();
+      expect(rows.length).toBe(1);
+      expect(rows[0].channel_group).toBe('seo');
+      expect(rows[0].first_touch_channel_group).toBe('');
+    });
+
+    it('is idempotent (running twice does not throw)', async () => {
+      await buildPreV12Schema();
+      await V12IdentityAttributionMigration.migrateWorkspace(
+        systemClient,
+        V12_DB,
+      );
+      await expect(
+        V12IdentityAttributionMigration.migrateWorkspace(systemClient, V12_DB),
       ).resolves.toBeUndefined();
     });
   });
