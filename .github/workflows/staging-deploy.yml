@@ -472,6 +472,19 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+          # Garde-fous anti-hang muet : un SSH qui se fige (TCP établi mais
+          # plus aucun octet — cas docker pull qui pend) doit ÉCHOUER VITE,
+          # pas pendre jusqu'au timeout du job. ConnectTimeout borne la
+          # connexion ; ServerAlive* (15s × 4 = 60s sans réponse → coupe).
+          # Appliqué à TOUTES les connexions vers dev-pub via ~/.ssh/config.
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host 37.187.199.185
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking accept-new
+          SSHCFG
+          chmod 600 ~/.ssh/config
 
       - name: Sync compose to dev-pub
         run: |
@@ -529,13 +542,17 @@ jobs:
           ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'DEPLOY'
             set -e
             cd /opt/staging/analytics-engine
-            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
+            # `timeout` borne chaque étape réseau/IO : un `docker pull` qui pend
+            # (registry lent, disque dev-pub plein à 94%) échoue net au lieu de
+            # figer le SSH jusqu'au timeout du job. Le rollback auto (étage 5)
+            # prend le relais si le deploy échoue.
+            timeout 300 docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
             # down scopé au project 'analytics-engine-staging' avant le up :
             # dégage les containers du run précédent. Scopé staging — ne
             # touche pas analytics-engine-dev (project name distinct).
             # Évite le conflit "container name already in use" sur orphelin.
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml down --remove-orphans || true
-            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
+            timeout 240 docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
             docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml ps
           DEPLOY
 
@@ -627,6 +644,15 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+          # Anti-hang : keepalive SSH (cf. Setup SSH étage 3).
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host 37.187.199.185
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking accept-new
+          SSHCFG
+          chmod 600 ~/.ssh/config
 
       - name: Smoke applicatif (assertions de contenu) — via SSH
         run: |
@@ -674,6 +700,15 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
+          # Anti-hang : keepalive SSH (cf. Setup SSH étage 3).
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host 37.187.199.185
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking accept-new
+          SSHCFG
+          chmod 600 ~/.ssh/config
       # Rollback + vérif healthy : tout est exécuté DANS dev-pub via SSH.
       # Le `curl` runner→URL publique ne marche pas (staging sur tailnet,
       # cf. note étage 3) — on vérifie le healthcheck container localement.
@@ -687,8 +722,8 @@ jobs:
             # dans le .env, puis redeploy.
             sed -i 's|^ENGINE_IMAGE_TAG=.*|ENGINE_IMAGE_TAG=rollback|' .env
             sed -i 's|^BRIDGE_IMAGE_TAG=.*|BRIDGE_IMAGE_TAG=rollback|' .env
-            docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
-            $COMPOSE up -d --remove-orphans
+            timeout 300 docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
+            timeout 240 $COMPOSE up -d --remove-orphans
             echo "✓ Rollback déclenché"
 
             echo "── Vérif healthy post-rollback (max 3 min) ──"
