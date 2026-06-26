@@ -28,6 +28,13 @@ COPY --from=sdk-builder /app/sdk/package.json ./sdk/package.json
 # Copy API version file (needed by vite.config.ts)
 COPY api/src/version.ts ./api/src/version.ts
 
+# Copy the widget-safe catalogue JSON (SOURCE UNIQUE partagée api↔console).
+# La console l'importe (widget-catalog.ts) pour les widgets dashboard custom
+# (VAGUE 2). Même pattern que version.ts ci-dessus : un seul fichier d'api/src
+# nécessaire au build console, copié explicitement (le reste d'api/ n'est pas
+# dans le contexte de ce stage).
+COPY api/src/common/widget-catalog/widget-catalog.json ./api/src/common/widget-catalog/widget-catalog.json
+
 WORKDIR /app/console
 
 # Copy frontend package files
