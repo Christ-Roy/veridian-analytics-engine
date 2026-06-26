@@ -23,7 +23,9 @@ import {
 } from '../../types/dashboard'
 import type { DatePreset, Granularity, Filter } from '../../types/analytics'
 import type { Annotation, DashboardLayout } from '../../types/workspace'
-import { orderDashboardWidgets } from './dashboard-layout'
+import { orderDashboardWidgets, type DashboardWidgetNode } from './dashboard-layout'
+import { CustomWidget } from './CustomWidget'
+import type { CompileContext } from './custom-widget'
 
 interface DashboardGridProps {
   workspaceId: string
@@ -435,6 +437,34 @@ export function DashboardGrid({
   const metric = METRICS.find((m) => m.key === selectedMetric)!
   const metricData = dashboardData?.metrics[selectedMetric]
 
+  // Widgets custom définis par le workspace (VAGUE 2). Chacun compile sa config
+  // en requête utilisateur `analytics.query` et se rend via le registre kind→
+  // composant (CustomWidget). Le contexte fournit la plage + filtres + tz
+  // courants ; la config widget est l'autorité pour metric/dimension/granularité.
+  const customWidgetCtx: CompileContext = useMemo(
+    () => ({
+      workspaceId,
+      dateRange,
+      timezone,
+      globalFilters,
+    }),
+    [workspaceId, dateRange, timezone, globalFilters]
+  )
+
+  const customWidgetNodes: DashboardWidgetNode[] = (layout?.widgets ?? []).map(
+    (w) => ({
+      key: w.id,
+      node: (
+        <CustomWidget
+          widget={w}
+          ctx={customWidgetCtx}
+          granularity={granularity}
+          currency={workspaceCurrency}
+        />
+      ),
+    })
+  )
+
   return (
     <DashboardProvider
       workspaceId={workspaceId}
@@ -596,7 +626,11 @@ export function DashboardGrid({
                     onRowClick={handleRowClick}
                   />
                 )
-              }
+              },
+              // Widgets custom du workspace (VAGUE 2), ajoutés à la grille native.
+              // `orderDashboardWidgets` les place selon `order` (qui peut citer
+              // un id custom) ou, à défaut, à la suite des natifs.
+              ...customWidgetNodes
             ],
             layout
           ).map((w) => (

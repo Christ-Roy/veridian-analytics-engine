@@ -54,10 +54,50 @@ export interface WorkspaceFeatures {
   connectors?: boolean
 }
 
-/** Native dashboard widget order/visibility per client (N3). */
+/**
+ * Un widget custom = une DESCRIPTION d'un group-by analytics, persistée dans
+ * `settings.dashboard_layout.widgets[]` (zéro migration) et résolue par le
+ * query-builder natif. Shape calqué sur le contrat backend (VAGUE 2,
+ * api/.../dto/customization.dto.ts WidgetConfigDto). Validé STRICTEMENT à la
+ * persistance côté engine (whitelist widget-safe + cohérence kind + id unique) :
+ * le front reçoit donc toujours un widget déjà sain.
+ */
+export interface DashboardWidget {
+  /** Slug unique dans le layout ; référencé par `order`. */
+  id: string
+  /** Type de rendu. */
+  kind: 'metric_card' | 'time_series' | 'dimension_table'
+  /** Titre affiché. */
+  title: string
+  /** Métrique widget-safe (whitelist). */
+  metric: string
+  /** Table analytics ; défaut 'sessions'. */
+  table?: 'sessions' | 'pages' | 'goals'
+  /** Dimension widget-safe (obligatoire pour dimension_table). */
+  dimension?: string
+  /** Granularité temporelle (obligatoire pour time_series). */
+  granularity?: 'hour' | 'day' | 'week' | 'month' | 'year'
+  /** Filtres optionnels sur des dimensions widget-safe. */
+  filters?: Array<{
+    dimension: string
+    operator: string
+    values?: (string | number | null)[]
+  }>
+  /** Plafond de lignes pour dimension_table (défaut 10). */
+  limit?: number
+}
+
+/**
+ * Layout dashboard par client (N3 + VAGUE 2). Le dashboard natif staminads lit
+ * ceci pour RÉORDONNER / MASQUER ses widgets natifs ET pour AJOUTER des widgets
+ * custom définis par workspace. `order` peut référencer une clé de widget natif
+ * OU un `widget.id` custom.
+ */
 export interface DashboardLayout {
   hidden_widgets?: string[]
   order?: string[]
+  /** Widgets custom définis par workspace (config group-by). */
+  widgets?: DashboardWidget[]
 }
 
 /**
