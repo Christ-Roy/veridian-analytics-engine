@@ -40,29 +40,47 @@ rollback-staging) :
 - Un hang échoue désormais en < 3 min au lieu de pendre 18 min. Rollback auto
   (étage 5) prend le relais.
 
-## En attente go Robert — prod-ci.yml (tier CI critique)
+## Fait — prod-ci.yml Option A (GO Robert 2026-06-26, tier 🔴)
 
-**Option A retenue (reco ~75%)** — diff prêt dans le worktree, NON commité :
+Commit `ci(prod): SSH keepalive + timeout pre-pull anti-hang` :
 - `~/.ssh/config` keepalive sur les 3 SSH (trigger, health-check, rollback).
 - `timeout 300 docker pull … || warning` sur les 2 pre-pull (non bloquant :
   `compose.deploy` Dokploy re-pull au up ; le verdict gitSha tranche).
 - On GARDE merge-env `compose.update` + `wait-dokploy-deploy.sh` (verdict
   gitSha loopback) — inchangés, c'est le bon design.
 
-Options écartées :
-- B (tout HTTPS direct comme Prospection) : élimine la cause racine mais
-  réécrit ~40 lignes + garde quand même 1 SSH pour le verdict loopback. ~20%.
+Options écartées (pour A) :
+- B (tout HTTPS direct comme Prospection) — voir chantier dédié ci-dessous.
 - C (poll health public, abandon verdict loopback) : régression fiabilité. ~5%.
 
 ## À ÉPROUVER
 
 Un workflow ne se prouve qu'au prochain run. Le durcissement staging est
 validé par le run CI de ce commit (deploy-staging vert). Le prod-ci Option A
-ne sera prouvé qu'au prochain deploy prod après merge main.
+ne sera prouvé **qu'au prochain deploy prod réel** après merge main : si un hang
+réapparaît, le SSH coupe désormais à ~60s et le pull à 300s → échec net +
+rollback auto, plus de silence 19 min.
 
-## Alerte infra connexe
+## Chantier FUTUR (créneau dédié, pas en urgence) — migrer vers HTTPS Dokploy direct
 
-**dev-pub disque à 94 %** (4.9G libre après nettoyage `/tmp` ~1G). Un
-`compose pull` staging (image ~500MB-1G) peut échouer si ça remplit. `/var/lib
-/docker` = 19G (actif, peu de reclaimable, 0 dangling). Surveillance / purge
-plus profonde à prévoir (décision Robert : que garder).
+Pattern Prospection = le plus robuste : `curl https://dokploy.veridian.site/api/
+compose.deploy` (x-api-key, **zéro SSH**) → élimine la cause RACINE du hang
+(plus de tunnel SSH du tout), pas juste la borne. Migrer staging+prod engine
+vers ce pattern quand on aura un créneau posé. Subtilité engine : le verdict
+gitSha loopback (`wait-dokploy-deploy.sh`, `docker exec` dans le container) a
+besoin d'UN accès VPS — soit garder 1 SSH durci pour le seul verdict, soit
+exposer un endpoint de verdict. À designer.
+
+**MÊME BUG CHEZ Hub + CMS** (SSH → docker pull non borné, identique à l'incident
+engine 2026-06-25). À router vers leurs agents dédiés (déposer un `todo/` dans
+veridian-hub + veridian-cms). Pas encore touchés par le hang mais même bombe.
+
+## Dette infra transverse — dev-pub disque 94 %
+
+- 4.9G libres après nettoyage `/tmp` (~1G build/test : eng-templates, jest_rs,
+  node-compile-cache). Suffisant pour un `compose pull` staging — **pas bloquant**.
+- `/var/lib/docker` = 19G (17 images actives, 22 containers, 0 dangling, builder
+  cache 0B → rien de plus à gratter côté docker sans risque).
+- Reste = checkouts des autres apps + volumes staging actifs → **PAS safe à
+  purger de notre côté** (multi-agents). Purge profonde + "qui possède quoi sur
+  dev-pub" à arbitrer par Robert. Dette transverse, non bloquante.
