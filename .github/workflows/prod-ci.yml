@@ -258,14 +258,31 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Garde-fous anti-hang muet (incident prod 2026-06-25, run 28134…) :
+          # le `docker pull` ci-dessous avait fait `Download complete` puis 19 min
+          # de SILENCE sur le SSH avant d'être tué au timeout du job. ConnectTimeout
+          # borne la connexion ; ServerAlive* (15s × 4 = 60s sans octet → coupe) ;
+          # `timeout` côté VPS borne chaque pull. Un hang échoue alors en < 3 min.
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host *
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking no
+          SSHCFG
+          chmod 600 ~/.ssh/config
 
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
             ENGINE_TAG="$ENGINE_TAG" BRIDGE_TAG="$BRIDGE_TAG" DOKPLOY_COMPOSE_ID="$DOKPLOY_COMPOSE_ID" bash -s << 'DEPLOY'
             set -e
             DKEY=$(grep '^DOKPLOY_API_KEY=' ~/credentials/.all-creds.env | cut -d= -f2)
-            # Pre-pull le tag IMMUABLE exact (pas latest — sinon docker ne re-pull pas)
-            docker pull ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_TAG}
-            docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_TAG}
+            # Pre-pull le tag IMMUABLE exact (pas latest — sinon docker ne re-pull pas).
+            # `timeout 300` : un pull figé (registry lent, IO disque) échoue net au
+            # lieu de pendre. Non bloquant : `compose.deploy` Dokploy re-pull au up,
+            # donc même si le pre-pull timeoute, le deploy reste correct — on ne
+            # FAIL pas dessus (|| true), le verdict fonctionnel (gitSha) tranche.
+            timeout 300 docker pull ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_TAG} || echo "::warning::pre-pull engine timeout/échec — compose.deploy re-pullera"
+            timeout 300 docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_TAG} || echo "::warning::pre-pull bridge timeout/échec — compose.deploy re-pullera"
             # 1. compose.update : pin ENGINE_IMAGE_TAG/BRIDGE_IMAGE_TAG (vrais noms attendus par base.yml).
             #
             # ⚠️ MERGE, PAS REPLACE : Dokploy compose.update {env} REMPLACE l'env entier.
@@ -323,8 +340,17 @@ jobs:
           # Cf ticket todo/2026-06-25-prod-ci-deploy-faux-negatif-rollback-parasite.md.
           mkdir -p ~/.ssh; echo "$SSH_KEY" > ~/.ssh/deploy_key; chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Keepalive anti-hang (cf. step "Trigger Dokploy redeploy").
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host *
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking no
+          SSHCFG
+          chmod 600 ~/.ssh/config
           # 15 min : 8 min poll Dokploy au pire + jusqu'à 5 min de grace fonctionnel.
-          VERDICT=$(ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" \
+          VERDICT=$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
             "COMPOSE_ID='$DOKPLOY_COMPOSE_ID' EXPECTED_SHA='$EXPECTED_SHA' bash -s" < scripts/ci/wait-dokploy-deploy.sh)
           echo "Verdict déploiement prod: $VERDICT"
           rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
@@ -405,8 +431,17 @@ jobs:
           echo "$SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          # Keepalive anti-hang (cf. step "Trigger Dokploy redeploy").
+          cat > ~/.ssh/config <<'SSHCFG'
+          Host *
+            ConnectTimeout 15
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking no
+          SSHCFG
+          chmod 600 ~/.ssh/config
 
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "$VPS_USER@$VPS_HOST" bash -s << ROLLBACK
+          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" bash -s << ROLLBACK
             set -e
             for img in christ-roy/veridian-analytics-engine christ-roy/veridian-analytics-bridge; do
               ROLLBACK_ID=\$(docker images ghcr.io/\${img}:rollback --format '{{.ID}}' 2>/dev/null | head -1)
