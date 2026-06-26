@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   InternalServerErrorException,
@@ -59,6 +60,12 @@ import {
   SetFeaturesDto,
   SetLayoutDto,
 } from './dto/customization.dto';
+import {
+  GetFunnelsDto,
+  RunFunnelDto,
+  SetFunnelsDto,
+} from './dto/funnels.dto';
+import type { NamedFunnel } from '../workspaces/entities/workspace.entity';
 import { WorkspaceStatusResponseDto } from './dto/workspace-status-response.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import {
@@ -1287,7 +1294,8 @@ export class AdminPlatformService {
 
   /**
    * Read the full per-workspace customization (branding + features + layout +
-   * crm_mapping) in one call — the snapshot an IA / the Hub reads before tuning.
+   * crm_mapping + funnels) in one call — the snapshot an IA / the Hub reads
+   * before tuning.
    */
   async getCustomization(dto: GetCustomizationDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
@@ -1300,6 +1308,132 @@ export class AdminPlatformService {
       features: ws.settings.features ?? null,
       dashboard_layout: ws.settings.dashboard_layout ?? null,
       crm_mapping: ws.settings.crm_mapping ?? null,
+      funnels: ws.settings.funnels ?? null,
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Named funnels M2M (VAGUE 2) — define / read / execute-by-name
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Define/replace a workspace's named funnel catalogue (VAGUE 2).
+   *
+   * FULL-REPLACE on the LIST: the `funnels` array sent REPLACES the whole
+   * persisted catalogue (settings JSON, zero migration) — it is NOT merged
+   * per-name. Send `[]` to clear all funnels. This is the same explicit
+   * full-replace semantics the M2M layout verb uses for its arrays, and the
+   * simplest predictable contract for a list.
+   *
+   * Validation beyond the DTO (which bounds shape/step-count/slug): names must
+   * be UNIQUE within the body (case-insensitive) so `funnels.run` can resolve a
+   * single funnel deterministically. A duplicate name is a 400 — refusing it
+   * here is better than silently keeping the last one.
+   *
+   * Returns the FULL customization snapshot (same shape as the other set* verbs)
+   * so a consumer re-reading state after a write gets a uniform object.
+   */
+  async setFunnels(dto: SetFunnelsDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+
+    // Reject duplicate names (case-insensitive) — the catalogue is keyed by name.
+    const seen = new Set<string>();
+    for (const f of dto.funnels) {
+      const key = f.name.toLowerCase();
+      if (seen.has(key)) {
+        throw new BadRequestException({
+          code: 'DUPLICATE_FUNNEL_NAME',
+          message: `Duplicate funnel name '${f.name}' — names must be unique per workspace.`,
+        });
+      }
+      seen.add(key);
+    }
+
+    // Normalise to the entity shape, dropping undefined keys the transformer
+    // materialised so we never persist `{ label: undefined }` garbage.
+    const funnels: NamedFunnel[] = dto.funnels.map((f) =>
+      stripUndefined({
+        name: f.name,
+        label: f.label,
+        steps: f.steps.map((s) =>
+          stripUndefined({ goal_name: s.goal_name, label: s.label }),
+        ),
+        default_unit: f.default_unit,
+        default_window_seconds: f.default_window_seconds,
+      }),
+    ) as NamedFunnel[];
+
+    await this.workspacesService.update({
+      id: dto.workspace_id,
+      settings: { funnels },
+    });
+    return this.getCustomization({ workspace_id: dto.workspace_id });
+  }
+
+  /** Read a workspace's persisted named funnels (audit / IA introspection). */
+  async getFunnels(dto: GetFunnelsDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    return {
+      workspace_id: dto.workspace_id,
+      funnels: ws.settings.funnels ?? [],
+    };
+  }
+
+  /**
+   * Execute ONE persisted funnel BY NAME (VAGUE 2). Resolves the named funnel's
+   * stored steps + its default unit/window, then runs the SAME windowFunnel
+   * engine as `analytics.funnel` (no logic duplication — we just build the
+   * funnel DTO from persisted config and delegate to AnalyticsService.funnel).
+   *
+   * Run-time overrides: `unit` / `window_seconds` / `filters` / `timezone`, when
+   * supplied, take precedence over the funnel's stored defaults. The `dateRange`
+   * is always caller-supplied (a funnel is computed over a window).
+   *
+   * Unknown name → 404 FUNNEL_NOT_FOUND (clean, never a 500). The response echoes
+   * `funnel_name` + `funnel_label` so a consumer knows which funnel ran.
+   */
+  async runFunnel(dto: RunFunnelDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+    const catalogue = ws.settings.funnels ?? [];
+
+    // Case-insensitive lookup so a CLI/IA passing 'RDV' resolves 'rdv'.
+    const target = dto.name.toLowerCase();
+    const funnel = catalogue.find((f) => f.name.toLowerCase() === target);
+    if (!funnel) {
+      const available = catalogue.map((f) => f.name);
+      throw new NotFoundException({
+        code: 'FUNNEL_NOT_FOUND',
+        message:
+          `No funnel named '${dto.name}' on workspace ${dto.workspace_id}.` +
+          (available.length
+            ? ` Available: ${available.join(', ')}.`
+            : ' This workspace has no persisted funnel.'),
+      });
+    }
+
+    // Build the analytics funnel DTO from persisted config. Run-time fields
+    // override the funnel's stored defaults; `??` keeps the stored default when
+    // the caller did not supply an override.
+    const funnelDto: FunnelQueryDto = {
+      workspace_id: dto.workspace_id,
+      steps: funnel.steps.map((s) => ({
+        goal_name: s.goal_name,
+        label: s.label,
+      })),
+      dateRange: dto.dateRange,
+      filters: dto.filters,
+      unit: dto.unit ?? funnel.default_unit,
+      window_seconds: dto.window_seconds ?? funnel.default_window_seconds,
+      timezone: dto.timezone,
+    };
+
+    const result = await this.analyticsService.funnel(funnelDto);
+    return {
+      funnel_name: funnel.name,
+      funnel_label: funnel.label ?? funnel.name,
+      ...result,
     };
   }
 

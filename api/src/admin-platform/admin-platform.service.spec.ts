@@ -1022,7 +1022,157 @@ describe('AdminPlatformService.provisionTenant', () => {
         features: null,
         dashboard_layout: null,
         crm_mapping: mapping,
+        funnels: null,
       });
+    });
+
+    it('setFunnels persists the catalogue and returns the full snapshot (with funnels)', async () => {
+      const funnels = [
+        {
+          name: 'rdv',
+          label: 'Tunnel RDV',
+          steps: [
+            { goal_name: 'appointment_click' },
+            { goal_name: 'rdv_booked' },
+          ],
+          default_unit: 'session' as const,
+        },
+      ];
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: { funnels },
+      });
+      const res = await service.setFunnels({
+        workspace_id: 'ws1',
+        funnels: funnels as never,
+      });
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({ settings: { funnels } }),
+      );
+      expect(res.funnels).toEqual(funnels);
+    });
+
+    it('setFunnels rejects a duplicate name (case-insensitive) with 400', async () => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      await expect(
+        service.setFunnels({
+          workspace_id: 'ws1',
+          funnels: [
+            { name: 'rdv', steps: [{ goal_name: 'a' }, { goal_name: 'b' }] },
+            { name: 'RDV', steps: [{ goal_name: 'c' }, { goal_name: 'd' }] },
+          ] as never,
+        }),
+      ).rejects.toMatchObject({
+        response: { code: 'DUPLICATE_FUNNEL_NAME' },
+      });
+    });
+
+    it('getFunnels returns the persisted catalogue ([] when none)', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: {},
+      });
+      const res = await service.getFunnels({ workspace_id: 'ws1' });
+      expect(res).toEqual({ workspace_id: 'ws1', funnels: [] });
+    });
+
+    it('runFunnel resolves persisted steps + defaults and delegates to AnalyticsService.funnel', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: {
+          funnels: [
+            {
+              name: 'rdv',
+              label: 'Tunnel RDV',
+              steps: [
+                { goal_name: 'appointment_click', label: 'Demande' },
+                { goal_name: 'rdv_booked' },
+              ],
+              default_unit: 'visitor',
+              default_window_seconds: 3600,
+            },
+          ],
+        },
+      });
+      analyticsService.funnel.mockResolvedValue({
+        workspace_id: 'ws1',
+        unit: 'visitor',
+        dateRange: { start: 's', end: 'e' },
+        entered: 0,
+        overall_conversion: 0,
+        steps: [],
+      } as never);
+
+      const res = await service.runFunnel({
+        workspace_id: 'ws1',
+        name: 'RDV', // case-insensitive lookup
+        dateRange: { preset: 'all_time' } as never,
+      });
+
+      // Delegated to the SAME engine with the persisted steps + stored defaults.
+      expect(analyticsService.funnel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace_id: 'ws1',
+          steps: [
+            { goal_name: 'appointment_click', label: 'Demande' },
+            { goal_name: 'rdv_booked', label: undefined },
+          ],
+          unit: 'visitor', // from default_unit (no override)
+          window_seconds: 3600, // from default_window_seconds (no override)
+        }),
+      );
+      expect(res.funnel_name).toBe('rdv');
+      expect(res.funnel_label).toBe('Tunnel RDV');
+    });
+
+    it('runFunnel run-time unit/window OVERRIDE the stored defaults', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: {
+          funnels: [
+            {
+              name: 'rdv',
+              steps: [
+                { goal_name: 'appointment_click' },
+                { goal_name: 'rdv_booked' },
+              ],
+              default_unit: 'visitor',
+              default_window_seconds: 3600,
+            },
+          ],
+        },
+      });
+      analyticsService.funnel.mockResolvedValue({ steps: [] } as never);
+      await service.runFunnel({
+        workspace_id: 'ws1',
+        name: 'rdv',
+        dateRange: { preset: 'all_time' } as never,
+        unit: 'session',
+        window_seconds: 60,
+      });
+      expect(analyticsService.funnel).toHaveBeenCalledWith(
+        expect.objectContaining({ unit: 'session', window_seconds: 60 }),
+      );
+    });
+
+    it('runFunnel on an unknown name → 404 FUNNEL_NOT_FOUND', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Yoga',
+        settings: { funnels: [{ name: 'other', steps: [] }] },
+      });
+      await expect(
+        service.runFunnel({
+          workspace_id: 'ws1',
+          name: 'ghost',
+          dateRange: { preset: 'all_time' } as never,
+        }),
+      ).rejects.toMatchObject({ response: { code: 'FUNNEL_NOT_FOUND' } });
+      expect(analyticsService.funnel).not.toHaveBeenCalled();
     });
 
     it('getCustomization 404s on a missing workspace', async () => {

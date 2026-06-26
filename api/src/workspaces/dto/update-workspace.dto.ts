@@ -14,6 +14,8 @@ import {
   MinLength,
   MaxLength,
   Matches,
+  ArrayMinSize,
+  ArrayMaxSize,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -167,6 +169,58 @@ export class CrmMappingDto {
   phone_call_timeline_name?: string;
 }
 
+/** One step of a persisted named funnel (VAGUE 2). */
+export class WorkspaceFunnelStepDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(120)
+  goal_name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  label?: string;
+}
+
+/**
+ * One named, persisted funnel for a workspace (VAGUE 2 customisation). The
+ * workspace-layer persistence contract for `settings.funnels` — the admin
+ * M2M funnels DTOs reuse this shape (same pattern as CrmMappingDto). 2..8
+ * ordered steps; `name` is a slug used to execute the funnel by name.
+ */
+export class WorkspaceFunnelDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(64)
+  @Matches(/^[a-z0-9][a-z0-9_-]*$/, {
+    message:
+      'name must be a slug: lowercase letters/digits/_/- , starting with a letter or digit',
+  })
+  name: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  label?: string;
+
+  @IsArray()
+  @ArrayMinSize(2)
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => WorkspaceFunnelStepDto)
+  steps: WorkspaceFunnelStepDto[];
+
+  @IsOptional()
+  @IsIn(['session', 'visitor'])
+  default_unit?: 'session' | 'visitor';
+
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  @Max(7_776_000)
+  default_window_seconds?: number;
+}
+
 export class UpdateWorkspaceSettingsDto {
   @IsOptional()
   @IsNumber()
@@ -255,6 +309,12 @@ export class UpdateWorkspaceSettingsDto {
   @ValidateNested()
   @Type(() => CrmMappingDto)
   crm_mapping?: CrmMappingDto;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => WorkspaceFunnelDto)
+  funnels?: WorkspaceFunnelDto[];
 }
 
 export class UpdateWorkspaceDto {

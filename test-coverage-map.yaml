@@ -546,13 +546,16 @@
     - api/test/admin-platform.e2e-spec.ts
     - api/test/identity-backfill.e2e-spec.ts
     - api/test/prospect360.e2e-spec.ts
+    - api/test/named-funnels.e2e-spec.ts
   reason: |
     Surface M2M plateforme (/api/admin/platform/*). admin-platform.e2e couvre le
     guard + le routing de toutes les routes M2M ; identity-backfill.e2e exerce
     en plus userProvenance/backfillIdentity contre un vrai ClickHouse (S6 Lot C) ;
     prospect360.e2e exerce analytics.prospect360 (compose provenance + journey
     export.userEvents + ads.conversions) contre un vrai ClickHouse + sabotage
-    user inexistant.
+    user inexistant ; named-funnels.e2e exerce funnels.set/get/run (funnels
+    nommés persistés VAGUE 2) contre un vrai ClickHouse + sabotages (nom inconnu
+    404, <2 étapes 400, doublon 400, slug invalide, catalogue vidé).
 
 - sources:
     - api/src/demo/demo.controller.ts

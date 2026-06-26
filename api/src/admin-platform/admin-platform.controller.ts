@@ -33,6 +33,11 @@ import {
   SetFeaturesDto,
   SetLayoutDto,
 } from './dto/customization.dto';
+import {
+  GetFunnelsDto,
+  RunFunnelDto,
+  SetFunnelsDto,
+} from './dto/funnels.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import { AdsConversionsResponseDto } from './dto/ads-conversions-response.dto';
 import { TrackingVerifyDto } from './dto/tracking-verify.dto';
@@ -481,6 +486,40 @@ export class AdminPlatformController {
   })
   getCrmMapping(@Body() dto: GetCrmMappingDto) {
     return this.adminPlatformService.getCrmMapping(dto);
+  }
+
+  // ─── Lot I — Named funnels M2M (VAGUE 2 customisation) ────────────────
+
+  @Post('funnels.set')
+  @WriteM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      "Define/replace a workspace’s named funnels (VAGUE 2). Each funnel = ordered goal/event steps adapted to the client’s tracker (phone/form/purchase/signup…), persisted in settings JSON so it can be executed by name instead of passed ad-hoc. FULL-REPLACE on the list; [] clears all. Names unique per workspace.",
+  })
+  setFunnels(@Body() dto: SetFunnelsDto) {
+    return this.adminPlatformService.setFunnels(dto);
+  }
+
+  @Post('funnels.get')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Read a workspace’s persisted named funnels (audit / IA).',
+  })
+  getFunnels(@Body() dto: GetFunnelsDto) {
+    return this.adminPlatformService.getFunnels(dto);
+  }
+
+  @Post('funnels.run')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Execute ONE persisted funnel BY NAME (VAGUE 2). Resolves the named funnel’s stored steps + default unit/window, then runs the same windowFunnel engine as analytics.funnel. unit/window_seconds/filters/timezone override the stored defaults. Unknown name → 404 FUNNEL_NOT_FOUND.',
+  })
+  runFunnel(@Body() dto: RunFunnelDto) {
+    return this.adminPlatformService.runFunnel(dto);
   }
 
   // ─── Lot F — ads.conversions (read-only Ads-attributed conversions) ───

@@ -122,6 +122,57 @@ export interface WorkspaceCrmMapping {
 }
 
 /**
+ * One step of a persisted, named funnel (VAGUE 2). A step = a tracked
+ * `goal_name` (or any event `name`) the unit must reach, IN ORDER. The optional
+ * `label` is the human caption shown in reports; default = `goal_name`.
+ *
+ * This mirrors the ad-hoc `FunnelStepDto` exactly (same shape) — the only
+ * difference is that a NamedFunnel's steps are STORED per workspace instead of
+ * being passed on every call, so each client owns its own conversion funnel
+ * (the tracker varies: phone, form, purchase, signup…).
+ */
+export interface FunnelStepConfig {
+  /** The `goal_name` / event `name` this step matches. */
+  goal_name: string;
+  /** Human caption shown in reports. Default = goal_name. */
+  label?: string;
+}
+
+/**
+ * A named, persisted funnel definition for ONE workspace (VAGUE 2
+ * customisation). Generalises the data-driven `crm_mapping.goals[]` pattern to
+ * the sales funnel: instead of passing `steps` on every `analytics.funnel` call,
+ * a client DEFINES its funnels once (e.g. a vitrine's "rdv" funnel =
+ * appointment_click → rdv_booked → form_submission), then EXECUTES them by name.
+ *
+ * Stored in the `settings` JSON blob (zero migration). The `default_unit` /
+ * `default_window_seconds` let a funnel carry its natural execution defaults
+ * (a phone funnel spans days → visitor unit; a checkout funnel = one session)
+ * while still being overridable at run time.
+ */
+export interface NamedFunnel {
+  /** Stable machine name used to execute the funnel (`funnels.run`). Unique per workspace. */
+  name: string;
+  /** Human title shown in the UI. Default = name. */
+  label?: string;
+  /** Ordered steps (2..8). The array order IS the funnel sequence. */
+  steps: FunnelStepConfig[];
+  /**
+   * Natural progression unit for THIS funnel:
+   *   - 'session' : one session_id must cross all steps (e.g. checkout) ;
+   *   - 'visitor' : one visitor_id crosses steps cross-session (e.g. a phone
+   *                 funnel spanning several visits).
+   * Default 'session' at run time when unset.
+   */
+  default_unit?: 'session' | 'visitor';
+  /**
+   * Natural windowFunnel window (seconds) for THIS funnel. Default at run time =
+   * the full requested date span when unset (steps may span the whole period).
+   */
+  default_window_seconds?: number;
+}
+
+/**
  * Workspace settings stored as JSON in the settings column.
  */
 export interface WorkspaceSettings {
@@ -177,6 +228,13 @@ export interface WorkspaceSettings {
   dashboard_layout?: DashboardLayout;
   /** Configurable analytics→CRM semantics (N4 + S4). */
   crm_mapping?: WorkspaceCrmMapping;
+  /**
+   * Per-workspace named funnels (VAGUE 2 customisation). Each client defines its
+   * own conversion funnels (steps = goals/events, tracker adapted: phone, form,
+   * purchase, signup…), executed by name via `funnels.run`. Absent → the
+   * workspace has no persisted funnel; the caller must pass ad-hoc `steps`.
+   */
+  funnels?: NamedFunnel[];
 }
 
 /**
