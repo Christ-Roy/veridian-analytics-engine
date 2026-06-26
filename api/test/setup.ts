@@ -48,6 +48,9 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // PROSPECT 360 — fiche 360 d'un prospect en 1 call M2M plateforme
   // (prospect360.e2e-spec.ts) : provenance + journey + ads_conversions.
   'staminads_ws_prospect360_test_ws',
+  // Custom dashboard widgets (VAGUE 2 "comme Twenty") — setLayout strict +
+  // analytics.widgetData group-by réel (widget-config.e2e-spec.ts).
+  'staminads_ws_widget_config_test_ws',
 ];
 
 let client: ClickHouseClient;

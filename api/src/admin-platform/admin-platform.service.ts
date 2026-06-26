@@ -14,7 +14,11 @@ import { WorkspacesService } from '../workspaces/workspaces.service';
 import { ApiKeysService } from '../api-keys/api-keys.service';
 import { MailService } from '../mail/mail.service';
 import { AnalyticsService } from '../analytics/analytics.service';
-import { AnalyticsQueryDto } from '../analytics/dto/analytics-query.dto';
+import {
+  AnalyticsQueryDto,
+  FilterOperator,
+  Granularity,
+} from '../analytics/dto/analytics-query.dto';
 import { FunnelQueryDto } from '../analytics/dto/funnel-query.dto';
 import { ConversionsByChannelDto } from '../analytics/dto/conversions-by-channel.dto';
 import { VoipService } from '../voip/voip.service';
@@ -59,13 +63,22 @@ import {
   SetCrmMappingDto,
   SetFeaturesDto,
   SetLayoutDto,
+  WidgetDataDto,
 } from './dto/customization.dto';
 import {
   GetFunnelsDto,
   RunFunnelDto,
   SetFunnelsDto,
 } from './dto/funnels.dto';
-import type { NamedFunnel } from '../workspaces/entities/workspace.entity';
+import {
+  validateWidgetsArray,
+  isKnownDashboardWidget,
+} from '../common/validators/dashboard-widget.validator';
+import type {
+  NamedFunnel,
+  DashboardLayout,
+  DashboardWidget,
+} from '../workspaces/entities/workspace.entity';
 import { WorkspaceStatusResponseDto } from './dto/workspace-status-response.dto';
 import { AdsConversionsDto } from './dto/ads-conversions.dto';
 import {
@@ -1238,22 +1251,151 @@ export class AdminPlatformService {
   }
 
   /**
-   * Set the native dashboard widget order/visibility (N3). Merges over the
-   * existing layout, dropping the undefined keys the transformer materialised so
-   * a partial update (e.g. only `order`) never wipes the sibling (`hidden_widgets`).
+   * Set the dashboard layout (N3 + VAGUE 2). Merges over the existing layout,
+   * dropping the undefined keys the transformer materialised so a partial update
+   * (e.g. only `order`) never wipes a sibling (`hidden_widgets` / `widgets`).
+   *
+   * STRICT VALIDATION AT PERSIST (garde-fou lead 2026-06-26): when `widgets[]`
+   * is provided, every widget is validated NOW — metric/dimension ∈ widget-safe
+   * whitelist, kind coherence (dimension_table REQUIRES dimension, metric_card
+   * FORBIDS it, time_series REQUIRES granularity), filters well-formed, unique
+   * slug id — and an invalid widget is a 400 that is NEVER persisted. `order` is
+   * also validated here (where the full layout is known) against the union of
+   * native widget keys and the EFFECTIVE custom widget ids: an `order` entry
+   * that names neither is a 400. This is the only place a custom widget can
+   * enter the store, so the store can never hold an unresolvable widget.
    */
   async setLayout(dto: SetLayoutDto) {
     await this.assertWorkspaceExists(dto.workspace_id);
     const ws = await this.workspacesService.get(dto.workspace_id);
-    const merged = {
+
+    const incoming = stripUndefined(dto.dashboard_layout);
+
+    // Validate the custom widgets being persisted (if the field is provided —
+    // full-replace semantics: an absent `widgets` keeps the stored ones).
+    if (incoming.widgets !== undefined) {
+      const widgetErrors = validateWidgetsArray(incoming.widgets);
+      if (widgetErrors.length > 0) {
+        throw new BadRequestException({
+          code: 'invalid_widget_config',
+          message: widgetErrors,
+        });
+      }
+    }
+
+    // `incoming.widgets` is a WidgetConfigDto[] whose `kind`/`granularity` are
+    // typed `string` (class-validator `@IsIn`). The `validateWidgetsArray` gate
+    // above guarantees each is a valid union member, so narrowing to the
+    // DashboardLayout shape at the merge boundary is sound.
+    const merged: DashboardLayout = {
       ...(ws.settings.dashboard_layout ?? {}),
-      ...stripUndefined(dto.dashboard_layout),
+      ...(incoming as Partial<DashboardLayout>),
     };
+
+    // Validate `order` against native keys ∪ EFFECTIVE custom widget ids. A
+    // custom widget id is only valid in `order` if it exists in the effective
+    // `widgets` after the merge (so you cannot order a widget you didn't define).
+    if (merged.order && merged.order.length > 0) {
+      const widgetIds = new Set(
+        (merged.widgets ?? []).map((w: DashboardWidget) => w.id),
+      );
+      const unknown = merged.order.filter(
+        (key) => !isKnownDashboardWidget(key) && !widgetIds.has(key),
+      );
+      if (unknown.length > 0) {
+        throw new BadRequestException({
+          code: 'invalid_widget_config',
+          message: [
+            `dashboard_layout.order references unknown widget(s): ${unknown.join(', ')} — each entry must be a native widget key or a defined custom widget id`,
+          ],
+        });
+      }
+    }
+
     await this.workspacesService.update({
       id: dto.workspace_id,
       settings: { dashboard_layout: merged },
     });
     return this.getCustomization({ workspace_id: dto.workspace_id });
+  }
+
+  /**
+   * Resolve ONE persisted custom widget's data (VAGUE 2). Reads the widget-config
+   * stored in `dashboard_layout.widgets[]`, compiles it into the canonical
+   * AnalyticsQueryDto, and delegates to `analyticsService.query()` — the SAME
+   * query path the native dashboard uses, so there is no second query engine to
+   * keep in sync.
+   *
+   * The metric/dimension/granularity/filters come ENTIRELY from the STORED
+   * config, never from the request: the caller only supplies `dateRange` (+
+   * optional timezone). A front cannot smuggle a metric or dimension through
+   * this endpoint — it can only pick a persisted (already whitelisted) widget.
+   *
+   * Defensive re-validation: the stored widget is re-checked against the
+   * whitelist/coherence rules before compiling. It was validated at persist, but
+   * re-checking costs nothing and turns a corrupted/legacy stored widget into a
+   * clean 400 instead of a query-builder throw.
+   *
+   * Unknown widget_id → 404 (widget_not_found).
+   */
+  async widgetData(dto: WidgetDataDto) {
+    await this.assertWorkspaceExists(dto.workspace_id);
+    const ws = await this.workspacesService.get(dto.workspace_id);
+
+    const widgets = ws.settings.dashboard_layout?.widgets ?? [];
+    const widget = widgets.find((w) => w.id === dto.widget_id);
+    if (!widget) {
+      throw new NotFoundException({
+        code: 'widget_not_found',
+        message: `No custom widget '${dto.widget_id}' in workspace '${dto.workspace_id}'`,
+      });
+    }
+
+    // Defensive: a stored widget must still be valid before we compile it.
+    const errors = validateWidgetsArray([widget]);
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        code: 'invalid_widget_config',
+        message: errors,
+      });
+    }
+
+    const table = widget.table ?? 'sessions';
+    const query: AnalyticsQueryDto = {
+      workspace_id: dto.workspace_id,
+      table,
+      metrics: [widget.metric],
+      // dimension_table groups by the (single) dimension; the other kinds don't.
+      dimensions: widget.dimension ? [widget.dimension] : [],
+      dateRange: {
+        ...dto.dateRange,
+        // time_series buckets by the widget's granularity (overrides any value
+        // the caller might pass in dateRange.granularity — config is authority).
+        granularity:
+          widget.kind === 'time_series'
+            ? (widget.granularity as Granularity)
+            : undefined,
+      },
+      // Filters from the stored config, mapped to the native FilterDto shape.
+      filters: (widget.filters ?? []).map((f) => ({
+        dimension: f.dimension,
+        operator: f.operator as FilterOperator,
+        values: f.values,
+      })),
+      // dimension_table caps its rows (default 10); the other kinds need 1 row.
+      limit:
+        widget.kind === 'dimension_table' ? (widget.limit ?? 10) : undefined,
+      ...(dto.timezone ? { timezone: dto.timezone } : {}),
+    };
+
+    const result = await this.analyticsService.query(query);
+
+    return {
+      widget_id: widget.id,
+      kind: widget.kind,
+      title: widget.title,
+      data: result.data,
+    };
   }
 
   /**

@@ -91,6 +91,9 @@ const SLUG_TO_CODE: Record<string, string> = {
   INVALID_CREDS: 'INVALID_CREDS',
   invalid_e164: 'INVALID_E164',
   already_exists: 'PHONE_NUMBER_ALREADY_EXISTS',
+  // Custom dashboard widgets (VAGUE 2 — customisation "comme Twenty"):
+  widget_not_found: 'WIDGET_NOT_FOUND',
+  invalid_widget_config: 'INVALID_WIDGET_CONFIG',
 };
 
 /** HTTP status → fallback machine code when no slug is carried in the body. */

@@ -1183,6 +1183,210 @@ describe('AdminPlatformService.provisionTenant', () => {
     });
   });
 
+  // ─── Custom dashboard widgets (VAGUE 2 "comme Twenty") ──────────────────
+  describe('setLayout — custom widgets strict validation', () => {
+    beforeEach(() => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      (workspacesService.update as jest.Mock).mockResolvedValue({} as never);
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Co',
+        settings: {},
+      });
+    });
+
+    it('persists a valid custom widget', async () => {
+      await service.setLayout({
+        workspace_id: 'ws1',
+        dashboard_layout: {
+          widgets: [
+            {
+              id: 'canaux',
+              kind: 'dimension_table',
+              title: 'Canaux',
+              metric: 'sessions',
+              dimension: 'channel_group',
+            },
+          ],
+        },
+      } as never);
+      expect(workspacesService.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          settings: expect.objectContaining({
+            dashboard_layout: expect.objectContaining({
+              widgets: expect.arrayContaining([
+                expect.objectContaining({ id: 'canaux' }),
+              ]),
+            }),
+          }),
+        }),
+      );
+    });
+
+    it.each([
+      [
+        'unknown metric',
+        { id: 'w', kind: 'metric_card', title: 'X', metric: 'nope' },
+      ],
+      [
+        'dimension on metric_card',
+        {
+          id: 'w',
+          kind: 'metric_card',
+          title: 'X',
+          metric: 'sessions',
+          dimension: 'channel_group',
+        },
+      ],
+      [
+        'time_series without granularity',
+        { id: 'w', kind: 'time_series', title: 'X', metric: 'sessions' },
+      ],
+    ])('rejects %s with 400 and never persists', async (_label, widget) => {
+      await expect(
+        service.setLayout({
+          workspace_id: 'ws1',
+          dashboard_layout: { widgets: [widget] },
+        } as never),
+      ).rejects.toMatchObject({ response: { code: 'invalid_widget_config' } });
+      expect(workspacesService.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a duplicate widget id (400)', async () => {
+      await expect(
+        service.setLayout({
+          workspace_id: 'ws1',
+          dashboard_layout: {
+            widgets: [
+              { id: 'dup', kind: 'metric_card', title: 'A', metric: 'sessions' },
+              { id: 'dup', kind: 'metric_card', title: 'B', metric: 'pageviews' },
+            ],
+          },
+        } as never),
+      ).rejects.toMatchObject({ response: { code: 'invalid_widget_config' } });
+      expect(workspacesService.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects an order entry that names neither a native key nor a defined widget id', async () => {
+      await expect(
+        service.setLayout({
+          workspace_id: 'ws1',
+          dashboard_layout: {
+            widgets: [
+              { id: 'real', kind: 'metric_card', title: 'X', metric: 'sessions' },
+            ],
+            order: ['real', 'ghost'],
+          },
+        } as never),
+      ).rejects.toMatchObject({ response: { code: 'invalid_widget_config' } });
+    });
+
+    it('accepts an order mixing a native key and a defined widget id', async () => {
+      await service.setLayout({
+        workspace_id: 'ws1',
+        dashboard_layout: {
+          widgets: [
+            { id: 'real', kind: 'metric_card', title: 'X', metric: 'sessions' },
+          ],
+          order: ['real', 'pages'],
+        },
+      } as never);
+      expect(workspacesService.update).toHaveBeenCalled();
+    });
+  });
+
+  describe('widgetData', () => {
+    const widget = {
+      id: 'canaux',
+      kind: 'dimension_table',
+      title: 'Canaux',
+      metric: 'sessions',
+      dimension: 'channel_group',
+    };
+
+    beforeEach(() => {
+      clickhouse.querySystem.mockResolvedValue([{ id: 'ws1' }]); // exists
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Co',
+        timezone: 'UTC',
+        settings: { dashboard_layout: { widgets: [widget] } },
+      });
+      analyticsService.query.mockResolvedValue({
+        data: [{ channel_group: 'direct', sessions: 10 }],
+        meta: {},
+      } as never);
+    });
+
+    it('compiles the stored widget into an analytics query and returns its data', async () => {
+      const res = await service.widgetData({
+        workspace_id: 'ws1',
+        widget_id: 'canaux',
+        dateRange: { preset: 'previous_30_days' },
+      } as never);
+
+      expect(analyticsService.query).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace_id: 'ws1',
+          table: 'sessions',
+          metrics: ['sessions'],
+          dimensions: ['channel_group'],
+          limit: 10,
+        }),
+      );
+      expect(res).toMatchObject({
+        widget_id: 'canaux',
+        kind: 'dimension_table',
+        title: 'Canaux',
+        data: [{ channel_group: 'direct', sessions: 10 }],
+      });
+    });
+
+    it('404s on an unknown widget id (no analytics query)', async () => {
+      await expect(
+        service.widgetData({
+          workspace_id: 'ws1',
+          widget_id: 'nope',
+          dateRange: { preset: 'previous_30_days' },
+        } as never),
+      ).rejects.toMatchObject({ response: { code: 'widget_not_found' } });
+      expect(analyticsService.query).not.toHaveBeenCalled();
+    });
+
+    it('does not group-by for a metric_card and asks for no granularity', async () => {
+      (workspacesService.get as jest.Mock).mockResolvedValue({
+        id: 'ws1',
+        name: 'Co',
+        timezone: 'UTC',
+        settings: {
+          dashboard_layout: {
+            widgets: [
+              {
+                id: 'kpi',
+                kind: 'metric_card',
+                title: 'KPI',
+                metric: 'unique_visitors',
+              },
+            ],
+          },
+        },
+      });
+      await service.widgetData({
+        workspace_id: 'ws1',
+        widget_id: 'kpi',
+        dateRange: { preset: 'previous_30_days' },
+      } as never);
+      expect(analyticsService.query).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metrics: ['unique_visitors'],
+          dimensions: [],
+          limit: undefined,
+          dateRange: expect.objectContaining({ granularity: undefined }),
+        }),
+      );
+    });
+  });
+
   // ─── PROSPECT 360 — fiche par prospect (compose provenance+journey+ads) ──
 
   describe('prospect360 (M2M)', () => {

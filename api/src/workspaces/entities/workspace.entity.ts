@@ -63,15 +63,53 @@ export interface WorkspaceFeatures {
 }
 
 /**
+ * One custom dashboard widget = a stored DESCRIPTION of an analytics group-by,
+ * compiled into the canonical AnalyticsQueryDto and resolved by the native
+ * query-builder at read time (VAGUE 2 — dashboard customisable "comme Twenty").
+ * The 8 native widgets stay hardcoded; this only ADDS workspace-defined widgets.
+ * Persisted in the `settings` JSON → zero migration. Always validated before
+ * persist (whitelist + kind coherence + unique id) — see dashboard-widget.validator.
+ */
+export interface DashboardWidget {
+  /** Unique slug id within the layout; referenced by `order`. */
+  id: string;
+  /** Render kind. */
+  kind: 'metric_card' | 'time_series' | 'dimension_table';
+  /** Display title. */
+  title: string;
+  /** Widget-safe metric key (whitelist). */
+  metric: string;
+  /** Analytics table; default 'sessions'. */
+  table?: 'sessions' | 'pages' | 'goals';
+  /** Widget-safe dimension key (required for dimension_table). */
+  dimension?: string;
+  /** Time bucket (required for time_series). */
+  granularity?: 'hour' | 'day' | 'week' | 'month' | 'year';
+  /** Optional filters on widget-safe dimensions. */
+  filters?: Array<{
+    dimension: string;
+    operator: string;
+    values?: (string | number | null)[];
+  }>;
+  /** Row cap for dimension_table (default 10). */
+  limit?: number;
+}
+
+/**
  * Per-client dashboard layout. The native staminads dashboard reads this to
  * REORDER and HIDE its existing widgets (no custom Veridian component — vision
  * 2026-05-23). Unknown/absent → the default native order, all widgets shown.
+ *
+ * `widgets[]` (VAGUE 2) ADDS workspace-defined custom widgets on top of the
+ * native grid. `order` may reference a native widget key OR a custom widget id.
  */
 export interface DashboardLayout {
-  /** Widget keys to hide (e.g. 'campaigns', 'countries', 'devices'). */
+  /** Native widget keys to hide (e.g. 'campaigns', 'countries', 'devices'). */
   hidden_widgets?: string[];
-  /** Ordered widget keys; widgets not listed keep their default relative order. */
+  /** Ordered keys (native widget key OR custom widget id); unlisted keep default order. */
   order?: string[];
+  /** Custom workspace-defined widgets (config group-by). */
+  widgets?: DashboardWidget[];
 }
 
 /**

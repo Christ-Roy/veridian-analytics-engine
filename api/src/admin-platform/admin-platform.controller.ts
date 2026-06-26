@@ -32,6 +32,7 @@ import {
   SetCrmMappingDto,
   SetFeaturesDto,
   SetLayoutDto,
+  WidgetDataDto,
 } from './dto/customization.dto';
 import {
   GetFunnelsDto,
@@ -461,10 +462,21 @@ export class AdminPlatformController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Set the native dashboard widget order/visibility for a workspace (N3). Reorders/hides existing staminads widgets — no custom component.',
+      'Set the dashboard layout for a workspace (N3 + VAGUE 2): reorder/hide native widgets AND define custom widgets (dashboard_layout.widgets[]). Each custom widget is a config group-by, strictly validated at persist (whitelist + kind coherence + unique id) — invalid widget = 400, never stored.',
   })
   setLayout(@Body() dto: SetLayoutDto) {
     return this.adminPlatformService.setLayout(dto);
+  }
+
+  @Post('analytics.widgetData')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Resolve ONE persisted custom widget’s data (VAGUE 2). The caller passes {workspace_id, widget_id, dateRange, timezone?}; the engine reads the stored widget-config, compiles it into the canonical analytics query and delegates to analyticsService.query(). metric/dimension come from the STORED config (not the request). Unknown widget_id → 404.',
+  })
+  widgetData(@Body() dto: WidgetDataDto) {
+    return this.adminPlatformService.widgetData(dto);
   }
 
   @Post('crm.setMapping')

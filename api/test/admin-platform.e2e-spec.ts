@@ -1147,6 +1147,7 @@ describe('Admin Platform — surface M2M IA-first : auth gate', () => {
     'workspaces.setBranding',
     'workspaces.setFeatures',
     'workspaces.setLayout',
+    'analytics.widgetData',
     'crm.setMapping',
     'crm.getMapping',
     // Attribution M2M (funnel + conversions par canal)
