@@ -3,6 +3,7 @@ import {
   DEMO_TRACKED_NUMBERS,
   type DemoPhoneSource,
 } from './voip-calls';
+import { APP_VERSION } from '../../version';
 
 describe('generateVoipCalls', () => {
   const baseConfig = {
@@ -28,6 +29,17 @@ describe('generateVoipCalls', () => {
       expect(ev.name).toBe('goal');
       expect(ev.goal_name).toBe('phone_call');
       expect(ev.goal_value).toBeGreaterThanOrEqual(5);
+    }
+  });
+
+  it('writes a semver sdk_version equal to APP_VERSION (lot B5 — pas de "voip-seed-1.0")', () => {
+    const events = generateVoipCalls(baseConfig);
+    expect(events.length).toBeGreaterThan(0);
+    for (const ev of events) {
+      expect(ev.sdk_version).toBe(APP_VERSION);
+      // Doit matcher le regex semver de getMajorVersion côté console
+      // (/^(\d+)\./) — sinon le bandeau « SDK obsolète » se déclenche.
+      expect(ev.sdk_version).toMatch(/^\d+\./);
     }
   });
 

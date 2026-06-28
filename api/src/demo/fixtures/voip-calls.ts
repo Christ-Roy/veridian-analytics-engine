@@ -31,6 +31,7 @@
 
 import { TrackingEvent } from '../../events/entities/event.entity';
 import { toClickHouseDateTime } from '../../common/utils/datetime.util';
+import { APP_VERSION } from '../../version';
 
 /** Source de trafic = vision 2026-05-25 (1 numéro = 1 source). */
 export type DemoPhoneSource = 'seo' | 'ads' | 'direct';
@@ -279,7 +280,10 @@ export function generateVoipCalls(config: VoipCallsConfig): TrackingEvent[] {
       latitude: null,
       longitude: null,
       max_scroll: 0,
-      sdk_version: 'voip-seed-1.0',
+      // Semver conforme au major courant (cf SdkVersionWarning) — un
+      // 'voip-seed-1.0' non-semver déclenchait le bandeau « SDK obsolète »
+      // parasite en démo (lot B5).
+      sdk_version: APP_VERSION,
       // V3 fields — goal event
       page_number: 1,
       dedup_token: `${sessionId}_goal_phone_call_${callTs}`,

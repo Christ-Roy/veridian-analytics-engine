@@ -3,6 +3,7 @@ import { Alert, Button } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { analyticsQueryOptions } from '../../lib/queries'
+import { useAuth } from '../../lib/useAuth'
 import type { AnalyticsQuery, AnalyticsResponse } from '../../types/analytics'
 
 /** Extract major version number from semver string (e.g., "3.2.0" -> 3) */
@@ -17,6 +18,12 @@ interface SdkVersionWarningProps {
 }
 
 export function SdkVersionWarning({ workspaceId, timezone }: SdkVersionWarningProps) {
+  // Ceinture (lot B5) : jamais de bandeau « SDK obsolète » sur l'instance de
+  // démo. La data mockée peut porter d'anciens sdk_version (re-seeds avant le
+  // fix #1) et le bundle baked peut diverger d'APP_VERSION ; en démo on ne
+  // veut sous aucun prétexte contredire le pitch « stack moderne ».
+  const { isDemo } = useAuth()
+
   // Memoize query to prevent endless re-fetching
   const query = useMemo<AnalyticsQuery>(() => {
     const now = new Date()
@@ -35,6 +42,9 @@ export function SdkVersionWarning({ workspaceId, timezone }: SdkVersionWarningPr
   }, [workspaceId, timezone])
 
   const { data, isLoading } = useQuery(analyticsQueryOptions(query))
+
+  // Gate démo : aucun bandeau « SDK obsolète » en mode démo (cf bloc ci-dessus).
+  if (isDemo) return null
 
   if (isLoading || !data) return null
 
