@@ -174,6 +174,32 @@ describe('buildAnalyticsQuery', () => {
     expect(sql).toContain('ORDER BY sessions ASC');
   });
 
+  it('drops an order on a KNOWN metric NOT selected (no CH 500), falling back to first metric', () => {
+    // Regression: a dimension-table widget defaulted its sort to `unique_visitors`
+    // while only requesting sessions/median_duration/bounce_rate → ClickHouse
+    // "Unknown expression identifier 'unique_visitors'" 500. The unselected order
+    // field must be dropped, not interpolated nor thrown.
+    const { sql } = buildAnalyticsQuery({
+      ...baseQuery,
+      metrics: ['sessions', 'median_duration', 'bounce_rate'],
+      dimensions: ['landing_path'],
+      order: { unique_visitors: 'desc' },
+    });
+    expect(sql).not.toContain('unique_visitors');
+    expect(sql).toContain('ORDER BY sessions DESC');
+  });
+
+  it('keeps an order on a selected metric even alongside an unselected one', () => {
+    const { sql } = buildAnalyticsQuery({
+      ...baseQuery,
+      metrics: ['sessions', 'median_duration'],
+      dimensions: ['landing_path'],
+      order: { unique_visitors: 'desc', median_duration: 'asc' },
+    });
+    expect(sql).not.toContain('unique_visitors');
+    expect(sql).toContain('ORDER BY median_duration ASC');
+  });
+
   it('respects limit', () => {
     const { sql } = buildAnalyticsQuery({ ...baseQuery, limit: 50 });
     expect(sql).toContain('LIMIT 50');

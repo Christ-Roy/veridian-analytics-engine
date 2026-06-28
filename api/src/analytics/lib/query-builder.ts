@@ -334,33 +334,47 @@ export function buildAnalyticsQuery(
       : '';
 
   // Build ORDER BY
+  // An order field is only valid if it is actually PROJECTED by THIS query
+  // (a selected metric or a grouped dimension). ClickHouse rejects an
+  // `ORDER BY <col>` whose identifier is not in the SELECT scope → 500.
+  // A caller (e.g. a dimension-table widget defaulting its sort column to a
+  // metric the widget did not request) can legitimately pass such a field; we
+  // silently DROP it (and fall back to the first metric) rather than crash.
+  const selectedMetrics = new Set(query.metrics);
+  const selectedDimensions = new Set(query.dimensions ?? []);
+  const orderClauseFor = (field: string, dir: unknown): string => {
+    // SECURITY (defense-in-depth, OWASP A03): never interpolate `dir` raw —
+    // normalize to one of exactly two literals (ASC/DESC) or throw.
+    const sqlDir = normalizeOrderDirection(dir);
+    if (METRICS[field]) return `${field} ${sqlDir}`;
+    if (DIMENSIONS[field]) return `${DIMENSIONS[field].column} ${sqlDir}`;
+    // A field absent from BOTH registries is a real caller error (typo /
+    // injection attempt) → throw. A field that exists but is simply not
+    // projected by this query is handled (dropped) by the filter below.
+    throw new Error(`Unknown order field: ${field}`);
+  };
+  const projectedOrderEntries = query.order
+    ? Object.entries(query.order).filter(([field]) => {
+        // Unknown field → keep it so orderClauseFor throws (real error).
+        // Known field but not in the SELECT → drop it (legitimate, e.g. a
+        // widget defaulting its sort to a metric it did not request).
+        if (!METRICS[field] && !DIMENSIONS[field]) return true;
+        if (METRICS[field]) return selectedMetrics.has(field);
+        return selectedDimensions.has(field);
+      })
+    : [];
+
   let orderBy = '';
   if (granularityColumn) {
     // Always order by granularity first (ascending) when present
-    const additionalOrder = query.order
-      ? Object.entries(query.order)
-          .map(([field, dir]) => {
-            // SECURITY (defense-in-depth, OWASP A03): never interpolate `dir`
-            // raw — normalize to one of exactly two literals (ASC/DESC) or throw.
-            const sqlDir = normalizeOrderDirection(dir);
-            if (METRICS[field]) return `${field} ${sqlDir}`;
-            if (DIMENSIONS[field])
-              return `${DIMENSIONS[field].column} ${sqlDir}`;
-            throw new Error(`Unknown order field: ${field}`);
-          })
-          .join(', ')
-      : '';
+    const additionalOrder = projectedOrderEntries
+      .map(([field, dir]) => orderClauseFor(field, dir))
+      .join(', ');
     orderBy = `ORDER BY ${granularityColumn} ASC${additionalOrder ? ', ' + additionalOrder : ''}`;
-  } else if (query.order) {
-    const orderClauses = Object.entries(query.order).map(([field, dir]) => {
-      // SECURITY (defense-in-depth, OWASP A03): normalize direction, never raw.
-      const sqlDir = normalizeOrderDirection(dir);
-      if (METRICS[field]) return `${field} ${sqlDir}`;
-      if (DIMENSIONS[field]) return `${DIMENSIONS[field].column} ${sqlDir}`;
-      throw new Error(`Unknown order field: ${field}`);
-    });
-    orderBy = `ORDER BY ${orderClauses.join(', ')}`;
+  } else if (projectedOrderEntries.length > 0) {
+    orderBy = `ORDER BY ${projectedOrderEntries.map(([field, dir]) => orderClauseFor(field, dir)).join(', ')}`;
   } else if (query.metrics.length > 0) {
+    // No (projected) order given → default to the first selected metric.
     orderBy = `ORDER BY ${query.metrics[0]} DESC`;
   }
 
