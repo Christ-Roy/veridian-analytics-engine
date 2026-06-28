@@ -273,6 +273,15 @@ export interface WorkspaceSettings {
    * workspace has no persisted funnel; the caller must pass ad-hoc `steps`.
    */
   funnels?: NamedFunnel[];
+
+  /**
+   * Demo-mode flag (M2M `demo.seed`/`demo.wipe`). Stored in the JSON settings —
+   * zero migration. `true` while the workspace is showcasing synthetic demo
+   * data (all rows carry the `vrddemo_` session_id prefix); set back to `false`
+   * by `demo.wipe`. Purely informational: the real wipe keys on the session_id
+   * prefix, never on this flag. Absent/false → normal workspace.
+   */
+  is_demo?: boolean;
 }
 
 /**

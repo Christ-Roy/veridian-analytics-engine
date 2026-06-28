@@ -315,6 +315,13 @@ export class UpdateWorkspaceSettingsDto {
   @ValidateNested({ each: true })
   @Type(() => WorkspaceFunnelDto)
   funnels?: WorkspaceFunnelDto[];
+
+  // Demo-mode flag (set by M2M demo.seed / cleared by demo.wipe). Stored in the
+  // JSON settings — zero migration. Purely informational; the wipe keys on the
+  // vrddemo_ session_id prefix, never on this flag.
+  @IsOptional()
+  @IsBoolean()
+  is_demo?: boolean;
 }
 
 export class UpdateWorkspaceDto {

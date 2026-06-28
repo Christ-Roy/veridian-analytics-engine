@@ -51,6 +51,11 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   // Custom dashboard widgets (VAGUE 2 "comme Twenty") — setLayout strict +
   // analytics.widgetData group-by réel (widget-config.e2e-spec.ts).
   'staminads_ws_widget_config_test_ws',
+  // Demo-mode tenant — seed/wipe synthetic data in a REAL workspace by the
+  // vrddemo_ session_id prefix (demo-tenant.e2e-spec.ts). The TTL scenario +
+  // preserved_real sabotage tests live here.
+  'staminads_ws_demo_tenant_test_ws',
+  'staminads_ws_demo_tenant_real_ws',
 ];
 
 let client: ClickHouseClient;

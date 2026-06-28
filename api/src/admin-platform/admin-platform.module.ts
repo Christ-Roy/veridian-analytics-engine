@@ -2,6 +2,7 @@ import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AdminPlatformController } from './admin-platform.controller';
 import { AdminPlatformService } from './admin-platform.service';
+import { DemoTenantService } from './demo-tenant/demo-tenant.service';
 import { PlatformAdminGuard } from './guards/platform-admin.guard';
 import { SsrfGuard } from '../common/ssrf-guard';
 import { UsersModule } from '../users/users.module';
@@ -56,6 +57,14 @@ import { ExportModule } from '../export/export.module';
     forwardRef(() => ExportModule),
   ],
   controllers: [AdminPlatformController],
-  providers: [AdminPlatformService, PlatformAdminGuard, SsrfGuard],
+  providers: [
+    AdminPlatformService,
+    // Demo-mode tenant (seed/wipe/status synthetic data in a REAL workspace).
+    // Self-contained: depends only on ClickHouseService + WorkspacesService
+    // (both already provided via the imported modules).
+    DemoTenantService,
+    PlatformAdminGuard,
+    SsrfGuard,
+  ],
 })
 export class AdminPlatformModule {}

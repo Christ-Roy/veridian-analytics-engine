@@ -8,6 +8,12 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminPlatformService } from './admin-platform.service';
+import { DemoTenantService } from './demo-tenant/demo-tenant.service';
+import {
+  DemoSeedDto,
+  DemoStatusDto,
+  DemoWipeDto,
+} from './dto/demo-tenant.dto';
 import { AdminPlatformExceptionFilter } from './admin-platform-exception.filter';
 import { ProvisionTenantDto } from './dto/provision-tenant.dto';
 import { ProvisionTenantResponseDto } from './dto/provision-tenant-response.dto';
@@ -97,7 +103,61 @@ import {
 export class AdminPlatformController {
   constructor(
     private readonly adminPlatformService: AdminPlatformService,
+    private readonly demoTenantService: DemoTenantService,
   ) {}
+
+  // ─── Demo-mode tenant (seed/wipe/status synthetic data in a REAL workspace) ─
+
+  @Post('demo.seed')
+  @WriteM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Seed synthetic-but-realistic demo data INTO an existing workspace (M2M) ' +
+      'so a prospect/client sees the product full of life before real traffic. ' +
+      'Every row carries the vrddemo_ session_id prefix + a _demo=1 tag, so ' +
+      'demo.wipe removes it surgically. Refuses with 409 DEMO_REAL_DATA_PRESENT ' +
+      'if the workspace already holds REAL events, unless force:true. Sets ' +
+      'is_demo=true. Returns mock vs real row counts after the materialized ' +
+      'views settle.',
+  })
+  demoSeed(@Body() dto: DemoSeedDto) {
+    return this.demoTenantService.seed({
+      workspaceId: dto.workspace_id,
+      sessionCount: dto.session_count,
+      voipCount: dto.voip_count,
+      daysRange: dto.days_range,
+      force: dto.force,
+    });
+  }
+
+  @Post('demo.wipe')
+  @WriteM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Wipe ALL demo data from a workspace by the vrddemo_ session_id prefix ' +
+      '(M2M) — removes every stacked seed across events/sessions/pages/goals ' +
+      'even after the events TTL purged them. Counts the REAL (non-demo) rows ' +
+      'BEFORE and AFTER as an auditable proof the real data was untouched ' +
+      '(preserved_real.intact). A wipe on 0 demo rows is a clean no-op. Sets ' +
+      'is_demo=false.',
+  })
+  demoWipe(@Body() dto: DemoWipeDto) {
+    return this.demoTenantService.wipe(dto.workspace_id);
+  }
+
+  @Post('demo.status')
+  @ReadM2MThrottle()
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Read the demo state of a workspace (M2M): is_demo flag + mock (vrddemo_) ' +
+      'vs real row counts across events/sessions/pages/goals.',
+  })
+  demoStatus(@Body() dto: DemoStatusDto) {
+    return this.demoTenantService.status(dto.workspace_id);
+  }
 
   @Post('tenants.provision')
   @WriteM2MThrottle()
