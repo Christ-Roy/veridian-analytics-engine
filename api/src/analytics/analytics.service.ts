@@ -10,7 +10,11 @@ import { ExtremesQueryDto, ExtremesResponse } from './dto/extremes-query.dto';
 import {
   FunnelQueryDto,
   FunnelResponse,
+  FunnelSegmentedResponse,
+  FunnelResult,
+  FunnelSegment,
   FunnelStepResult,
+  SEGMENT_MAX,
 } from './dto/funnel-query.dto';
 import { ConversionsByChannelDto } from './dto/conversions-by-channel.dto';
 import { buildAnalyticsQuery, buildExtremesQuery } from './lib/query-builder';
@@ -494,7 +498,7 @@ export class AnalyticsService {
    * taux global. Filtrable par canal (channel/channel_group) via `filters`.
    * S'appuie sur ClickHouse `windowFunnel` sur la table durable `goals`.
    */
-  async funnel(dto: FunnelQueryDto): Promise<FunnelResponse> {
+  async funnel(dto: FunnelQueryDto): Promise<FunnelResult> {
     const workspace = await this.workspacesService.get(dto.workspace_id);
     const tz = dto.timezone || workspace.timezone || 'UTC';
     const unit = dto.unit === 'visitor' ? 'visitor' : 'session';
@@ -521,6 +525,30 @@ export class AnalyticsService {
     );
     const windowSeconds = dto.window_seconds ?? spanSeconds;
 
+    // Segmentation A/B/C (A1): resolve the segment dimension (same validation as
+    // filters — unknown dimension or not-on-goals is a 400) and pass its raw
+    // column expression to the builder. We ask for SEGMENT_MAX+1 rows so we can
+    // detect (and reject) a high-cardinality dimension instead of truncating.
+    let segment:
+      | { column: string; name: string; limit: number }
+      | undefined;
+    if (dto.segment_by) {
+      const dim = DIMENSIONS[dto.segment_by];
+      if (!dim) {
+        throw new BadRequestException(`Unknown dimension: ${dto.segment_by}`);
+      }
+      if (!dim.tables.includes('goals')) {
+        throw new BadRequestException(
+          `Dimension '${dto.segment_by}' is not available for segmenting the funnel (table 'goals').`,
+        );
+      }
+      segment = {
+        column: dim.column,
+        name: dim.name,
+        limit: SEGMENT_MAX + 1,
+      };
+    }
+
     const { sql, params } = buildFunnelQuery({
       steps: dto.steps,
       start: startCh,
@@ -528,6 +556,7 @@ export class AnalyticsService {
       unit,
       windowSeconds,
       filters: dto.filters,
+      segment,
     });
 
     const rows = await this.clickhouse.queryWorkspace<Record<string, unknown>>(
@@ -535,17 +564,73 @@ export class AnalyticsService {
       sql,
       params,
     );
-    const row = rows[0] ?? {};
 
-    // Coerce step counts (ClickHouse returns aggregates as strings).
-    const counts = dto.steps.map((_, i) => {
-      const v = row[`s${i}`];
-      const n = typeof v === 'number' ? v : Number(v ?? 0);
-      return Number.isFinite(n) ? n : 0;
+    // ─── Mono-série (rétro-compat ABSOLUE) ─────────────────────────────────
+    if (!segment) {
+      const row = rows[0] ?? {};
+      const steps = this.buildFunnelSteps(dto, row);
+      const entered = steps[0]?.count ?? 0;
+      const last = steps[steps.length - 1]?.count ?? 0;
+      const overall = entered > 0 ? round2((last / entered) * 100) : 0;
+      return {
+        workspace_id: dto.workspace_id,
+        unit,
+        dateRange: { start: startCh, end: endCh },
+        entered,
+        overall_conversion: overall,
+        steps,
+      } satisfies FunnelResponse;
+    }
+
+    // ─── Multi-séries (segment_by) — une ligne ClickHouse par segment ───────
+    if (rows.length > SEGMENT_MAX) {
+      throw new BadRequestException({
+        code: 'SEGMENT_CARDINALITY_EXCEEDED',
+        message:
+          `segment_by '${dto.segment_by}' produced more than ${SEGMENT_MAX} ` +
+          `series. Pick a lower-cardinality dimension or filter the funnel first.`,
+      });
+    }
+
+    const segments: FunnelSegment[] = rows.map((row) => {
+      const steps = this.buildFunnelSteps(dto, row);
+      const entered = steps[0]?.count ?? 0;
+      const last = steps[steps.length - 1]?.count ?? 0;
+      const overall = entered > 0 ? round2((last / entered) * 100) : 0;
+      // The segment value is projected under the dimension NAME alias; coerce to
+      // a stable string key (ClickHouse may return numbers for numeric dims, and
+      // an empty Map key resolves to '').
+      const raw = row[dto.segment_by!];
+      const key = raw === null || raw === undefined ? '' : String(raw);
+      return { key, label: key, entered, overall_conversion: overall, steps };
     });
 
+    return {
+      workspace_id: dto.workspace_id,
+      unit,
+      dateRange: { start: startCh, end: endCh },
+      segment_by: dto.segment_by!,
+      segments,
+    } satisfies FunnelSegmentedResponse;
+  }
+
+  /**
+   * Construit les `FunnelStepResult[]` à partir d'une ligne ClickHouse
+   * (`s0..sN` = counts, `v0..vN` = valeurs €). Factorisé pour servir le cas
+   * mono-série ET chaque segment d'un funnel segmenté (A1/A3-value).
+   */
+  private buildFunnelSteps(
+    dto: FunnelQueryDto,
+    row: Record<string, unknown>,
+  ): FunnelStepResult[] {
+    const num = (v: unknown): number => {
+      const n = typeof v === 'number' ? v : Number(v ?? 0);
+      return Number.isFinite(n) ? n : 0;
+    };
+    const counts = dto.steps.map((_, i) => num(row[`s${i}`]));
+    const values = dto.steps.map((_, i) => num(row[`v${i}`]));
     const entered = counts[0] ?? 0;
-    const steps: FunnelStepResult[] = dto.steps.map((s, i) => {
+    return dto.steps.map((s, i) => {
       const count = counts[i] ?? 0;
       const prev = i === 0 ? null : (counts[i - 1] ?? 0);
       const convFromPrev =
@@ -557,23 +642,12 @@ export class AnalyticsService {
         goal_name: s.goal_name,
         label: s.label || s.goal_name,
         count,
+        value: round2(values[i] ?? 0),
         conversion_from_previous: convFromPrev,
         conversion_from_start: convFromStart,
         dropoff_from_previous: dropoff,
       };
     });
-
-    const last = counts[counts.length - 1] ?? 0;
-    const overall = entered > 0 ? round2((last / entered) * 100) : 0;
-
-    return {
-      workspace_id: dto.workspace_id,
-      unit,
-      dateRange: { start: startCh, end: endCh },
-      entered,
-      overall_conversion: overall,
-      steps,
-    };
   }
 
   /**

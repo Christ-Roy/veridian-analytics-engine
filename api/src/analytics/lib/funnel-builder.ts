@@ -9,6 +9,18 @@ export interface FunnelQuerySpec {
   unit: 'session' | 'visitor';
   windowSeconds: number;
   filters?: FilterDto[];
+  /**
+   * Segmentation A/B/C (A1). Quand fourni, le funnel est calculé une série par
+   * valeur distincte de la dimension EN UNE SEULE requête : la colonne est
+   * ajoutée au sous-select (au GROUP BY de l'unité) et au GROUP BY externe.
+   * - `column` : expression SQL brute de la dimension (ex : `properties['variant']`,
+   *   résolue par l'appelant via `DIMENSIONS[segment_by].column`).
+   * - `name`   : nom de la dimension, utilisé comme alias de la colonne projetée
+   *   (le résultat est keyé par ce nom, cf. pattern query-builder).
+   * - `limit`  : garde-fou de cardinalité — le SQL ramène au plus `limit` lignes
+   *   (l'appelant en demande `SEGMENT_MAX + 1` pour détecter le dépassement).
+   */
+  segment?: { column: string; name: string; limit: number };
 }
 
 export interface BuiltFunnelQuery {
@@ -61,10 +73,37 @@ export function buildFunnelQuery(spec: FunnelQuerySpec): BuiltFunnelQuery {
   const unitGuard =
     unit === 'visitor' ? `AND visitor_id != ''` : `AND session_id != ''`;
 
-  // levelN booleans → per-group max funnel level.
+  // Per-step aggregates over the per-group funnel level:
+  //  - countIf(level >= N) AS sN  → units reaching step N
+  //  - sumIf(value, level >= N) AS vN → € value at step N (A3-value). `value` is
+  //    the per-unit total goal_value (sum over the unit's goals in window), so the
+  //    outer sumIf adds each qualifying unit's value once (no double counting
+  //    across the unit's individual goal rows).
   const levelExprs = steps
-    .map((_, i) => `countIf(level >= ${i + 1}) AS s${i}`)
+    .map(
+      (_, i) =>
+        `countIf(level >= ${i + 1}) AS s${i}, sumIf(value, level >= ${i + 1}) AS v${i}`,
+    )
     .join(',\n      ');
+
+  // Segmentation (A1): when a segment dimension is supplied we add it to BOTH
+  // the inner per-unit GROUP BY (so each unit keeps its segment value) and the
+  // outer aggregation (one row of sN/vN per segment value). The segment column
+  // is projected under its dimension NAME alias when the expression differs
+  // (Map accessors like `properties['variant']`), exactly like the query-builder
+  // does, so the result row is keyed by the dimension name. A hard LIMIT guards
+  // cardinality (caller asks SEGMENT_MAX+1 to detect overflow).
+  const seg = spec.segment;
+  // Inner projection line for the segment column (keyed `seg`), placed between
+  // the per-unit `value` and the windowFunnel. It carries its OWN trailing comma
+  // so it slots cleanly between the two without touching their commas.
+  const segInnerSelect = seg ? `\n        ${seg.column} AS seg,` : '';
+  const segInnerGroupBy = seg ? `, seg` : '';
+  const segOuterSelect = seg ? `seg AS \`${seg.name}\`,\n      ` : '';
+  const segOuterGroupBy = seg ? `\n    GROUP BY seg` : '';
+  const segOuterOrderLimit = seg
+    ? `\n    ORDER BY s0 DESC\n    LIMIT ${seg.limit}`
+    : '';
 
   // NOTE: we deliberately use an inline parenthesized subquery (NOT a `WITH …
   // AS` CTE). ClickHouseService.qualifyTableNames() rewrites every `FROM <word>`
@@ -73,10 +112,11 @@ export function buildFunnelQuery(spec: FunnelQuerySpec): BuiltFunnelQuery {
   // subquery is left untouched by that regex, so it is injection-/qualifier-safe.
   const sql = `
     SELECT
-      ${levelExprs}
+      ${segOuterSelect}${levelExprs}
     FROM (
       SELECT
         ${groupCol} AS g,
+        sum(goal_value) AS value,${segInnerSelect}
         windowFunnel({window:UInt32})(
           toDateTime(goal_timestamp),
           ${stepConds.join(',\n          ')}
@@ -86,8 +126,8 @@ export function buildFunnelQuery(spec: FunnelQuerySpec): BuiltFunnelQuery {
         AND goal_timestamp <= {end:DateTime64(3)}
         ${unitGuard}
         ${filterSql ? `AND ${filterSql}` : ''}
-      GROUP BY ${groupCol}
-    )
+      GROUP BY ${groupCol}${segInnerGroupBy}
+    )${segOuterGroupBy}${segOuterOrderLimit}
   `;
 
   return { sql, params };

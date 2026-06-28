@@ -231,7 +231,7 @@ export class AdminPlatformController {
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Compute a workspace funnel (M2M). Ordered goal steps, filterable by channel/channel_group. Same contract as POST /api/analytics.funnel, gated by the platform admin key.',
+      'Compute a workspace funnel (M2M). Ordered goal steps, filterable by channel/channel_group, optionally segmented A/B/C via segment_by (one series per dimension value in a single query). Same contract as POST /api/analytics.funnel, gated by the platform admin key.',
   })
   analyticsFunnel(@Body() dto: FunnelQueryDto) {
     return this.adminPlatformService.analyticsFunnel(dto);

@@ -524,7 +524,9 @@ export class AdminPlatformService {
   /**
    * M2M funnel (tunnel de vente). Same contract as POST /api/analytics.funnel
    * but gated by the platform admin key. Lets an IA read a tenant's funnel
-   * (filterable by channel) without a workspace-scoped key.
+   * (filterable by channel, optionally segmented A/B/C via segment_by) without a
+   * workspace-scoped key. Returns FunnelResponse (mono) or FunnelSegmentedResponse
+   * (when segment_by is set) — strictly identical to the public endpoint.
    */
   async analyticsFunnel(dto: FunnelQueryDto) {
     return this.analyticsService.funnel(dto);

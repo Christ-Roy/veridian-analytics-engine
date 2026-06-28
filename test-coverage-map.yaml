@@ -456,8 +456,11 @@
     - api/src/analytics/analytics.service.ts
   covered_by:
     - api/test/analytics.e2e-spec.ts
+    - api/test/funnel-segment-ab.e2e-spec.ts
   reason: |
     Endpoint /api/analytics.query, metrics, dimensions, filters.
+    funnel-segment-ab couvre analytics.funnel segment_by (A/B/C multi-séries)
+    + value par étape (A3) contre un vrai ClickHouse.
 
 - sources:
     - api/src/filters/filters.controller.ts
@@ -549,6 +552,7 @@
     - api/test/named-funnels.e2e-spec.ts
     - api/test/demo-tenant.e2e-spec.ts
     - api/test/widget-config.e2e-spec.ts
+    - api/test/funnel-segment-ab.e2e-spec.ts
   reason: |
     Surface M2M plateforme (/api/admin/platform/*). admin-platform.e2e couvre le
     guard + le routing de toutes les routes M2M ; identity-backfill.e2e exerce
@@ -564,7 +568,10 @@
     widget-config.e2e exerce setLayout/analytics.widgetData (custom widgets
     VAGUE 2) contre un vrai ClickHouse + sabotages, dont le cross-table
     metric/dimension×table (garde-fou racine "Pages les plus consultées") et
-    le durcissement du chemin preset de provisioning (applyProvisioningTemplate).
+    le durcissement du chemin preset de provisioning (applyProvisioningTemplate) ;
+    funnel-segment-ab.e2e exerce le miroir M2M analytics.funnel segment_by
+    (réponse segmentée A/B/C identique à la surface publique) contre un vrai
+    ClickHouse.
 
 - sources:
     - api/src/demo/demo.controller.ts

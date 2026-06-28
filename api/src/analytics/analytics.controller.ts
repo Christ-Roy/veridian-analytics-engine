@@ -11,7 +11,7 @@ import { ApiOperation, ApiSecurity, ApiTags, ApiQuery } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { AnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ExtremesQueryDto, ExtremesResponse } from './dto/extremes-query.dto';
-import { FunnelQueryDto, FunnelResponse } from './dto/funnel-query.dto';
+import { FunnelQueryDto, FunnelResult } from './dto/funnel-query.dto';
 import { ConversionsByChannelDto } from './dto/conversions-by-channel.dto';
 import type { AnalyticsTable } from './constants/tables';
 import { ANALYTICS_TABLES } from './constants/tables';
@@ -48,9 +48,9 @@ export class AnalyticsController {
   @UseGuards(WorkspaceAuthGuard)
   @ApiOperation({
     summary:
-      'Compute a conversion funnel over an ordered list of goal steps. Filterable by channel/channel_group. Uses ClickHouse windowFunnel over the durable goals table.',
+      'Compute a conversion funnel over an ordered list of goal steps. Filterable by channel/channel_group. Optional segment_by returns one series per dimension value (A/B/C) in a single ClickHouse query. Uses windowFunnel over the durable goals table.',
   })
-  async funnel(@Body() dto: FunnelQueryDto): Promise<FunnelResponse> {
+  async funnel(@Body() dto: FunnelQueryDto): Promise<FunnelResult> {
     return this.analyticsService.funnel(dto);
   }
 

@@ -5,6 +5,10 @@ import { AnalyticsService } from './analytics.service';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { WorkspacesService } from '../workspaces/workspaces.service';
 import { Workspace } from '../workspaces/entities/workspace.entity';
+import {
+  FunnelResponse,
+  FunnelSegmentedResponse,
+} from './dto/funnel-query.dto';
 
 describe('AnalyticsService', () => {
   let service: AnalyticsService;
@@ -325,12 +329,13 @@ describe('AnalyticsService', () => {
 
   describe('funnel', () => {
     it('computes step counts, per-step and overall conversion rates', async () => {
-      // windowFunnel aggregate row: s0=100 reach step1, s1=40 reach step2, s2=10 reach step3
+      // windowFunnel aggregate row: s0=100 reach step1, s1=40 reach step2, s2=10 reach step3.
+      // v0/v1/v2 = cumulative € value at each step (A3-value).
       clickhouse.queryWorkspace.mockResolvedValueOnce([
-        { s0: 100, s1: 40, s2: 10 },
+        { s0: 100, s1: 40, s2: 10, v0: 0, v1: 0, v2: 490 },
       ]);
 
-      const res = await service.funnel({
+      const res = (await service.funnel({
         workspace_id: 'ws-1',
         steps: [
           { goal_name: 'view', label: 'Vue' },
@@ -338,7 +343,7 @@ describe('AnalyticsService', () => {
           { goal_name: 'signup' },
         ],
         dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
-      });
+      })) as FunnelResponse;
 
       expect(res.unit).toBe('session');
       expect(res.entered).toBe(100);
@@ -365,20 +370,24 @@ describe('AnalyticsService', () => {
         conversion_from_previous: 25, // 10/40
         conversion_from_start: 10,
         dropoff_from_previous: 30,
+        value: 490, // A3-value: € at the final step
       });
       expect(res.overall_conversion).toBe(10); // 10/100
+      // A3-value: value carried on every step (0 where no goal_value).
+      expect(res.steps.map((s) => s.value)).toEqual([0, 0, 490]);
     });
 
     it('handles an empty result (no sessions in funnel)', async () => {
       clickhouse.queryWorkspace.mockResolvedValueOnce([]);
-      const res = await service.funnel({
+      const res = (await service.funnel({
         workspace_id: 'ws-1',
         steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
         dateRange: { preset: 'previous_7_days' },
-      });
+      })) as FunnelResponse;
       expect(res.entered).toBe(0);
       expect(res.overall_conversion).toBe(0);
       expect(res.steps.every((s) => s.count === 0)).toBe(true);
+      expect(res.steps.every((s) => s.value === 0)).toBe(true);
     });
 
     it('passes a channel filter through to ClickHouse', async () => {
@@ -393,6 +402,78 @@ describe('AnalyticsService', () => {
       });
       const [, sql] = clickhouse.queryWorkspace.mock.calls[0];
       expect(sql).toContain('channel_group =');
+    });
+
+    it('segment_by returns one series per dimension value in a single query', async () => {
+      // One ClickHouse row per segment value; the segment is keyed by the
+      // dimension NAME alias (here stm_2). A1: ONE query, N series.
+      clickhouse.queryWorkspace.mockResolvedValueOnce([
+        { stm_2: 'A', s0: 100, s1: 30, v0: 0, v1: 300 },
+        { stm_2: 'B', s0: 80, s1: 40, v0: 0, v1: 400 },
+        { stm_2: 'C', s0: 50, s1: 10, v0: 0, v1: 100 },
+      ]);
+
+      const res = (await service.funnel({
+        workspace_id: 'ws-1',
+        steps: [{ goal_name: 'signup' }, { goal_name: 'purchase' }],
+        dateRange: { start: '2026-06-01 00:00:00', end: '2026-06-30 23:59:59' },
+        segment_by: 'stm_2',
+      })) as FunnelSegmentedResponse;
+
+      // ONE ClickHouse call (single query).
+      expect(clickhouse.queryWorkspace).toHaveBeenCalledTimes(1);
+      // SQL groups by the segment column AND projects it under the dim name alias.
+      const [, sql] = clickhouse.queryWorkspace.mock.calls[0];
+      expect(sql).toContain('stm_2 AS seg');
+      expect(sql).toContain('GROUP BY seg');
+      expect(sql).toContain('`stm_2`');
+
+      expect(res.segment_by).toBe('stm_2');
+      expect(res.segments).toHaveLength(3);
+      const a = res.segments.find((s) => s.key === 'A')!;
+      expect(a.entered).toBe(100);
+      expect(a.overall_conversion).toBe(30); // 30/100
+      expect(a.steps[1].value).toBe(300);
+      const b = res.segments.find((s) => s.key === 'B')!;
+      expect(b.overall_conversion).toBe(50); // 40/80
+    });
+
+    it('throws SEGMENT_CARDINALITY_EXCEEDED when segment_by yields too many series', async () => {
+      // Builder asks SEGMENT_MAX+1 rows; > SEGMENT_MAX rows back → reject.
+      const tooMany = Array.from({ length: 13 }, (_, i) => ({
+        stm_2: `v${i}`,
+        s0: 10,
+        s1: 5,
+        v0: 0,
+        v1: 0,
+      }));
+      clickhouse.queryWorkspace.mockResolvedValueOnce(tooMany);
+
+      await expect(
+        service.funnel({
+          workspace_id: 'ws-1',
+          steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
+          dateRange: {
+            start: '2026-06-01 00:00:00',
+            end: '2026-06-30 23:59:59',
+          },
+          segment_by: 'stm_2',
+        }),
+      ).rejects.toThrow(/SEGMENT_CARDINALITY_EXCEEDED|more than/);
+    });
+
+    it('rejects an unknown segment_by dimension with 400', async () => {
+      await expect(
+        service.funnel({
+          workspace_id: 'ws-1',
+          steps: [{ goal_name: 'a' }, { goal_name: 'b' }],
+          dateRange: {
+            start: '2026-06-01 00:00:00',
+            end: '2026-06-30 23:59:59',
+          },
+          segment_by: 'definitely_not_a_dim',
+        }),
+      ).rejects.toThrow(/Unknown dimension/);
     });
   });
 

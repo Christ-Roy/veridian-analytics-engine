@@ -30,6 +30,8 @@ const ADDITIONAL_WORKSPACE_DATABASES = [
   'staminads_ws_channel_backfill_ws',
   // Funnel vs conversions parity e2e (funnel-conversions-parity.e2e-spec.ts)
   'staminads_ws_funnel_conv_parity_ws',
+  // Funnel segment_by A/B/C + per-step value e2e (funnel-segment-ab.e2e-spec.ts, A1/A3)
+  'staminads_ws_funnel_segment_ab_ws',
   // Named persisted funnels e2e (named-funnels.e2e-spec.ts, VAGUE 2)
   'staminads_ws_named_funnels_ws',
   // Identity stitching first-touch e2e (identity-stitch.e2e-spec.ts)
