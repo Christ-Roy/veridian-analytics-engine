@@ -548,6 +548,7 @@
     - api/test/prospect360.e2e-spec.ts
     - api/test/named-funnels.e2e-spec.ts
     - api/test/demo-tenant.e2e-spec.ts
+    - api/test/widget-config.e2e-spec.ts
   reason: |
     Surface M2M plateforme (/api/admin/platform/*). admin-platform.e2e couvre le
     guard + le routing de toutes les routes M2M ; identity-backfill.e2e exerce
@@ -559,7 +560,11 @@
     404, <2 étapes 400, doublon 400, slug invalide, catalogue vidé) ;
     demo-tenant.e2e exerce demo.seed/wipe/status (mode démo tenant) contre un
     vrai ClickHouse : scénario TTL (sessions/goals wipées sans events),
-    préservation data réelle (sabotage), guard 409, no-op, 100%-taggé.
+    préservation data réelle (sabotage), guard 409, no-op, 100%-taggé ;
+    widget-config.e2e exerce setLayout/analytics.widgetData (custom widgets
+    VAGUE 2) contre un vrai ClickHouse + sabotages, dont le cross-table
+    metric/dimension×table (garde-fou racine "Pages les plus consultées") et
+    le durcissement du chemin preset de provisioning (applyProvisioningTemplate).
 
 - sources:
     - api/src/demo/demo.controller.ts

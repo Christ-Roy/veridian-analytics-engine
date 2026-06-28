@@ -368,13 +368,34 @@ export class AdminPlatformService {
   ): Promise<void> {
     const preset = getWorkspaceTemplate(template);
     if (!preset) return;
+    // Same persist gate as setLayout: a provisioning preset is the OTHER path
+    // that can write dashboard_layout.widgets[]. Validate it here too so a preset
+    // can never seed an incoherent custom widget (e.g. metric/table mismatch)
+    // that would 400 at widgetData. Today's presets carry only `order`, but this
+    // closes the bypass by construction.
+    const presetWidgetErrors = validateWidgetsArray(
+      (preset.dashboard_layout as { widgets?: unknown })?.widgets,
+    );
+    // On invalid preset widgets, drop ONLY the widgets[] field (keep order/hide)
+    // rather than persist a widget that would 400 at widgetData. Loud log so the
+    // preset author fixes it; the workspace stays usable.
+    let presetLayout = preset.dashboard_layout;
+    if (presetWidgetErrors.length > 0) {
+      this.logger.error(
+        `[provision] template "${template}" has invalid custom widgets — ` +
+          `dropping widgets[] to avoid persisting a broken widget: ${presetWidgetErrors.join('; ')}`,
+      );
+      const { widgets: _dropped, ...rest } = presetLayout as DashboardLayout;
+      void _dropped;
+      presetLayout = rest as DashboardLayout;
+    }
     try {
       await this.workspacesService.update({
         id: workspaceId,
         settings: {
           branding: preset.branding,
           features: preset.features,
-          dashboard_layout: preset.dashboard_layout,
+          dashboard_layout: presetLayout,
           crm_mapping: preset.crm_mapping,
         },
       });

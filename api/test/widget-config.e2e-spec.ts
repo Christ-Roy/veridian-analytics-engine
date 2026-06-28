@@ -317,6 +317,69 @@ describe('Custom dashboard widgets E2E (VAGUE 2)', () => {
     }).expect(400);
   });
 
+  // ── ROOT-CAUSE: "Pages les plus consultées" cross-table breakage ────────
+  // The original bug: a {table:'pages', metric:'pageviews'} widget was persisted
+  // (pageviews IS in the widget whitelist, just not as a `pages` metric) and then
+  // exploded at widgetData with the runtime 400 "Metric pageviews is not
+  // available for table pages". The persist gate now crosses metric×table against
+  // the AUTHORITATIVE METRICS constants → rejected at setLayout, never stored.
+  it("SABOTAGE THE BUG — {table:'pages', metric:'pageviews'} → 400 INVALID_WIDGET_CONFIG, never persisted", async () => {
+    const res = await setLayout({
+      widgets: [
+        {
+          id: 'pages-vues',
+          kind: 'dimension_table',
+          title: 'Pages les plus consultées',
+          metric: 'pageviews',
+          table: 'pages',
+          dimension: 'page_path',
+        },
+      ],
+    }).expect(400);
+    expect(res.body.code).toBe('INVALID_WIDGET_CONFIG');
+    // The incoherent widget must NOT have been persisted → widgetData 404.
+    await waitForMutations(systemClient, 'workspaces');
+    const probe = await widgetData('pages-vues');
+    expect(probe.status).toBe(404);
+  });
+
+  it("THE FIX — {table:'pages', metric:'page_count', dimension:'page_path'} persists and resolves", async () => {
+    await setLayout({
+      widgets: [
+        {
+          id: 'top-pages',
+          kind: 'dimension_table',
+          title: 'Pages les plus consultées',
+          metric: 'page_count',
+          table: 'pages',
+          dimension: 'page_path',
+          limit: 20,
+        },
+      ],
+    }).expect(200);
+    await waitForMutations(systemClient, 'workspaces');
+    // widgetData compiles the pages group-by and returns real ClickHouse data —
+    // no runtime 400, because the persist gate guarantees metric/table coherence.
+    const data = await widgetData('top-pages').expect(200);
+    expect(data.body.widget_id).toBe('top-pages');
+    expect(Array.isArray(data.body.data)).toBe(true);
+  });
+
+  it('SABOTAGE dimension off-table → 400 (page_path filter/dimension on sessions)', async () => {
+    await setLayout({
+      widgets: [
+        {
+          id: 'bad-dim',
+          kind: 'dimension_table',
+          title: 'X',
+          metric: 'sessions',
+          table: 'sessions',
+          dimension: 'page_path',
+        },
+      ],
+    }).expect(400);
+  });
+
   // ── widgetData edge cases ───────────────────────────────────────────────
   it('widgetData on an unknown widget id → 404 WIDGET_NOT_FOUND', async () => {
     // Persist a known-good widget first so the layout exists.

@@ -14,6 +14,54 @@ import {
   WidgetKind,
   WidgetTable,
 } from '../widget-catalog';
+import { METRICS } from '../../analytics/constants/metrics';
+import { DIMENSIONS } from '../../analytics/constants/dimensions';
+
+// ───────────────────────────────────────────────────────────────────────────
+// AUTHORITATIVE table-availability (root-cause fix, lead 2026-06-28).
+//
+// The widget-safe whitelist (widget-catalog.json) carries its OWN `tables` copy,
+// hand-maintained ("2 maj/an"). The query-builder / analytics.service decide
+// table-availability from the REAL constants METRICS[m].tables / DIMENSIONS[d].
+// tables. Those two sources CAN drift: if the catalog says a metric is available
+// on a table while the constants disagree, setLayout PERSISTS the widget, then
+// widgetData → analytics.service throws "Metric X is not available for table Y"
+// at runtime (400 on a persisted widget — the exact "Pages les plus consultées"
+// breakage: a {table:'pages', metric:'pageviews'} widget). Pageviews is a
+// SESSIONS metric, not a PAGES metric (sum(pageview_count) over sessions).
+//
+// We therefore cross metric×table and dimension×table against the SAME
+// authoritative constants the runtime uses, on TOP of the whitelist. A widget
+// that passes setLayout can then NEVER be rejected by the runtime for
+// table-availability. The catalog whitelist still gates WHICH keys are exposable
+// at all (excludes user_id/visitor_id/noisy numerics) + supplies console labels;
+// the constants are the single source of truth for WHERE a key is queryable.
+// ───────────────────────────────────────────────────────────────────────────
+
+/** True when `metric` is queryable on `table` per the authoritative constants. */
+function isMetricAvailableOnTable(metric: string, table: WidgetTable): boolean {
+  return METRICS[metric]?.tables.includes(table) ?? false;
+}
+
+/** True when `dimension` is queryable on `table` per the authoritative constants. */
+function isDimensionAvailableOnTable(
+  dimension: string,
+  table: WidgetTable,
+): boolean {
+  return DIMENSIONS[dimension]?.tables.includes(table) ?? false;
+}
+
+/** Widget-safe metrics ∩ authoritative-on-table (what an actionable 400 should list). */
+function widgetSafeMetricsForTable(table: WidgetTable): string[] {
+  return WIDGET_SAFE_METRICS.filter((m) => isMetricAvailableOnTable(m, table));
+}
+
+/** Widget-safe dimensions ∩ authoritative-on-table (for the 400 message). */
+function widgetSafeDimensionsForTable(table: WidgetTable): string[] {
+  return WIDGET_SAFE_DIMENSIONS.filter((d) =>
+    isDimensionAvailableOnTable(d, table),
+  );
+}
 
 /**
  * Closed list of configurable native dashboard widget keys (N3 layout).
@@ -176,12 +224,33 @@ export function validateWidgetConfig(w: WidgetConfigInput): string[] {
     }
   }
 
-  // metric — required, widget-safe, available on the (effective) table
+  // metric — required, widget-safe AND queryable on the (effective) table.
+  // Two gates, both must pass:
+  //  1. widget-safe whitelist (catalog) — excludes identifiers/noisy numerics.
+  //  2. AUTHORITATIVE table-availability (METRICS[m].tables) — the SAME check the
+  //     runtime query-builder/analytics.service runs. This is what stops a
+  //     {table:'pages', metric:'pageviews'} widget being persisted then exploding
+  //     at widgetData with "Metric pageviews is not available for table pages".
   if (typeof w.metric !== 'string') {
     errors.push('widget.metric is required and must be a string');
   } else if (!isWidgetSafeMetric(w.metric, table)) {
+    if (METRICS[w.metric] && !isMetricAvailableOnTable(w.metric, table)) {
+      // Known metric, wrong table → list the metrics valid for THIS table.
+      errors.push(
+        `widget.metric '${w.metric}' is not available for table '${table}' ` +
+          `(valid metrics for '${table}': ${widgetSafeMetricsForTable(table).join(', ')})`,
+      );
+    } else {
+      errors.push(
+        `widget.metric '${w.metric}' is not a widget-safe metric for table '${table}' (allowed: ${WIDGET_SAFE_METRICS.join(', ')})`,
+      );
+    }
+  } else if (!isMetricAvailableOnTable(w.metric, table)) {
+    // Defensive: whitelist passed but the authoritative constants disagree
+    // (catalog `tables` drifted from METRICS). Reject — the runtime would 400.
     errors.push(
-      `widget.metric '${w.metric}' is not a widget-safe metric for table '${table}' (allowed: ${WIDGET_SAFE_METRICS.join(', ')})`,
+      `widget.metric '${w.metric}' is not available for table '${table}' ` +
+        `(valid metrics for '${table}': ${widgetSafeMetricsForTable(table).join(', ')})`,
     );
   }
 
@@ -201,8 +270,21 @@ export function validateWidgetConfig(w: WidgetConfigInput): string[] {
     if (typeof w.dimension !== 'string') {
       errors.push('widget.dimension must be a string');
     } else if (!isWidgetSafeDimension(w.dimension, table)) {
+      if (DIMENSIONS[w.dimension] && !isDimensionAvailableOnTable(w.dimension, table)) {
+        errors.push(
+          `widget.dimension '${w.dimension}' is not available for table '${table}' ` +
+            `(valid dimensions for '${table}': ${widgetSafeDimensionsForTable(table).join(', ')})`,
+        );
+      } else {
+        errors.push(
+          `widget.dimension '${w.dimension}' is not a widget-safe dimension for table '${table}' (allowed: ${WIDGET_SAFE_DIMENSIONS.join(', ')})`,
+        );
+      }
+    } else if (!isDimensionAvailableOnTable(w.dimension, table)) {
+      // Defensive: whitelist passed but authoritative constants disagree (drift).
       errors.push(
-        `widget.dimension '${w.dimension}' is not a widget-safe dimension for table '${table}' (allowed: ${WIDGET_SAFE_DIMENSIONS.join(', ')})`,
+        `widget.dimension '${w.dimension}' is not available for table '${table}' ` +
+          `(valid dimensions for '${table}': ${widgetSafeDimensionsForTable(table).join(', ')})`,
       );
     }
   }
@@ -252,8 +334,11 @@ export function validateWidgetConfig(w: WidgetConfigInput): string[] {
         }
         if (
           typeof f.dimension !== 'string' ||
-          !isWidgetSafeDimension(f.dimension, table)
+          !isWidgetSafeDimension(f.dimension, table) ||
+          !isDimensionAvailableOnTable(f.dimension, table)
         ) {
+          // Authoritative cross-check too: a filter dimension off-table would
+          // explode in filter-builder at widgetData time, same root cause.
           errors.push(
             `widget.filters[${i}].dimension '${String(f.dimension)}' is not a widget-safe dimension for table '${table}'`,
           );

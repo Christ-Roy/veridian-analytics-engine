@@ -198,6 +198,106 @@ describe('dashboard-widget.validator — custom widget config', () => {
     });
   });
 
+  // Root-cause of the "Pages les plus consultées" breakage (lead 2026-06-28):
+  // a custom widget {table:'pages', metric:'pageviews'} was persisted by
+  // setLayout then exploded at widgetData with the runtime 400 "Metric pageviews
+  // is not available for table pages". pageviews is a SESSIONS metric. The fix
+  // crosses metric×table / dimension×table against the AUTHORITATIVE
+  // METRICS/DIMENSIONS constants (the same source the runtime query-builder
+  // uses), so an incoherent widget is rejected at PERSIST, never at runtime.
+  describe('AUTHORITATIVE table-availability (root-cause: pages/pageviews)', () => {
+    it("THE BUG — {table:'pages', metric:'pageviews'} → rejected at persist", () => {
+      const errs = validateWidgetConfig({
+        id: 'pages-vues',
+        kind: 'dimension_table',
+        title: 'Pages les plus consultées',
+        metric: 'pageviews',
+        table: 'pages',
+        dimension: 'page_path',
+      });
+      // pageviews is not a pages metric → must be rejected here, not at runtime.
+      expect(
+        errs.some(
+          (e) =>
+            e.includes("widget.metric 'pageviews'") &&
+            e.includes("table 'pages'"),
+        ),
+      ).toBe(true);
+      // the actionable message lists the metrics actually valid for `pages`.
+      expect(errs.some((e) => e.includes('page_count'))).toBe(true);
+    });
+
+    it("THE FIX — {table:'pages', metric:'page_count', dimension:'page_path'} → OK", () => {
+      expect(
+        validateWidgetConfig({
+          id: 'pages-vues',
+          kind: 'dimension_table',
+          title: 'Pages les plus consultées',
+          metric: 'page_count',
+          table: 'pages',
+          dimension: 'page_path',
+        }),
+      ).toEqual([]);
+    });
+
+    it("native {table:'sessions', metric:'sessions', dimension:'channel_group'} → OK", () => {
+      expect(
+        validateWidgetConfig({
+          id: 'canaux',
+          kind: 'dimension_table',
+          title: 'Canaux',
+          metric: 'sessions',
+          table: 'sessions',
+          dimension: 'channel_group',
+        }),
+      ).toEqual([]);
+    });
+
+    it('dimension incompatible with table → rejected (page_path on sessions)', () => {
+      const errs = validateWidgetConfig({
+        id: 'x',
+        kind: 'dimension_table',
+        title: 'X',
+        metric: 'sessions',
+        table: 'sessions',
+        dimension: 'page_path',
+      });
+      expect(
+        errs.some(
+          (e) =>
+            e.includes("widget.dimension 'page_path'") &&
+            e.includes("table 'sessions'"),
+        ),
+      ).toBe(true);
+    });
+
+    it('filter dimension off-table → rejected (page_path filter on sessions)', () => {
+      const errs = validateWidgetConfig({
+        id: 'y',
+        kind: 'dimension_table',
+        title: 'Y',
+        metric: 'sessions',
+        table: 'sessions',
+        dimension: 'channel_group',
+        filters: [{ dimension: 'page_path', operator: 'equals', values: ['/'] }],
+      });
+      expect(errs.some((e) => e.includes('filters[0].dimension'))).toBe(true);
+    });
+
+    it('goals metric on sessions table → rejected (cross-table guard holds)', () => {
+      const errs = validateWidgetConfig({
+        id: 'g',
+        kind: 'metric_card',
+        title: 'G',
+        metric: 'sum_goal_value',
+        table: 'sessions',
+      });
+      expect(
+        errs.some((e) => e.includes("widget.metric 'sum_goal_value'")),
+      ).toBe(true);
+    });
+  });
+
   describe('validateWidgetsArray', () => {
     it('accepts an empty/absent widgets list', () => {
       expect(validateWidgetsArray(undefined)).toEqual([]);
