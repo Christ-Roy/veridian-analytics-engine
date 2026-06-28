@@ -807,7 +807,45 @@ describe('buildAnalyticsQuery', () => {
         "Dimension 'phone_source' is not available for table 'sessions'",
       );
     });
+  });
 
+  describe('variant goal-property dimension (Map accessor on goals)', () => {
+    it('groups by variant and aliases the SELECT to the dimension name', () => {
+      const { sql } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'goals',
+        metrics: ['goals'],
+        dimensions: ['variant'],
+      });
+      // segment_by:'variant' (A1) relies on this: GROUP BY the raw Map accessor,
+      // SELECT aliased back to `variant` so the row is keyed by the dim name.
+      expect(sql).toContain("properties['variant'] as variant");
+      expect(sql).toContain("GROUP BY properties['variant']");
+    });
+
+    it('filters variant=A in WHERE with a bound param', () => {
+      const { sql, params } = buildAnalyticsQuery({
+        ...baseQuery,
+        table: 'goals',
+        metrics: ['goals'],
+        dimensions: ['variant'],
+        filters: [{ dimension: 'variant', operator: 'equals', values: ['A'] }],
+      });
+      expect(sql).toContain("properties['variant'] = {f0:String}");
+      expect(params.f0).toBe('A');
+    });
+
+    it('throws for variant on the sessions table', () => {
+      expect(() =>
+        buildAnalyticsQuery({
+          ...baseQuery,
+          dimensions: ['variant'],
+        }),
+      ).toThrow("Dimension 'variant' is not available for table 'sessions'");
+    });
+  });
+
+  describe('aliased physical columns regression', () => {
     // Non-regression: aliased physical columns (name !== column) must also be
     // projected under their dimension name, not their raw column name.
     it('aliases page_path (column `path`) to the dimension name in SELECT', () => {

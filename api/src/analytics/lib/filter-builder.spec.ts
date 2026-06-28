@@ -320,6 +320,39 @@ describe('buildFilters', () => {
       ).toThrow("Dimension 'phone_source' is not available for table 'sessions'");
     });
   });
+
+  describe('variant goal-property dimension (Map accessor on goals)', () => {
+    it('filters variant with a bound param (equals)', () => {
+      const result = buildFilters(
+        [{ dimension: 'variant', operator: 'equals', values: ['A'] }],
+        'f',
+        'goals',
+      );
+      // value bound as a param (no injection); Map key hard-coded in the column
+      expect(result.sql).toBe("properties['variant'] = {f0:String}");
+      expect(result.params.f0).toBe('A');
+    });
+
+    it('filters variant with IN (array bound param)', () => {
+      const result = buildFilters(
+        [{ dimension: 'variant', operator: 'in', values: ['A', 'B', 'C'] }],
+        'f',
+        'goals',
+      );
+      expect(result.sql).toBe("properties['variant'] IN {f0:Array(String)}");
+      expect(result.params.f0).toEqual(['A', 'B', 'C']);
+    });
+
+    it('throws for variant on the sessions table', () => {
+      expect(() =>
+        buildFilters(
+          [{ dimension: 'variant', operator: 'equals', values: ['A'] }],
+          'f',
+          'sessions',
+        ),
+      ).toThrow("Dimension 'variant' is not available for table 'sessions'");
+    });
+  });
 });
 
 describe('buildMetricFilters', () => {

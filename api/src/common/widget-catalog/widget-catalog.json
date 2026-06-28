@@ -68,6 +68,7 @@
     "goal_path": { "label": "Page de l'objectif", "tables": ["goals"] },
     "phone_source": { "label": "Source de l'appel", "tables": ["goals"] },
     "phone_direction": { "label": "Direction de l'appel", "tables": ["goals"] },
-    "phone_status": { "label": "Statut de l'appel", "tables": ["goals"] }
+    "phone_status": { "label": "Statut de l'appel", "tables": ["goals"] },
+    "variant": { "label": "Variante (A/B/C)", "tables": ["goals"] }
   }
 }

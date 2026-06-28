@@ -491,6 +491,36 @@ export const DIMENSIONS: Record<string, DimensionDefinition> = {
     tables: ['goals'],
   },
 
+  // Goal properties (goals only — arbitrary keys of the goal event's
+  // `properties` Map). Same ClickHouse Map-accessor mechanism as the phone_*
+  // dimensions above: the query-builder aliases `properties['<key>']` back to
+  // the dimension name in the SELECT, and the filter-builder binds the *value*
+  // as a parameter ({fN:String}), so filtering/segmenting on these is safe.
+  //
+  // `variant` exposes `properties['variant']` (the A/B/C experience variant a
+  // goal was fired under), enabling funnel segmentation / filtering by variant
+  // without polluting an `stm_*` slot or duplicating `goal_name` per variant.
+  //
+  // EXTENSIBILITY: to expose another goal-property key as a filterable /
+  // groupable dimension, add ONE entry here following this exact pattern
+  // (`<dim>: { column: "properties['<key>']", type: 'string', tables: ['goals'] }`).
+  // The key is HARD-CODED in `column` on purpose — it is interpolated into the
+  // SQL (GROUP BY / SELECT / WHERE), so it must never be caller-controlled.
+  // (No generic `goal_property` dimension with a runtime-supplied key: that
+  // would interpolate an unbound, user-controlled Map key into SQL — an
+  // injection vector — and would require reworking the query/filter builders.)
+  //
+  // LIMITATION: ClickHouse has no skip-index on a Map key, so filtering on
+  // `properties['variant']` scans. Acceptable at demo scale; revisit (e.g. a
+  // materialized column) if a high-traffic tenant relies on it.
+  variant: {
+    name: 'variant',
+    column: "properties['variant']",
+    type: 'string',
+    category: 'Goal',
+    tables: ['goals'],
+  },
+
   // User
   user_id: {
     name: 'user_id',
