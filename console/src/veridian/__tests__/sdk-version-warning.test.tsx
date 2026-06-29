@@ -65,11 +65,20 @@ const PROD_CFG: PublicConfig = {
   contact_email: 'robert.brunon@veridian.site',
 }
 
-// Une session avec un sdk_version non-semver (data mockée historique) →
-// déclenche normalement le bandeau « SDK obsolète » hors démo.
-function mismatchedData() {
+// Une session avec un sdk_version NON-SEMVER (tag mocké / tracker custom) → on
+// ne peut RIEN conclure sur l'obsolescence → PAS de bandeau (même hors démo).
+function nonSemverData() {
   return {
     data: { data: [{ sdk_version: 'vrddemo-seed-1.0', sessions: 42 }] },
+    isLoading: false,
+  }
+}
+
+// Une session avec un vrai sdk_version SEMVER ANCIEN (major < courant) →
+// bandeau légitime « SDK obsolète ».
+function outdatedSemverData() {
+  return {
+    data: { data: [{ sdk_version: '6.1.0', sessions: 42 }] },
     isLoading: false,
   }
 }
@@ -83,7 +92,7 @@ function matchedData() {
 
 describe('SdkVersionWarning — gate démo (lot B5)', () => {
   it('ne rend RIEN en mode démo, même avec un sdk_version non-semver', () => {
-    mockUseQuery.mockReturnValue(mismatchedData())
+    mockUseQuery.mockReturnValue(nonSemverData())
     const { container } = render(
       withAuth(
         DEMO_CFG,
@@ -94,8 +103,20 @@ describe('SdkVersionWarning — gate démo (lot B5)', () => {
     expect(screen.queryByText(/SDK obsolète/i)).not.toBeInTheDocument()
   })
 
-  it('AFFICHE le bandeau hors démo quand le major diverge (régression : le gate ne casse pas le comportement normal)', () => {
-    mockUseQuery.mockReturnValue(mismatchedData())
+  it('ne rend RIEN hors démo quand le sdk_version est NON-SEMVER (tracker custom/démo) — fix faux-positif ASD', () => {
+    mockUseQuery.mockReturnValue(nonSemverData())
+    const { container } = render(
+      withAuth(
+        PROD_CFG,
+        <SdkVersionWarning workspaceId="ws-prod" timezone="Europe/Paris" />,
+      ),
+    )
+    expect(container).toBeEmptyDOMElement()
+    expect(screen.queryByText(/SDK obsolète/i)).not.toBeInTheDocument()
+  })
+
+  it('AFFICHE le bandeau hors démo quand un vrai semver ancien (major < courant) est tracké', () => {
+    mockUseQuery.mockReturnValue(outdatedSemverData())
     render(
       withAuth(
         PROD_CFG,

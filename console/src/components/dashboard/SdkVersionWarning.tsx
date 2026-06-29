@@ -57,13 +57,33 @@ export function SdkVersionWarning({ workspaceId, timezone }: SdkVersionWarningPr
   // If no versions found, no sessions have been tracked
   if (versions.length === 0) return null
 
-  // Only warn on major version mismatch (not minor/patch)
+  // Only warn on major version mismatch (not minor/patch), AND only when we can
+  // actually READ a semver major from the tracked versions. A non-semver
+  // sdk_version (e.g. demo-seed tags `vrddemo-onboarding-1.0`, or a client's
+  // custom/internal tracker label) yields major=null — we CANNOT conclude it is
+  // "obsolete", so it must NOT trip the banner (false-positive seen prod on the
+  // ASD demo workspace, where every event carries a `vrddemo-*` tag). Robust fix
+  // independent of the IS_DEMO instance gate and of re-seeding.
   const currentVersion = __APP_VERSION__
   const currentMajor = getMajorVersion(currentVersion)
-  const hasMatchingMajor = versions.some(v => getMajorVersion(v) === currentMajor)
 
-  // If any tracked version has the same major version, no warning needed
-  if (hasMatchingMajor) return null
+  const semverMajors = versions
+    .map(getMajorVersion)
+    .filter((m): m is number => m !== null)
+
+  // No parseable semver version among the tracked ones → nothing to conclude.
+  if (semverMajors.length === 0) return null
+
+  // If any tracked semver version has the same major version, no warning needed.
+  if (semverMajors.some((m) => m === currentMajor)) return null
+
+  // Name the first OUTDATED semver version in the message (not an arbitrary
+  // non-semver tag), so the banner points at a real version to act on.
+  const outdatedExample =
+    versions.find((v) => {
+      const m = getMajorVersion(v)
+      return m !== null && m !== currentMajor
+    }) ?? versions[0]
 
   return (
     <Alert
@@ -72,7 +92,7 @@ export function SdkVersionWarning({ workspaceId, timezone }: SdkVersionWarningPr
       message={
         <div className="flex items-center justify-between">
           <span>
-            SDK obsolète détecté ({versions[0]} → {currentVersion})
+            SDK obsolète détecté ({outdatedExample} → {currentVersion})
           </span>
           <Link to="/workspaces/$workspaceId/settings" params={{ workspaceId }} search={{ section: 'sdk' }}>
             <Button type="link" size="small" className="p-0">
