@@ -318,16 +318,19 @@ jobs:
       omit-dev: true
       level: "high"
 
-  # ─── Étage 1.g : Tests console Veridian (Vitest + RTL) ────────────
+  # ─── Étage 1.g : Tests console (Vitest + RTL) ─────────────────────
   #
-  # La console embarque les composants/pages Veridian (dashboard, tabs,
-  # welcome, auth-shell, error-pages) sous `console/src/veridian/**`, testés
-  # par `console/vitest.config.ts` (scopé strictement sur ce dossier — pas
-  # de Tailwind ni TanStack Router à monter). Sans ce job, ces suites
-  # n'étaient validées que par le pre-push local. Le build (étage 2) ne
-  # vérifie que la compilation TS, pas les assertions de comportement.
+  # Couvre les composants/pages Veridian (`console/src/veridian/**`) ET, depuis
+  # l'incident prod 2026-06-29, le code hérité staminax partagé : lib de
+  # formatage (`src/lib`), widgets dashboard (`src/components`) et hooks
+  # (`src/hooks`). Ce dernier élargissement est CRITIQUE : un crash
+  # `undefined.toFixed()` dans un widget dashboard avait planté tous les
+  # workspaces SANS qu'aucun test ne le voie (vitest était scopé strictement
+  # sur src/veridian/**). Bloquant : `build` (étage 2) a ce job dans son
+  # `needs:`, donc un test rouge empêche tout déploiement. Le build ne vérifie
+  # que la compilation TS, pas les assertions de comportement.
   console-checks:
-    name: Étage 1.g — Tests console Veridian (Vitest)
+    name: Étage 1.g — Tests console (Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 8
     defaults:
@@ -342,7 +345,7 @@ jobs:
           cache-dependency-path: console/package-lock.json
       - name: npm ci
         run: npm ci --no-audit --no-fund
-      - name: Vitest (console/src/veridian)
+      - name: Vitest (console — veridian + lib + components + hooks)
         run: npm run test
 
   # ─── Étage 2 : Build images ───────────────────────────────────────

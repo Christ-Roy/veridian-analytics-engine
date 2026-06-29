@@ -64,17 +64,34 @@ export const GRANULARITY_LABELS: Record<Granularity, string> = {
 }
 
 /**
+ * Coerce une valeur d'API potentiellement absente vers un nombre fini sûr.
+ *
+ * Les widgets configurables peuvent référencer une colonne (`col.key`) qui
+ * n'existe pas dans une ligne donnée (ex. métrique renommée/supprimée du
+ * registre, dimension hors-table) — `row[col.key]` vaut alors `undefined`.
+ * ClickHouse renvoie aussi des nombres en `string`. Sans cette coercion,
+ * `undefined.toFixed()` fait planter TOUT le dashboard via l'ErrorBoundary
+ * (incident prod 2026-06-29, tous les workspaces). Les fonctions de
+ * formatage bas niveau ne doivent JAMAIS throw : on tombe sur 0 par défaut.
+ */
+function toFiniteNumber(value: unknown): number {
+  const n = typeof value === 'string' ? Number(value) : (value as number)
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0
+}
+
+/**
  * Format a value based on metric type (for tooltips - full format)
  */
 export function formatValue(value: number, format: MetricConfig['format']): string {
+  const v = toFiniteNumber(value)
   switch (format) {
     case 'duration':
-      return formatDuration(value)
+      return formatDuration(v)
     case 'percentage':
-      return `${value.toFixed(1)}%`
+      return `${v.toFixed(1)}%`
     case 'number':
     default:
-      return formatNumber(value)
+      return formatNumber(v)
   }
 }
 
@@ -82,16 +99,17 @@ export function formatValue(value: number, format: MetricConfig['format']): stri
  * Format a value for axis labels (compact format)
  */
 export function formatAxisValue(value: number, format: MetricConfig['format']): string {
+  const v = toFiniteNumber(value)
   switch (format) {
     case 'duration':
       // Compact: 90 -> "90s", 150 -> "2.5m"
-      if (value < 60) return `${Math.round(value)}s`
-      return `${(value / 60).toFixed(1)}m`
+      if (v < 60) return `${Math.round(v)}s`
+      return `${(v / 60).toFixed(1)}m`
     case 'percentage':
-      return `${Math.round(value)}%`
+      return `${Math.round(v)}%`
     case 'number':
     default:
-      return formatNumber(value)
+      return formatNumber(v)
   }
 }
 
@@ -99,6 +117,7 @@ export function formatAxisValue(value: number, format: MetricConfig['format']): 
  * Format duration in seconds to human readable format
  */
 export function formatDuration(seconds: number): string {
+  seconds = toFiniteNumber(seconds)
   if (seconds < 60) {
     return `${Math.round(seconds)}s`
   }
@@ -116,6 +135,7 @@ export function formatDuration(seconds: number): string {
  * Format number with compact notation for large values
  */
 export function formatNumber(value: number): string {
+  value = toFiniteNumber(value)
   if (value >= 1_000_000) {
     return `${(value / 1_000_000).toFixed(1)}M`
   }
@@ -130,6 +150,7 @@ export function formatNumber(value: number): string {
  * Uses narrow symbol (e.g., "$" instead of "USD")
  */
 export function formatCurrency(value: number, currency: string = 'USD'): string {
+  value = toFiniteNumber(value)
   const formatter = new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency,

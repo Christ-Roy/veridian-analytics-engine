@@ -13,6 +13,19 @@ type SortDirection = 'asc' | 'desc'
 const EXPANDED_LIMIT = 200
 const PAGE_SIZE = 20
 
+/**
+ * Coerce une cellule de données vers un nombre fini. `row[col.key]` peut être
+ * `undefined` quand une colonne configurée n'existe pas dans la ligne (métrique
+ * renommée/supprimée du registre, dimension hors-table) ou une `string`
+ * (ClickHouse). Le `as number` aux call-sites mentait au compilateur et laissait
+ * passer `undefined` jusqu'à `formatValue(...).toFixed()` → crash du dashboard
+ * entier (incident prod 2026-06-29). On tombe sur 0 plutôt que d'afficher NaN.
+ */
+function cellNumber(raw: unknown): number {
+  const n = typeof raw === 'string' ? Number(raw) : (raw as number)
+  return typeof n === 'number' && Number.isFinite(n) ? n : 0
+}
+
 /** Default columns for backward compatibility (sessions tables) */
 const DEFAULT_COLUMNS: ColumnConfig[] = [
   { key: 'unique_visitors', label: 'Visiteurs', format: 'number' },
@@ -282,8 +295,10 @@ export function DimensionTableWidget({
                 </div>
                 {/* Column cells */}
                 {data.map((row, index) => {
-                  const value = row[col.key] as number
-                  const prevValue = row[`prev_${col.key}`] as number | undefined
+                  const value = cellNumber(row[col.key])
+                  const prevValue = row[`prev_${col.key}`] === undefined
+                    ? undefined
+                    : cellNumber(row[`prev_${col.key}`])
                   const change = showComparison ? getChange(value, prevValue) : null
                   const formattedValue = col.format === 'currency'
                     ? (value === 0 ? '-' : formatCurrency(value, col.currency))
@@ -521,8 +536,10 @@ function DimensionRow({
         const isFirst = colIndex === 0
         const isLast = colIndex === columns.length - 1
         const hasHeatMap = col.heatMap
-        const value = row[col.key] as number
-        const prevValue = row[`prev_${col.key}`] as number | undefined
+        const value = cellNumber(row[col.key])
+        const prevValue = row[`prev_${col.key}`] === undefined
+          ? undefined
+          : cellNumber(row[`prev_${col.key}`])
         const change = showComparison ? getChange(value, prevValue) : null
         const formattedValue = col.format === 'currency'
           ? (value === 0 ? '-' : formatCurrency(value, col.currency))

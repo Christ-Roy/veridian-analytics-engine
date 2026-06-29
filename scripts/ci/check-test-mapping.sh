@@ -100,6 +100,21 @@ canonical_test_for() {
     sdk/src/*.ts)
       # sdk/src/X.ts → sdk/src/X.test.ts (colocalisé) OU tests/
       echo "sdk/tests/" ;;
+    # ─── Console : code partagé critique (incident prod 2026-06-29) ───
+    # Lib de formatage, widgets dashboard et hooks consomment des réponses
+    # API ClickHouse (valeurs string/undefined) et alimentent le rendu. Un
+    # crash `undefined.toFixed()` y avait planté TOUS les workspaces sans
+    # qu'aucun test ne l'exige (la console était SKIP par ce mapping). On
+    # exige désormais un test colocalisé `<dir>/__tests__/<base>.test.tsx`.
+    # Les 87 fichiers legacy non couverts vivent dans tests-pending.txt
+    # (dette déclarée, à résorber). Hors scope : routes/, types/, _archive/,
+    # _optional-features/ (couverts par e2e ou gelés).
+    console/src/lib/*.ts|console/src/lib/*.tsx|console/src/components/**/*.tsx|console/src/hooks/*.ts|console/src/hooks/*.tsx)
+      # Mapping "dossier" : on accepte qu'un test du __tests__ colocalisé soit
+      # modifié dans la même PR (même convention que bridge/sdk ci-dessus).
+      local dir
+      dir=$(dirname "$file")
+      echo "${dir}/__tests__/" ;;
     *) echo "SKIP" ;;
   esac
 }

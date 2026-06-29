@@ -1,5 +1,6 @@
 import type { Filter } from '../types/analytics'
 import type { ExploreRow, ChildrenQueryConfig, DimensionsByCategory, DimensionInfo } from '../types/explore'
+import { toMetricNumber } from './dimension-utils'
 
 /**
  * Libellé unique affiché pour une valeur de dimension vide/nulle. Source
@@ -310,21 +311,27 @@ export function transformApiRowsToExploreRows(
       parentDimensionIndex: currentDimensionIndex,
       childrenLoaded: false,
       ...dimensionValues,
-      // Current period metrics
-      unique_visitors: (row.unique_visitors as number) ?? 0,
-      sessions: (row.sessions as number) ?? 0,
-      median_duration: (row.median_duration as number) ?? 0,
-      bounce_rate: (row.bounce_rate as number) ?? 0,
-      median_scroll: (row.median_scroll as number) ?? 0,
+      // Current period metrics. ClickHouse sérialise les agrégats en string :
+      // `as number` était un cast menteur (aucune conversion runtime) et `?? 0`
+      // ne rattrape PAS une string → `record.bounce_rate.toFixed()` crashait la
+      // page Explore (même classe de bug que l'incident dashboard 2026-06-29).
+      // toMetricNumber coerce réellement (string→number, NaN/absent→0/undefined).
+      unique_visitors: toMetricNumber(row.unique_visitors) ?? 0,
+      sessions: toMetricNumber(row.sessions) ?? 0,
+      median_duration: toMetricNumber(row.median_duration) ?? 0,
+      bounce_rate: toMetricNumber(row.bounce_rate) ?? 0,
+      median_scroll: toMetricNumber(row.median_scroll) ?? 0,
     }
 
-    // Add previous period metrics if available
+    // Add previous period metrics if available. On garde `| undefined` (les
+    // gardes `!== undefined` en aval distinguent "pas de période précédente"),
+    // mais on coerce les strings ClickHouse quand la valeur est présente.
     if (hasPreviousPeriod) {
-      exploreRow.unique_visitors_prev = row.unique_visitors_prev as number | undefined
-      exploreRow.sessions_prev = row.sessions_prev as number | undefined
-      exploreRow.median_duration_prev = row.median_duration_prev as number | undefined
-      exploreRow.bounce_rate_prev = row.bounce_rate_prev as number | undefined
-      exploreRow.median_scroll_prev = row.median_scroll_prev as number | undefined
+      exploreRow.unique_visitors_prev = toMetricNumber(row.unique_visitors_prev)
+      exploreRow.sessions_prev = toMetricNumber(row.sessions_prev)
+      exploreRow.median_duration_prev = toMetricNumber(row.median_duration_prev)
+      exploreRow.bounce_rate_prev = toMetricNumber(row.bounce_rate_prev)
+      exploreRow.median_scroll_prev = toMetricNumber(row.median_scroll_prev)
 
       // Calculate change percentages
       if (exploreRow.unique_visitors_prev !== undefined && exploreRow.unique_visitors_prev > 0) {
