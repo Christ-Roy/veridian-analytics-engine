@@ -216,154 +216,98 @@ jobs:
       continue-on-error: true   # upstream staminads, on suit
       trivyignore-path: '.trivyignore'
 
-  # ─── Étage 2 : Deploy prod ────────────────────────────────────────
-  # Suppose un compose Dokploy "analytics-engine" sur prod-pub. Pour
-  # l'instant on suppose deploy via Dokploy API (à câbler dans var
-  # ANALYTICS_DOKPLOY_COMPOSE_ID quand connu). Fallback : skip deploy
-  # avec warning si vars absentes.
+  # ─── Étage 2 : Deploy prod (Nomad via bastion) ────────────────────
+  #
+  # Migration Dokploy→Nomad (cluster 3 nœuds, Dokploy décommissionné 2026-07-10).
+  # Déploie le job versionné deploy/analytics-engine.nomad.hcl : SSH→bastion,
+  # token sourcé IN SITU, `nomad job plan`→`run -detach -var image_tag=prod-<sha>`.
+  # Rollback = auto_revert du job (stanza `update`) — Nomad ramène la version
+  # saine si le déploiement échoue ses checks. Pas de job de rollback CI.
   deploy-prod:
-    name: Deploy prod (Dokploy API)
+    name: Deploy prod (Nomad)
     needs: [build, trivy-bridge]
-    # Deploy seulement si build vert ET trivy-bridge vert (bloquant).
-    # `if:` explicite — même raison que trivy-bridge (chaîne avec
-    # structural-gate skippable). trivy-engine est warn-only, non requis.
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.trivy-bridge.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: production
       url: https://analytics-engine.app.veridian.site
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.engine_tag }}
+      JOB_FILE: deploy/analytics-engine.nomad.hcl
+      NOMAD_JOB: analytics-engine
+      REMOTE_HCL: /tmp/analytics-engine-${{ github.run_id }}.nomad.hcl
     steps:
-      # checkout requis : le health-check exécute scripts/ci/wait-dokploy-deploy.sh
-      # (ce job ne clonait pas le repo → "No such file or directory" sur le runner).
       - uses: actions/checkout@v4
-      - name: Trigger Dokploy redeploy
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          VPS_HOST: ${{ vars.PROD_VPS_HOST }}
-          VPS_USER: ${{ vars.PROD_VPS_USER }}
-          DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
-          ENGINE_TAG: ${{ needs.build.outputs.engine_tag }}
-          BRIDGE_TAG: ${{ needs.build.outputs.bridge_tag }}
+
+      - name: Guard image tag (refus d'un tag mouvant)
         run: |
-          if [ -z "$SSH_KEY" ] || [ -z "$VPS_HOST" ] || [ -z "$DOKPLOY_COMPOSE_ID" ]; then
-            echo "::warning::Prod deploy not configured (set DEPLOY_SSH_KEY + PROD_VPS_HOST + ANALYTICS_DOKPLOY_COMPOSE_ID)"
-            exit 0
-          fi
-          if [ -z "$ENGINE_TAG" ] || [ -z "$BRIDGE_TAG" ]; then
-            echo "::error::engine_tag/bridge_tag manquant (build outputs) — refus de déployer un tag mouvant"
+          if [ -z "$IMAGE_TAG" ]; then
+            echo "::error::engine_tag manquant (build outputs) — refus de déployer un tag mouvant"
             exit 1
           fi
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          # Garde-fous anti-hang muet (incident prod 2026-06-25, run 28134…) :
-          # le `docker pull` ci-dessous avait fait `Download complete` puis 19 min
-          # de SILENCE sur le SSH avant d'être tué au timeout du job. ConnectTimeout
-          # borne la connexion ; ServerAlive* (15s × 4 = 60s sans octet → coupe) ;
-          # `timeout` côté VPS borne chaque pull. Un hang échoue alors en < 3 min.
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host *
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking no
-          SSHCFG
-          chmod 600 ~/.ssh/config
 
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
-            ENGINE_TAG="$ENGINE_TAG" BRIDGE_TAG="$BRIDGE_TAG" DOKPLOY_COMPOSE_ID="$DOKPLOY_COMPOSE_ID" bash -s << 'DEPLOY'
-            set -e
-            DKEY=$(grep '^DOKPLOY_API_KEY=' ~/credentials/.all-creds.env | cut -d= -f2)
-            # Pre-pull le tag IMMUABLE exact (pas latest — sinon docker ne re-pull pas).
-            # `timeout 300` : un pull figé (registry lent, IO disque) échoue net au
-            # lieu de pendre. Non bloquant : `compose.deploy` Dokploy re-pull au up,
-            # donc même si le pre-pull timeoute, le deploy reste correct — on ne
-            # FAIL pas dessus (|| true), le verdict fonctionnel (gitSha) tranche.
-            timeout 300 docker pull ghcr.io/christ-roy/veridian-analytics-engine:${ENGINE_TAG} || echo "::warning::pre-pull engine timeout/échec — compose.deploy re-pullera"
-            timeout 300 docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${BRIDGE_TAG} || echo "::warning::pre-pull bridge timeout/échec — compose.deploy re-pullera"
-            # 1. compose.update : pin ENGINE_IMAGE_TAG/BRIDGE_IMAGE_TAG (vrais noms attendus par base.yml).
-            #
-            # ⚠️ MERGE, PAS REPLACE : Dokploy compose.update {env} REMPLACE l'env entier.
-            #    Envoyer seulement les 2 tags EFFACE les 21 autres vars (CLICKHOUSE_PASSWORD,
-            #    VERIDIAN_ADMIN_API_KEY...) → `compose up` fail-closed sur ${VAR:?}, container figé
-            #    sur l'ancienne image (incident vécu 2026-06-17, promo bafe9d9). Donc : fetch l'env
-            #    COURANT, remplace SEULEMENT les 2 lignes de tag, renvoie le TOUT.
-            CUR_ENV=$(curl -sf -H "x-api-key: $DKEY" \
-              "http://localhost:3000/api/trpc/compose.one?input=$(python3 -c "import urllib.parse,json;print(urllib.parse.quote(json.dumps({'json':{'composeId':'${DOKPLOY_COMPOSE_ID}'}})))")" \
-              | python3 -c "import sys,json;print(json.load(sys.stdin)['result']['data']['json'].get('env') or '')")
-            echo "$CUR_ENV" | grep -q '^VERIDIAN_ADMIN_API_KEY=' || { echo "::error::env Dokploy courant vide/incomplet — abandon (ne pas écraser)"; exit 1; }
-            NEW_ENV=$(printf '%s\n' "$CUR_ENV" \
-              | grep -vE '^(ENGINE_IMAGE_TAG|BRIDGE_IMAGE_TAG)=' \
-              | { cat; printf 'ENGINE_IMAGE_TAG=%s\nBRIDGE_IMAGE_TAG=%s\n' "$ENGINE_TAG" "$BRIDGE_TAG"; })
-            ENV_JSON=$(python3 -c "import json,sys;print(json.dumps(sys.stdin.read()))" <<< "$NEW_ENV")
-            curl -sf -X POST \
-              -H "x-api-key: $DKEY" \
-              -H "Content-Type: application/json" \
-              -d "{\"json\":{\"composeId\":\"${DOKPLOY_COMPOSE_ID}\",\"env\":${ENV_JSON}}}" \
-              http://localhost:3000/api/trpc/compose.update && echo "tag pinned (env mergé, $(echo "$NEW_ENV" | grep -c =) vars): ${ENGINE_TAG}"
-            # 2. compose.deploy : re-clone Git + up avec le nouvel ENGINE_IMAGE_TAG (auto-pull du tag pinné)
-            curl -sf -X POST \
-              -H "x-api-key: $DKEY" \
-              -H "Content-Type: application/json" \
-              -d "{\"json\":{\"composeId\":\"${DOKPLOY_COMPOSE_ID}\"}}" \
-              http://localhost:3000/api/trpc/compose.deploy && echo "deploy triggered"
-          DEPLOY
-
-      - name: Health check (verdict fonctionnel — anti rollback parasite)
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          VPS_HOST: ${{ vars.PROD_VPS_HOST }}
-          VPS_USER: ${{ vars.PROD_VPS_USER }}
-          DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
-          EXPECTED_SHA: ${{ github.sha }}
+      - name: Install SSH key (bastion Nomad)
         run: |
-          # Le `compose.deploy` Dokploy est ASYNCHRONE : il queue, puis clone+pull+
-          # recreate en arrière-plan (plusieurs min). DEUX faux négatifs en prod :
-          #   1. un health-check applicatif lancé trop tôt timeoute pendant le
-          #      recreate (vécu 3× le 2026-06-17) ;
-          #   2. le STATUT Dokploy lui-même MENT : il peut marquer `error` un
-          #      déploiement dont le code finit servi et la prod healthy (vécu
-          #      2026-06-25, run 28134278276) → rollback parasite sur un deploy SAIN.
-          #
-          # Le seul juge fiable que LE BON code est servi = une CONFIRMATION
-          # FONCTIONNELLE STABLE de l'app (health 200 consécutifs + clickhouse:ok
-          # + gitSha == SHA déployé), faite EN LOOPBACK DANS le container prod
-          # (bypass Traefik/DNS qui flottent depuis un runner). Toute cette logique
-          # est dans wait-dokploy-deploy.sh, exécuté SUR le VPS : il poll Dokploy,
-          # et sur Dokploy `error`/`timeout` il NE conclut PAS échec — il laisse un
-          # grace fonctionnel de 5 min (5×200 consécutifs + bon SHA requis) avant de
-          # trancher. EXPECTED_SHA (github.sha) est confronté à /api/health.gitSha
-          # (injecté au build via ENV GIT_SHA). Verdict : DONE (deploy sain servant
-          # le bon code) ou FAILED (prod cassée OU mauvais code → rollback légitime).
-          # Cf ticket todo/2026-06-25-prod-ci-deploy-faux-negatif-rollback-parasite.md.
-          mkdir -p ~/.ssh; echo "$SSH_KEY" > ~/.ssh/deploy_key; chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          # Keepalive anti-hang (cf. step "Trigger Dokploy redeploy").
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host *
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking no
-          SSHCFG
-          chmod 600 ~/.ssh/config
-          # 15 min : 8 min poll Dokploy au pire + jusqu'à 5 min de grace fonctionnel.
-          VERDICT=$(ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" \
-            "COMPOSE_ID='$DOKPLOY_COMPOSE_ID' EXPECTED_SHA='$EXPECTED_SHA' bash -s" < scripts/ci/wait-dokploy-deploy.sh)
-          echo "Verdict déploiement prod: $VERDICT"
-          rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
-          if [ "$VERDICT" = "DONE" ]; then
-            echo "✓ deploy prod sain (confirmation fonctionnelle stable côté VPS)"
-            exit 0
-          fi
-          echo "::error::deploy prod réellement cassé (verdict=$VERDICT) — rollback légitime"
-          exit 1
+          mkdir -p ~/.ssh
+          echo "${{ secrets.NOMAD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.NOMAD_BASTION_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Cleanup
+      # HCL DU REPO (déclare `variable "image_tag"`), jamais la copie du bastion.
+      - name: Copy HCL to bastion
+        run: |
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
+            "$JOB_FILE" \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}:$REMOTE_HCL"
+
+      - name: nomad validate + plan + run -detach
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "IMAGE_TAG='${IMAGE_TAG}' REMOTE_HCL='${REMOTE_HCL}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          source ~/credentials/nomad-bastion.env
+          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
+          echo "== validate =="
+          /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
+          echo "== plan (diff, inoffensif — exit 1 = allocs à créer, PAS une erreur) =="
+          /usr/bin/nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true
+          echo "== run -detach (image_tag=${IMAGE_TAG}) =="
+          /usr/bin/nomad job run -detach -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
+          REMOTE
+
+      # Poll jusqu'à successful/failed. Si failed → update{auto_revert} a déjà
+      # ramené la version saine (prod jamais laissée sur une alloc cassée).
+      - name: Wait deployment healthy (poll bastion)
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "NOMAD_JOB='${NOMAD_JOB}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          source ~/credentials/nomad-bastion.env
+          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
+          for i in $(seq 1 90); do
+            ST=$(/usr/bin/nomad job status "$NOMAD_JOB" 2>/dev/null \
+                  | sed -n '/Latest Deployment/,/^$/p' \
+                  | grep -oE 'successful|failed|running' | head -1 || echo pending)
+            echo "[$i/90] deployment: ${ST:-pending}"
+            [ "$ST" = "successful" ] && exit 0
+            if [ "$ST" = "failed" ]; then
+              echo "::error::Deployment prod failed (Nomad auto_revert a ramené la version saine)"
+              /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::deployment prod not successful after 900s"
+          /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
+          exit 1
+          REMOTE
+
+      - name: Cleanup secrets
         if: always()
-        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
   # ─── Étage 3 : Smoke E2E prod ─────────────────────────────────────
   e2e-prod-smoke:
@@ -404,72 +348,3 @@ jobs:
           path: veridian-bridge/test-results/
           retention-days: 7
 
-  # ─── Étage 4 : Rollback auto ──────────────────────────────────────
-  rollback-prod:
-    name: Rollback prod (auto on failure)
-    needs: [deploy-prod, e2e-prod-smoke]
-    if: |
-      always() &&
-      github.ref == 'refs/heads/main' &&
-      (needs.deploy-prod.result == 'failure' || needs.e2e-prod-smoke.result == 'failure') &&
-      inputs.skip-rollback != true
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Retag :rollback as :latest + redeploy
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          VPS_HOST: ${{ vars.PROD_VPS_HOST }}
-          VPS_USER: ${{ vars.PROD_VPS_USER }}
-          DOKPLOY_COMPOSE_ID: ${{ vars.ANALYTICS_DOKPLOY_COMPOSE_ID }}
-        run: |
-          if [ -z "$SSH_KEY" ] || [ -z "$VPS_HOST" ] || [ -z "$DOKPLOY_COMPOSE_ID" ]; then
-            echo "::warning::Prod rollback not configured"
-            exit 0
-          fi
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          # Keepalive anti-hang (cf. step "Trigger Dokploy redeploy").
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host *
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking no
-          SSHCFG
-          chmod 600 ~/.ssh/config
-
-          ssh -i ~/.ssh/deploy_key "$VPS_USER@$VPS_HOST" bash -s << ROLLBACK
-            set -e
-            for img in christ-roy/veridian-analytics-engine christ-roy/veridian-analytics-bridge; do
-              ROLLBACK_ID=\$(docker images ghcr.io/\${img}:rollback --format '{{.ID}}' 2>/dev/null | head -1)
-              if [ -n "\$ROLLBACK_ID" ]; then
-                docker tag "\$ROLLBACK_ID" ghcr.io/\${img}:latest
-                echo "✓ Retagged :rollback → :latest for \${img}"
-              else
-                echo "::warning::No :rollback image for \${img}"
-              fi
-            done
-            DKEY=\$(grep '^DOKPLOY_API_KEY=' ~/credentials/.all-creds.env | cut -d= -f2)
-            curl -sf -X POST \
-              -H "x-api-key: \$DKEY" \
-              -H "Content-Type: application/json" \
-              -d '{"json":{"composeId":"$DOKPLOY_COMPOSE_ID"}}' \
-              http://localhost:3000/api/trpc/compose.redeploy && echo "rollback redeploy triggered"
-          ROLLBACK
-
-          for i in $(seq 1 18); do
-            if curl -sf https://analytics-engine-bridge.app.veridian.site/health >/dev/null 2>&1; then
-              echo "✓ rollback healthy after $((i*10))s"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "::error::Rollback not confirmed — intervention manuelle requise"
-          exit 1
-
-      - name: Cleanup
-        if: always()
-        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
