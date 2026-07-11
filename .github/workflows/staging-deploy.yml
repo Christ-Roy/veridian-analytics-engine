@@ -450,186 +450,98 @@ jobs:
           format: 'table'
           trivyignores: 'veridian-bridge/.trivyignore'
 
-  # ─── Étage 3 : Deploy staging ─────────────────────────────────────
+  # ─── Étage 3 : Deploy staging (Nomad via bastion) ─────────────────
+  #
+  # Remplace l'ancien deploy compose SSH→dev-pub par un `nomad job run` du HCL
+  # versionné (deploy/analytics-engine-staging.nomad.hcl). La CI SSH vers le
+  # bastion Nomad, y source le token IN SITU (jamais exposé au runner), et
+  # `nomad job plan`→`run -detach -var image_tag=<staging-sha7>`. Rollback =
+  # auto_revert du job (stanza `update`), pas de job CI dédié.
   deploy-staging:
-    name: Étage 3 — Deploy staging
+    name: Étage 3 — Deploy staging (Nomad)
     needs: build
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/staging'
     runs-on: ubuntu-latest
-    # 18 min : `compose pull` de 4 images sur le dev-pub (7.6 Go RAM) + up
-    # des containers + smoke polling (jusqu'à 30×10s engine + 12×10s bridge)
-    # dépassait régulièrement l'ancien cap de 10 min → job tué pendant le
-    # smoke alors que le deploy lui-même était OK. Marge confortable ici.
-    timeout-minutes: 18
+    timeout-minutes: 15
     environment:
       name: staging
       url: https://analytics-engine.staging.veridian.site
+    env:
+      IMAGE_TAG: ${{ needs.build.outputs.engine_tag }}
+      JOB_FILE: deploy/analytics-engine-staging.nomad.hcl
+      NOMAD_JOB: analytics-engine-staging
+      REMOTE_HCL: /tmp/analytics-engine-staging-${{ github.run_id }}.nomad.hcl
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Install SSH key (bastion Nomad)
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
-          # Garde-fous anti-hang muet : un SSH qui se fige (TCP établi mais
-          # plus aucun octet — cas docker pull qui pend) doit ÉCHOUER VITE,
-          # pas pendre jusqu'au timeout du job. ConnectTimeout borne la
-          # connexion ; ServerAlive* (15s × 4 = 60s sans réponse → coupe).
-          # Appliqué à TOUTES les connexions vers dev-pub via ~/.ssh/config.
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host 37.187.199.185
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking accept-new
-          SSHCFG
-          chmod 600 ~/.ssh/config
+          echo "${{ secrets.NOMAD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.NOMAD_BASTION_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Sync compose to dev-pub
+      # Copie du HCL DU REPO (celui qui déclare `variable "image_tag"`), jamais
+      # la copie ~/nomad-veridian/jobs/ du bastion (sans variable → -var échoue).
+      - name: Copy HCL to bastion
         run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
-            'mkdir -p /opt/staging/analytics-engine/compose'
-          scp -i ~/.ssh/deploy_key compose/base.yml compose/staging.yml \
-            staging-deploy@37.187.199.185:/opt/staging/analytics-engine/compose/
-          scp -i ~/.ssh/deploy_key clickhouse-users.xml \
-            staging-deploy@37.187.199.185:/opt/staging/analytics-engine/
+          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
+            "$JOB_FILE" \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}:$REMOTE_HCL"
 
-      - name: Write .env on dev-pub
-        env:
-          ENGINE_TAG: ${{ needs.build.outputs.engine_tag }}
-          BRIDGE_TAG: ${{ needs.build.outputs.bridge_tag }}
-          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD_STAGING }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY_STAGING }}
-          VERIDIAN_ADMIN_API_KEY: ${{ secrets.VERIDIAN_ADMIN_API_KEY_STAGING }}
-          # Secret M2M des endpoints /api/admin/platform/* (PlatformAdminGuard).
-          # Requis (${VAR:?} dans base.yml) — sans lui le deploy fail-closed.
-          PLATFORM_ADMIN_API_KEY: ${{ secrets.PLATFORM_ADMIN_API_KEY_STAGING }}
-          HUB_HMAC_SECRET: ${{ secrets.HUB_HMAC_SECRET_ANALYTICS_STAGING }}
-          BRIDGE_DB_PASSWORD: ${{ secrets.BRIDGE_DB_PASSWORD_STAGING }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY_STAGING }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY_STAGING }}
-          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT_STAGING }}
-          # Clé AES-256-GCM (64 hex) — chiffrement at-rest des credentials
-          # bridge : tokens GSC (A4) + credentials VoIP self-service (U8).
-          # Sans elle, les features Settings/credentials se désactivent
-          # proprement (graceful degradation) — mais restent inertes.
-          TOKEN_ENCRYPTION_KEY: ${{ secrets.TOKEN_ENCRYPTION_KEY_STAGING }}
+      - name: nomad validate + plan + run -detach
         run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 \
-            "cat > /opt/staging/analytics-engine/.env <<ENV
-          ENGINE_IMAGE_TAG=${ENGINE_TAG}
-          BRIDGE_IMAGE_TAG=${BRIDGE_TAG}
-          NODE_ENV=production
-          CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD}
-          ENCRYPTION_KEY=${ENCRYPTION_KEY}
-          VERIDIAN_ADMIN_API_KEY=${VERIDIAN_ADMIN_API_KEY}
-          PLATFORM_ADMIN_API_KEY=${PLATFORM_ADMIN_API_KEY}
-          HUB_HMAC_SECRET=${HUB_HMAC_SECRET}
-          SKIP_HMAC=false
-          BRIDGE_DB_USER=bridge
-          BRIDGE_DB_PASSWORD=${BRIDGE_DB_PASSWORD}
-          BRIDGE_DB_NAME=veridian_bridge
-          VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
-          VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
-          VAPID_SUBJECT=${VAPID_SUBJECT}
-          TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY}
-          ENV
-          chmod 600 /opt/staging/analytics-engine/.env"
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "IMAGE_TAG='${IMAGE_TAG}' REMOTE_HCL='${REMOTE_HCL}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          source ~/credentials/nomad-bastion.env
+          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
+          echo "== validate =="
+          /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
+          echo "== plan (diff, inoffensif — exit 1 = allocs à créer, PAS une erreur) =="
+          /usr/bin/nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true
+          echo "== run -detach (image_tag=${IMAGE_TAG}) =="
+          /usr/bin/nomad job run -detach -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
+          REMOTE
 
-      - name: Deploy stack
+      # run -detach est ASYNC : on poll le déploiement jusqu'à successful/failed.
+      # Si failed → le stanza `update{auto_revert}` a déjà ramené la version saine.
+      - name: Wait deployment healthy (poll bastion)
         run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'DEPLOY'
-            set -e
-            cd /opt/staging/analytics-engine
-            # `timeout` borne chaque étape réseau/IO : un `docker pull` qui pend
-            # (registry lent, disque dev-pub plein à 94%) échoue net au lieu de
-            # figer le SSH jusqu'au timeout du job. Le rollback auto (étage 5)
-            # prend le relais si le deploy échoue.
-            timeout 300 docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
-            # down scopé au project 'analytics-engine-staging' avant le up :
-            # dégage les containers du run précédent. Scopé staging — ne
-            # touche pas analytics-engine-dev (project name distinct).
-            # Évite le conflit "container name already in use" sur orphelin.
-            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml down --remove-orphans || true
-            timeout 240 docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml up -d --remove-orphans
-            docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml ps
-          DEPLOY
-
-      # Smoke EXÉCUTÉ SUR dev-pub via SSH — pas depuis le runner GitHub.
-      #
-      # Pourquoi : `*.staging.veridian.site` résout sur une IP Tailscale
-      # (100.64.0.0/10), volontairement (cf. veridian-platform/CLAUDE.md —
-      # staging derrière Tailscale). Les runners GitHub ne sont PAS sur le
-      # tailnet → un `curl` runner→URL publique pend indéfiniment OU échoue
-      # (même avec --max-time) ; le job se faisait tuer/annuler pendant le
-      # smoke alors que le deploy lui-même était OK.
-      #
-      # Le smoke tourne donc DANS dev-pub, qui atteint les containers
-      # directement (réseau Docker) — indépendant de Tailscale/Traefik/DNS :
-      #   1. `docker compose ps` : tous les services en état `healthy`
-      #   2. HTTP réel via `docker exec` : engine /api/setup.status + bridge /health
-      - name: Smoke test (engine + bridge) — via SSH sur dev-pub
-        timeout-minutes: 7
-        run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'SMOKE'
-            set -e
-            cd /opt/staging/analytics-engine
-            COMPOSE="docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml"
-
-            echo "── Attente containers healthy (max 5 min) ──"
-            for i in $(seq 1 30); do
-              UNHEALTHY=$($COMPOSE ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
-                | awk '$2 != "" && $2 != "healthy" {print}')
-              if [ -z "$UNHEALTHY" ]; then
-                echo "✓ tous les containers healthy après ${i}0s"
-                break
-              fi
-              echo "  pas encore : $UNHEALTHY"
-              sleep 10
-            done
-            UNHEALTHY=$($COMPOSE ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
-              | awk '$2 != "" && $2 != "healthy" {print}')
-            if [ -n "$UNHEALTHY" ]; then
-              echo "::error::Containers non-healthy : $UNHEALTHY"
-              $COMPOSE ps
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "NOMAD_JOB='${NOMAD_JOB}' bash -s" <<'REMOTE'
+          set -euo pipefail
+          source ~/credentials/nomad-bastion.env
+          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
+          for i in $(seq 1 90); do
+            ST=$(/usr/bin/nomad job status "$NOMAD_JOB" 2>/dev/null \
+                  | sed -n '/Latest Deployment/,/^$/p' \
+                  | grep -oE 'successful|failed|running' | head -1 || echo pending)
+            echo "[$i/90] deployment: ${ST:-pending}"
+            [ "$ST" = "successful" ] && exit 0
+            if [ "$ST" = "failed" ]; then
+              echo "::error::Deployment failed (Nomad auto_revert a ramené la version saine)"
+              /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
               exit 1
             fi
-
-            echo "── Smoke HTTP engine (docker exec, port interne 3000) ──"
-            $COMPOSE exec -T engine wget -q -O- http://127.0.0.1:3000/api/setup.status >/dev/null \
-              && echo "✓ engine /api/setup.status OK" \
-              || { echo "::error::engine KO"; exit 1; }
-
-            echo "── Smoke HTTP bridge (docker exec, port interne 3002) ──"
-            $COMPOSE exec -T bridge wget -q -O- http://127.0.0.1:3002/health >/dev/null \
-              && echo "✓ bridge /health OK" \
-              || { echo "::error::bridge KO"; exit 1; }
-
-            echo "Staging deploy : ✓ smoke OK"
-          SMOKE
+            sleep 10
+          done
+          echo "::error::deployment not successful after 900s"
+          /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
+          exit 1
+          REMOTE
 
       - name: Cleanup secrets
         if: always()
-        run: |
-          rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
-  # ─── Étage 4 : Smoke applicatif post-deploy (via SSH dev-pub) ─────
+  # ─── Étage 4 : Smoke applicatif post-deploy ───────────────────────
   #
-  # Anciennement "Playwright smoke contre URL staging publique". Mais
-  # `*.staging.veridian.site` est sur le tailnet (IP Tailscale) — un
-  # runner GitHub ne peut PAS l'atteindre (cf. note étage 3). On exécute
-  # donc le smoke applicatif DANS dev-pub via SSH : check HTTP réel +
-  # assertions de contenu sur les endpoints publics du bridge et de
-  # l'engine. Pas de navigateur — les smokes Playwright actuels ne sont
-  # que des `fetch()` sur /health, parfaitement reproductibles en wget.
-  #
-  # NB : un vrai E2E navigateur contre staging nécessiterait de mettre le
-  # runner sur le tailnet (action tailscale/github-action + secret
-  # TS_OAUTH). Suivi séparé — cf. todo INFRA.
+  # La route staging est Tailscale-only (`internal-only@nomad` → 403 pour un
+  # runner GitHub public). On SSH sur le bastion (dans le tailnet) et on curl la
+  # route publique via l'ingress → assertions de contenu réelles sur engine+bridge.
   e2e-staging-smoke:
     name: Étage 4 — Smoke applicatif staging
     needs: deploy-staging
@@ -637,112 +549,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+      - name: Install SSH key (bastion)
         run: |
           mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
-          # Anti-hang : keepalive SSH (cf. Setup SSH étage 3).
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host 37.187.199.185
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking accept-new
-          SSHCFG
-          chmod 600 ~/.ssh/config
+          echo "${{ secrets.NOMAD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.NOMAD_BASTION_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Smoke applicatif (assertions de contenu) — via SSH
+      - name: Smoke (curl route via bastion tailnet)
         run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'E2E'
-            set -e
-            cd /opt/staging/analytics-engine
-            COMPOSE="docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml"
-
-            echo "── Bridge /health → status:ok ──"
-            BODY=$($COMPOSE exec -T bridge wget -q -O- http://127.0.0.1:3002/health)
-            echo "  réponse : $BODY"
-            echo "$BODY" | grep -q '"status":"ok"' \
-              || { echo "::error::bridge /health sans status:ok"; exit 1; }
-
-            echo "── Engine /api/setup.status → réponse JSON ──"
-            STATUS=$($COMPOSE exec -T engine wget -q -O- http://127.0.0.1:3000/api/setup.status)
-            echo "  réponse : $STATUS"
-            echo "$STATUS" | grep -q '{' \
-              || { echo "::error::engine /api/setup.status sans corps JSON"; exit 1; }
-
-            echo "Smoke applicatif staging : ✓ OK"
-          E2E
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" bash -s <<'SMOKE'
+          set -euo pipefail
+          echo "── Engine /api/health → status:ok ──"
+          BODY=$(curl -fsS --max-time 15 https://analytics-engine.staging.veridian.site/api/health)
+          echo "  réponse : $BODY"
+          echo "$BODY" | grep -q '"status":"ok"' \
+            || { echo "::error::engine /api/health sans status:ok"; exit 1; }
+          echo "── Console / → HTTP 200 ──"
+          curl -fsS --max-time 15 -o /dev/null -w "  HTTP %{http_code}\n" \
+            https://analytics-engine.staging.veridian.site/
+          echo "Smoke staging : ✓ OK"
+          SMOKE
 
       - name: Cleanup secrets
         if: always()
-        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
-
-  # ─── Étage 5 : Rollback auto si smoke fail ────────────────────────
-  rollback-staging:
-    name: Étage 5 — Rollback staging (auto on failure)
-    needs: [build, deploy-staging, e2e-staging-smoke]
-    if: |
-      always() &&
-      github.ref == 'refs/heads/staging' &&
-      (needs.deploy-staging.result == 'failure' || needs.e2e-staging-smoke.result == 'failure')
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup SSH
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H 37.187.199.185 >> ~/.ssh/known_hosts 2>/dev/null
-          # Anti-hang : keepalive SSH (cf. Setup SSH étage 3).
-          cat > ~/.ssh/config <<'SSHCFG'
-          Host 37.187.199.185
-            ConnectTimeout 15
-            ServerAliveInterval 15
-            ServerAliveCountMax 4
-            StrictHostKeyChecking accept-new
-          SSHCFG
-          chmod 600 ~/.ssh/config
-      # Rollback + vérif healthy : tout est exécuté DANS dev-pub via SSH.
-      # Le `curl` runner→URL publique ne marche pas (staging sur tailnet,
-      # cf. note étage 3) — on vérifie le healthcheck container localement.
-      - name: Rollback to :rollback image
-        run: |
-          ssh -i ~/.ssh/deploy_key staging-deploy@37.187.199.185 bash -s <<'ROLLBACK'
-            set -e
-            cd /opt/staging/analytics-engine
-            COMPOSE="docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml"
-            # On force ENGINE_IMAGE_TAG=rollback et BRIDGE_IMAGE_TAG=rollback
-            # dans le .env, puis redeploy.
-            sed -i 's|^ENGINE_IMAGE_TAG=.*|ENGINE_IMAGE_TAG=rollback|' .env
-            sed -i 's|^BRIDGE_IMAGE_TAG=.*|BRIDGE_IMAGE_TAG=rollback|' .env
-            timeout 300 docker compose --env-file .env -f compose/base.yml -f compose/staging.yml pull
-            timeout 240 $COMPOSE up -d --remove-orphans
-            echo "✓ Rollback déclenché"
-
-            echo "── Vérif healthy post-rollback (max 3 min) ──"
-            for i in $(seq 1 18); do
-              UNHEALTHY=$($COMPOSE ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
-                | awk '$2 != "" && $2 != "healthy" {print}')
-              if [ -z "$UNHEALTHY" ]; then
-                echo "✓ Rollback healthy après $((i*10))s"
-                exit 0
-              fi
-              sleep 10
-            done
-            echo "::error::Rollback non confirmé après 180s — intervention manuelle requise"
-            $COMPOSE ps
-            exit 1
-          ROLLBACK
-      - name: Cleanup
-        if: always()
-        run: rm -f ~/.ssh/deploy_key ~/.ssh/known_hosts
+        run: rm -f ~/.ssh/id_ed25519 ~/.ssh/known_hosts

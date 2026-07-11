@@ -28,6 +28,17 @@ job "analytics-engine-staging" {
       value     = "ovh-dev"
     }
 
+    # Rollback idiomatique Nomad : auto-revert à la dernière version saine si le
+    # nouveau déploiement échoue ses health checks. Pas de job de rollback CI.
+    update {
+      max_parallel      = 1
+      health_check      = "checks"
+      min_healthy_time  = "10s"
+      healthy_deadline  = "5m"
+      progress_deadline = "10m"
+      auto_revert       = true
+    }
+
     restart {
       attempts = 10
       interval = "10m"
