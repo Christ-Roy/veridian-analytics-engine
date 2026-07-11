@@ -12,3 +12,15 @@
 # Alignement : même VEX utilisé dans veridian-analytics/.trivyignore
 # À retirer : quand node:22-alpine release une image avec npm bumpé picomatch ≥ 4.0.4
 CVE-2026-33671
+#
+# CVE-2026-48815 — @sigstore/* (verification constraints, HIGH)
+# Path : /usr/local/lib/node_modules/npm/node_modules/@sigstore/… (sigstore 3.1.0)
+# Source : bundle npm dans l'image node:22-alpine officielle Docker Hub
+# Justification (identique picomatch — même classe npm-bundled) :
+#   - sigstore n'est PAS une dépendance du bridge (vérifié : absent de
+#     veridian-bridge/package.json ET package-lock.json)
+#   - Utilisé uniquement par npm (vérif signatures/provenance à l'install)
+#   - Au runtime de l'image bridge, npm n'est jamais exécuté (CMD npx tsx)
+#   - Code path non exposé à l'input réseau du bridge
+# À retirer : quand node:22-alpine release une image avec npm bumpé sigstore ≥ 4.1.1
+CVE-2026-48815
