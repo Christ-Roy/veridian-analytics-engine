@@ -1,8 +1,11 @@
 import { useCallback, useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
+import { Button } from 'antd'
+import { SlidersHorizontal } from 'lucide-react'
 import { workspaceQueryOptions } from '../../../../lib/queries'
 import { DashboardGrid } from '../../../../components/dashboard/DashboardGrid'
+import { DashboardManagerDrawer } from '../../../../components/dashboard/builder/DashboardManagerDrawer'
 import { DashboardFilters } from '../../../../components/dashboard/DashboardFilters'
 import { ExploreFilterBuilder } from '../../../../components/explore/ExploreFilterBuilder'
 import { LiveButton } from '../../../../components/live/LiveButton'
@@ -21,6 +24,7 @@ function Dashboard() {
   const navigate = useNavigate()
   const { data: workspace } = useSuspenseQuery(workspaceQueryOptions(workspaceId))
   const [subscribeDrawerOpen, setSubscribeDrawerOpen] = useState(false)
+  const [managerOpen, setManagerOpen] = useState(false)
   const {
     period,
     timezone,
@@ -77,6 +81,13 @@ function Dashboard() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-light text-gray-800">Tableau de bord</h1>
           <LiveButton workspaceId={workspaceId} workspaceTimezone={workspace.timezone} />
+          <Button
+            size="small"
+            icon={<SlidersHorizontal size={14} />}
+            onClick={() => setManagerOpen(true)}
+          >
+            Gérer
+          </Button>
         </div>
         <DashboardFilters
           period={period}
@@ -125,6 +136,12 @@ function Dashboard() {
         workspaceId={workspaceId}
         filters={filters}
         timezone={workspace.timezone}
+      />
+      <DashboardManagerDrawer
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        workspaceId={workspaceId}
+        layout={workspace.settings.dashboard_layout}
       />
     </div>
   )

@@ -11,7 +11,7 @@
  * ailleurs — on réutilise ces pickers pour garantir la même whitelist et les
  * mêmes libellés FR partout.
  */
-import { Select, Button, Space, Input } from 'antd'
+import { Select, Button, Space } from 'antd'
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
 import {
   WIDGET_SAFE_METRICS,
