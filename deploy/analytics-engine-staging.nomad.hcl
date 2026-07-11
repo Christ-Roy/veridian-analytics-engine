@@ -1,0 +1,236 @@
+# analytics-engine-staging — STAGING — job Nomad versionné (GitOps, source de vérité DANS ce repo).
+#
+# Placé sur ovh-dev (provider=ovh-dev), servi via l'ingress bastion (cross-node Tailscale).
+# PRIVÉ Tailscale : middleware internal-only (ipAllowList 100.64/10) → 403 hors tailnet, ET
+# host_network="tailscale" sur chaque port → app injoignable en public (double verrou).
+# ClickHouse + Postgres bridge STATEFUL (bind /opt/veridian-staging/analytics du nœud ovh-dev)
+# → group épinglé `provider=ovh-dev`. Secrets = Nomad Variable `nomad/jobs/analytics-engine-staging`.
+#
+# La CI (staging-deploy.yml) build+push engine+bridge au tag `staging-<sha>` puis
+# SSH → bastion → `nomad job plan -var image_tag=staging-<sha>` → `run -detach`.
+
+variable "image_tag" {
+  type        = string
+  description = "Tag des images GHCR engine+bridge (staging-<sha7>). Injecté par la CI."
+  default     = "staging-b95e022"
+}
+
+job "analytics-engine-staging" {
+  datacenters = ["veridian-eu"]
+  type        = "service"
+
+  group "stack" {
+    count = 1
+
+    # Épinglé à ovh-dev : les DB bind sur /opt/veridian-staging du nœud ovh-dev uniquement.
+    constraint {
+      attribute = "${meta.provider}"
+      value     = "ovh-dev"
+    }
+
+    restart {
+      attempts = 10
+      interval = "10m"
+      delay    = "15s"
+      mode     = "delay"
+    }
+
+    network {
+      mode = "bridge"
+      # host_network tailscale : les ports CNI bind sur l'IP Tailscale du nœud uniquement
+      # → apps injoignables en public, Traefik route via Tailscale.
+      port "http" {
+        to           = 3000
+        host_network = "tailscale"
+      }
+      port "bridge" {
+        to           = 3002
+        host_network = "tailscale"
+      }
+    }
+
+    # engine → console analytics (exposé)
+    service {
+      name     = "analytics-engine-staging"
+      provider = "nomad"
+      port     = "http"
+      tags = [
+        "traefik.enable=true",
+        "traefik.http.middlewares.internal-only.ipallowlist.sourcerange=100.64.0.0/10,127.0.0.1/32",
+        "traefik.http.routers.analytics-engine-staging.rule=Host(`analytics-engine.staging.veridian.site`)",
+        "traefik.http.routers.analytics-engine-staging.entrypoints=web",
+        "traefik.http.routers.analytics-engine-staging.middlewares=internal-only@nomad",
+        "traefik.http.routers.analytics-engine-stagingsec.rule=Host(`analytics-engine.staging.veridian.site`)",
+        "traefik.http.routers.analytics-engine-stagingsec.entrypoints=websecure",
+        "traefik.http.routers.analytics-engine-stagingsec.tls=true",
+        "traefik.http.routers.analytics-engine-stagingsec.tls.certresolver=letsencrypt",
+        "traefik.http.routers.analytics-engine-stagingsec.middlewares=internal-only@nomad",
+      ]
+      check {
+        type     = "http"
+        path     = "/api/setup.status"
+        interval = "15s"
+        timeout  = "5s"
+      }
+    }
+
+    # bridge Veridian (exposé)
+    service {
+      name     = "analytics-bridge-staging"
+      provider = "nomad"
+      port     = "bridge"
+      tags = [
+        "traefik.enable=true",
+        "traefik.http.routers.analytics-bridge-staging.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
+        "traefik.http.routers.analytics-bridge-staging.entrypoints=web",
+        "traefik.http.routers.analytics-bridge-staging.middlewares=internal-only@nomad",
+        "traefik.http.routers.analytics-bridge-stagingsec.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
+        "traefik.http.routers.analytics-bridge-stagingsec.entrypoints=websecure",
+        "traefik.http.routers.analytics-bridge-stagingsec.tls=true",
+        "traefik.http.routers.analytics-bridge-stagingsec.tls.certresolver=letsencrypt",
+        "traefik.http.routers.analytics-bridge-stagingsec.middlewares=internal-only@nomad",
+      ]
+      check {
+        type     = "http"
+        path     = "/health"
+        interval = "15s"
+        timeout  = "5s"
+      }
+    }
+
+    # ---- ClickHouse (interne, données staging migrées) ----
+    task "clickhouse" {
+      driver = "docker"
+      config {
+        image = "clickhouse/clickhouse-server:24.8"
+        volumes = [
+          "/opt/veridian-staging/analytics/clickhouse:/var/lib/clickhouse",
+          "/opt/veridian-staging/analytics/clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro",
+        ]
+        ulimit { nofile = "262144:262144" }
+      }
+      template {
+        destination = "secrets/ch.env"
+        env         = true
+        data        = <<EOH
+TZ=UTC
+CLICKHOUSE_DB=staminads_system
+CLICKHOUSE_USER=default
+CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
+CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
+{{ end }}
+EOH
+      }
+      resources {
+        cpu    = 500
+        memory = 1024
+      }
+    }
+
+    # ---- Postgres bridge (interne, données staging migrées) ----
+    task "postgres-bridge" {
+      driver = "docker"
+      config {
+        image = "postgres:16-alpine"
+        volumes = [
+          "/opt/veridian-staging/analytics/pg-bridge:/var/lib/postgresql/data",
+        ]
+      }
+      template {
+        destination = "secrets/pg.env"
+        env         = true
+        data        = <<EOH
+TZ=UTC
+{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
+POSTGRES_DB={{ .BRIDGE_DB_NAME }}
+POSTGRES_USER={{ .BRIDGE_DB_USER }}
+POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
+{{ end }}
+EOH
+      }
+      resources {
+        cpu    = 200
+        memory = 256
+      }
+    }
+
+    # ---- Engine (console analytics, port 3000) — bumpé par la CI ----
+    task "engine" {
+      driver = "docker"
+      config {
+        image = "ghcr.io/christ-roy/veridian-analytics-engine:${var.image_tag}"
+        ports = ["http"]
+      }
+      template {
+        destination = "secrets/engine.env"
+        env         = true
+        data        = <<EOH
+TZ=UTC
+PORT=3000
+NODE_ENV=production
+JWT_EXPIRES_IN=7d
+IS_DEMO=false
+SUBSCRIPTIONS_ENABLED=false
+VOIP_SYNC_ENABLED=false
+CLICKHOUSE_HOST=http://127.0.0.1:8123
+CLICKHOUSE_SYSTEM_DATABASE=staminads_system
+CLICKHOUSE_DATABASE=staminads
+CLICKHOUSE_USER=default
+SMTP_FROM_EMAIL=noreply@veridian.site
+SMTP_FROM_NAME=Veridian Analytics
+SMTP_PORT=587
+APP_URL=https://analytics-engine.staging.veridian.site
+CORS_ALLOWED_ORIGINS=https://analytics-engine.staging.veridian.site,https://analytics-engine-bridge.staging.veridian.site,https://hub.staging.veridian.site
+{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
+CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
+ENCRYPTION_KEY={{ .ENCRYPTION_KEY }}
+PLATFORM_ADMIN_API_KEY={{ .PLATFORM_ADMIN_API_KEY }}
+{{ end }}
+EOH
+      }
+      resources {
+        cpu    = 400
+        memory = 512
+      }
+    }
+
+    # ---- Bridge (port 3002) — bumpé par la CI ----
+    task "bridge" {
+      driver = "docker"
+      config {
+        image = "ghcr.io/christ-roy/veridian-analytics-bridge:${var.image_tag}"
+        ports = ["bridge"]
+      }
+      template {
+        destination = "secrets/bridge.env"
+        env         = true
+        data        = <<EOH
+TZ=UTC
+PORT=3002
+NODE_ENV=production
+STAMINADS_URL=http://127.0.0.1:3000
+PUBLIC_STAMINADS_URL=https://analytics-engine.staging.veridian.site
+PUBLIC_DASHBOARD_URL=https://analytics.app.veridian.site
+SKIP_HMAC=false
+BRIDGE_DB_HOST=127.0.0.1
+BRIDGE_DB_PORT=5432
+{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
+PLATFORM_ADMIN_API_KEY={{ .PLATFORM_ADMIN_API_KEY }}
+VERIDIAN_ADMIN_API_KEY={{ .VERIDIAN_ADMIN_API_KEY }}
+HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
+TOKEN_ENCRYPTION_KEY={{ .TOKEN_ENCRYPTION_KEY }}
+BRIDGE_DB_USER={{ .BRIDGE_DB_USER }}
+BRIDGE_DB_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
+BRIDGE_DB_NAME={{ .BRIDGE_DB_NAME }}
+BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}@127.0.0.1:5432/{{ .BRIDGE_DB_NAME }}
+{{ end }}
+EOH
+      }
+      resources {
+        cpu    = 300
+        memory = 384
+      }
+    }
+  }
+}
