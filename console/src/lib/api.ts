@@ -7,7 +7,7 @@ import type {
   ExtremesQuery,
   ExtremesResponse,
   FunnelQuery,
-  FunnelResponse,
+  FunnelResult,
   ConversionsByChannelQuery,
   ConversionsByChannelResponse,
 } from '../types/analytics'
@@ -120,7 +120,7 @@ export const api = {
     metrics: () => request<Record<string, MetricDefinition>>('analytics.metrics'),
     dimensions: () => request<Record<string, DimensionDefinition>>('analytics.dimensions'),
     funnel: (data: FunnelQuery) =>
-      request<FunnelResponse>('analytics.funnel', {
+      request<FunnelResult>('analytics.funnel', {
         method: 'POST',
         body: JSON.stringify(data),
       }),

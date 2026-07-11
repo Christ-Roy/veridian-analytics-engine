@@ -127,6 +127,12 @@ export interface FunnelQuery {
   timezone?: string
   unit?: 'session' | 'visitor'
   window_seconds?: number
+  /**
+   * Dimension de segmentation (ex : `'variant'` pour comparer A/B/C). Quand
+   * fournie, l'API renvoie `FunnelSegmentedResponse` (une série par valeur) au
+   * lieu de `FunnelResponse`. Le back garde-fou à SEGMENT_MAX (12) séries.
+   */
+  segment_by?: string
 }
 
 export interface FunnelStepResult {
@@ -134,6 +140,8 @@ export interface FunnelStepResult {
   goal_name: string
   label: string
   count: number
+  /** Valeur € cumulée des goals de cette étape (A3-value, `sumIf(goal_value)`). */
+  value: number
   conversion_from_previous: number | null
   conversion_from_start: number
   dropoff_from_previous: number
@@ -146,6 +154,43 @@ export interface FunnelResponse {
   entered: number
   overall_conversion: number
   steps: FunnelStepResult[]
+}
+
+/**
+ * Une série (un mini-funnel complet) pour une valeur de la dimension de
+ * segmentation. Miroir du contrat backend `FunnelSegment`.
+ */
+export interface FunnelSegment {
+  /** Valeur brute de la dimension (ex : 'A', 'desktop'). */
+  key: string
+  /** Libellé affiché (= key par défaut ; le front peut mapper). */
+  label: string
+  entered: number
+  overall_conversion: number
+  steps: FunnelStepResult[]
+}
+
+/**
+ * Réponse multi-séries — renvoyée UNIQUEMENT quand `segment_by` est fourni. Le
+ * consommateur discrimine sur la présence de `segments`/`segment_by`.
+ */
+export interface FunnelSegmentedResponse {
+  workspace_id: string
+  unit: 'session' | 'visitor'
+  dateRange: { start: string; end: string }
+  segment_by: string
+  /** Une série par valeur distincte, triée par `entered` desc. */
+  segments: FunnelSegment[]
+}
+
+/** Union renvoyée par `analytics.funnel` selon la présence de `segment_by`. */
+export type FunnelResult = FunnelResponse | FunnelSegmentedResponse
+
+/** Discriminant : la réponse est-elle segmentée (multi-séries) ? */
+export function isFunnelSegmented(
+  r: FunnelResult,
+): r is FunnelSegmentedResponse {
+  return 'segments' in r && Array.isArray((r as FunnelSegmentedResponse).segments)
 }
 
 export interface ConversionsByChannelQuery {
