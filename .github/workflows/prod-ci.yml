@@ -261,7 +261,12 @@ jobs:
             "$JOB_FILE" \
             "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}:$REMOTE_HCL"
 
-      - name: nomad validate + plan + run -detach
+      # Pré-pull authentifié LOCAL (nœud prod = contabo = bastion) + deploy +
+      # monitoring CIBLÉ (canon prospection, ticket NOMAD-GITOPS §4 pièges).
+      # (2) Nomad ne pull pas ghcr privé → pré-pull local sur le bastion (auth
+      # ghcr déjà en place) ; (4) monitor du DeploymentID EXACT via Evaluation ID
+      # (pas un poll `job status | grep successful` qui lit le déploiement précédent).
+      - name: Pré-pull + nomad plan + run -detach + monitor ciblé
         run: |
           ssh -i ~/.ssh/id_ed25519 \
             "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
@@ -269,40 +274,34 @@ jobs:
           set -euo pipefail
           source ~/credentials/nomad-bastion.env
           export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
-          echo "== validate =="
-          /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
-          echo "== plan (diff, inoffensif — exit 1 = allocs à créer, PAS une erreur) =="
-          /usr/bin/nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true
-          echo "== run -detach (image_tag=${IMAGE_TAG}) =="
-          /usr/bin/nomad job run -detach -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
-          REMOTE
 
-      # Poll jusqu'à successful/failed. Si failed → update{auto_revert} a déjà
-      # ramené la version saine (prod jamais laissée sur une alloc cassée).
-      - name: Wait deployment healthy (poll bastion)
-        run: |
-          ssh -i ~/.ssh/id_ed25519 \
-            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
-            "NOMAD_JOB='${NOMAD_JOB}' bash -s" <<'REMOTE'
-          set -euo pipefail
-          source ~/credentials/nomad-bastion.env
-          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
-          for i in $(seq 1 90); do
-            ST=$(/usr/bin/nomad job status "$NOMAD_JOB" 2>/dev/null \
-                  | sed -n '/Latest Deployment/,/^$/p' \
-                  | grep -oE 'successful|failed|running' | head -1 || echo pending)
-            echo "[$i/90] deployment: ${ST:-pending}"
-            [ "$ST" = "successful" ] && exit 0
-            if [ "$ST" = "failed" ]; then
-              echo "::error::Deployment prod failed (Nomad auto_revert a ramené la version saine)"
-              /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
-              exit 1
-            fi
-            sleep 10
+          # (2) Pré-pull LOCAL des 2 images sur le bastion (nœud prod contabo).
+          echo "== pré-pull engine+bridge (local bastion) =="
+          docker pull "ghcr.io/christ-roy/veridian-analytics-engine:${IMAGE_TAG}"
+          docker pull "ghcr.io/christ-roy/veridian-analytics-bridge:${IMAGE_TAG}"
+
+          echo "== nomad job validate =="
+          /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
+          echo "== nomad job plan (diff, inoffensif — exit 1 = allocs à créer) =="
+          /usr/bin/nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true
+
+          # (4) run -detach → Evaluation ID → DeploymentID → monitor CE déploiement.
+          # Si failed → update{auto_revert} a déjà ramené la version saine.
+          echo "== nomad job run -detach + monitor ciblé (image_tag=${IMAGE_TAG}) =="
+          EVAL=$(/usr/bin/nomad job run -detach -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" | grep -oP 'Evaluation ID:\s+\K\S+')
+          echo "eval: ${EVAL:-none}"
+          DEP=""
+          for i in $(seq 1 15); do
+            DEP=$(/usr/bin/nomad eval status -json "$EVAL" 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin).get("DeploymentID") or "")' 2>/dev/null || true)
+            [ -n "$DEP" ] && break
+            sleep 2
           done
-          echo "::error::deployment prod not successful after 900s"
-          /usr/bin/nomad job status "$NOMAD_JOB" | tail -40
-          exit 1
+          if [ -z "$DEP" ]; then
+            echo "Pas de déploiement créé (job inchangé = no-op) → OK"
+          else
+            echo "deployment: $DEP — monitoring jusqu'à terminal…"
+            /usr/bin/nomad deployment status -monitor "$DEP"
+          fi
           REMOTE
 
       - name: Cleanup secrets

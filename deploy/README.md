@@ -24,10 +24,15 @@ Variables + `template{env=true}`.
 
 1. Build + push images `ghcr.io/christ-roy/veridian-analytics-{engine,bridge}:<prefix>-<sha7>`.
 2. Deploy job : **SSH → bastion** (`NOMAD_BASTION_HOST`/`_USER`/`NOMAD_DEPLOY_SSH_KEY`),
-   scp du HCL **de ce repo** (celui qui déclare `variable "image_tag"`), puis IN SITU
-   sur le bastion : `source ~/credentials/nomad-bastion.env` → `nomad job validate/plan/run
-   -detach -var image_tag=<tag>`. **Le NOMAD_TOKEN ne quitte jamais le bastion.**
-3. Poll `nomad job status` jusqu'à `Latest Deployment = successful`.
+   scp du HCL **de ce repo** (celui qui déclare `variable "image_tag"`), puis IN SITU :
+   `source ~/credentials/nomad-bastion.env`, **pré-pull authentifié** des 2 images
+   (staging : `ssh -n dev-pub docker pull` ; prod : `docker pull` local sur le bastion —
+   Nomad ne pull pas ghcr privé), `nomad job validate/plan`, `run -detach`.
+   **Le NOMAD_TOKEN ne quitte jamais le bastion.**
+3. Vérif CIBLÉE : `run -detach` → Evaluation ID → `nomad eval status -json` → DeploymentID
+   → `nomad deployment status -monitor <DeploymentID>` (bloque jusqu'à terminal).
+   PAS un poll `job status | grep successful` (faux positif : lit le déploiement précédent).
+   Rollback = `update{auto_revert}` du HCL (`healthy_deadline=15m` — le 1er pull peut être long).
 
 Secrets GH repo requis (provisionnés) : `NOMAD_BASTION_HOST`, `NOMAD_BASTION_USER`,
 `NOMAD_DEPLOY_SSH_KEY` (clé dédiée `analytics-engine-ci-deploy@github`, publique dans
