@@ -88,7 +88,8 @@ Auto-deploy sur push `staging` : GHCR build → SSH dev-pub → `docker compose 
 
 ## Deploy prod
 
-Auto-deploy sur push `main` : GHCR build → Trivy scan → SSH prod-pub via Dokploy API.
+Auto-deploy sur push `main` : GHCR build → Trivy scan → SSH bastion → `nomad job run`
+(job Nomad `analytics-engine`). Cf `deploy/README.md`. (Ex-Dokploy API, décommissionné 2026-07-10.)
 
 ## Tests
 

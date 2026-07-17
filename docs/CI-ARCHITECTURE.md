@@ -1,5 +1,12 @@
 # CI-ARCHITECTURE — Veridian Analytics Engine
 
+> ⚠️ **OBSOLÈTE en partie (Dokploy décommissionné 2026-07-10).** Les étapes de
+> déploiement décrites plus bas via l'**API Dokploy** (`compose.update` /
+> `compose.deploy`, `composeId`) ne sont plus la réalité : l'engine est un **job
+> Nomad** déployé par SSH→bastion + `nomad job run`. Source de vérité du déploiement
+> = `deploy/README.md` (GitOps Nomad) + skill `/nomad`. Ce doc reste comme historique
+> de l'architecture CI d'époque.
+
 > **Statut** : Phase 3 (refonte branches main←staging) — 2026-05-22
 > **Référence parente** : [veridian-hub CI-ARCHITECTURE.md](../../veridian-hub/docs/CI-ARCHITECTURE.md)
 > **Maintainer** : agent CI/Husky hardening

@@ -11,7 +11,7 @@
 - Branche `upstream/master` : suit le repo staminads upstream pour cherry-pick les bugfixes
 - Branche `veridian/main` : notre version mainline avec tous les patches Veridian
 - Branche `staging` : auto-deploy sur dev-pub (`analytics-engine.staging.veridian.site`)
-- Branche `main` (prod) : auto-deploy sur prod via Dokploy (`analytics-engine.app.veridian.site`)
+- Branche `main` (prod) : auto-deploy prod via job Nomad `analytics-engine` (`analytics-engine.app.veridian.site` ; ex-Dokploy, décommissionné 2026-07-10 — cf `deploy/README.md`)
 
 ## Patches actifs
 
