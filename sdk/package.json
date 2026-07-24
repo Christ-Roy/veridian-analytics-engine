@@ -58,7 +58,7 @@
     "tslib": "^2.6.2",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3",
-    "vitest": "^1.2.1"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "ua-parser-js": "^2.0.0"
