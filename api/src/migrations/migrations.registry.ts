@@ -8,6 +8,7 @@ import { V9GscMigration } from './v9-gsc-migration';
 import { V10VisitorIdMigration } from './v10-visitor-id-migration';
 import { V11WorkspacesReplacingMigration } from './v11-workspaces-replacing-migration';
 import { V12IdentityAttributionMigration } from './v12-identity-attribution-migration';
+import { V13SsoTokensMigration } from './v13-sso-tokens-migration';
 
 /**
  * Registry of all major migrations.
@@ -23,4 +24,5 @@ export const MIGRATIONS: MajorMigration[] = [
   V10VisitorIdMigration,
   V11WorkspacesReplacingMigration,
   V12IdentityAttributionMigration,
+  V13SsoTokensMigration,
 ];

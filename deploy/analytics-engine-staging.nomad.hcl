@@ -197,6 +197,11 @@ CORS_ALLOWED_ORIGINS=https://analytics-engine.staging.veridian.site,https://anal
 CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 ENCRYPTION_KEY={{ .ENCRYPTION_KEY }}
 PLATFORM_ADMIN_API_KEY={{ .PLATFORM_ADMIN_API_KEY }}
+# Secret HMAC partagé avec le Hub, requis par HubHmacGuard (routes SSO).
+# Même valeur que celle déjà servie au bridge ci-dessous, et que le Hub nomme
+# ANALYTICS_HUB_API_SECRET de son côté. Sans cette variable, l'engine
+# refusera TOUTES les demandes d'autologin (fail-closed volontaire).
+HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 {{ end }}
 EOH
       }

@@ -140,6 +140,28 @@ export const SYSTEM_SCHEMAS: Record<string, string> = {
     ORDER BY id
   `,
 
+  // Jetons d'autologin SSO émis par le Hub (couche 1 du contrat SSO).
+  // Volontairement SÉPARÉE de password_reset_tokens : un jeton de reset permet
+  // de changer un mot de passe, un jeton SSO ouvre une session. Deux tables =
+  // confusion de type structurellement impossible entre les deux flux.
+  // Détail du modèle de sécurité : migrations/v13-sso-tokens-migration.ts
+  sso_login_tokens: `
+    CREATE TABLE IF NOT EXISTS {database}.sso_login_tokens (
+      id String,
+      token_hash String,
+      user_id String,
+      workspace_id String DEFAULT '',
+      status Enum8('pending' = 1, 'used' = 2) DEFAULT 'pending',
+      issued_to_hub_user_id String DEFAULT '',
+      expires_at DateTime64(3),
+      consumed_at Nullable(DateTime64(3)),
+      consumed_ip String DEFAULT '',
+      created_at DateTime64(3) DEFAULT now64(3),
+      updated_at DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = ReplacingMergeTree(updated_at)
+    ORDER BY token_hash
+  `,
+
   system_settings: `
     CREATE TABLE IF NOT EXISTS {database}.system_settings (
       key String,

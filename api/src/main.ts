@@ -20,7 +20,15 @@ async function bootstrap() {
     process.exit(0);
   }
 
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // `rawBody: true` : conserve les octets bruts du body dans `req.rawBody` EN PLUS
+  // du body parsé. Indispensable au HubHmacGuard (SSO) : la signature du Hub porte
+  // sur les octets exacts envoyés. Vérifier une signature contre un body re-sérialisé
+  // côté serveur casserait au moindre écart d'ordre de clés ou d'espace — et, pire,
+  // pousserait à « assouplir » la vérification pour la faire passer. On garde donc
+  // l'original. Aucun impact sur les autres routes, qui continuent de lire req.body.
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
 
   // ---------------------------------------------------------------------------
   // Trust proxy (anti-spoofing IP/géo — ticket ingest-spoofing-ip-xff 2026-06-23)

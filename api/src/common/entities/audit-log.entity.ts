@@ -32,6 +32,14 @@ export const AUDIT_ACTIONS = {
   'subscription.report_sent': 'Report email sent',
   'subscription.report_failed': 'Report email failed to send',
   'subscription.unsubscribed': 'User unsubscribed via email link',
+
+  // SSO (autologin Hub → Analytics)
+  // Ces deux traces sont la seule piste d'audit d'un mécanisme qui ouvre des
+  // sessions sans mot de passe. Une émission sans consommation correspondante,
+  // ou une rafale d'émissions, sont les signaux qui trahiraient un abus du
+  // secret HMAC — ne pas les retirer.
+  'sso.token_issued': 'SSO autologin token issued to the Hub',
+  'sso.token_consumed': 'SSO autologin token consumed, session opened',
 } as const;
 
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
