@@ -160,10 +160,7 @@ export class SsoService {
     // jamais sur un workspace arbitraire.
     let workspaceId: string;
     if (input.workspaceId) {
-      const isMember = await this.isWorkspaceMember(
-        user.id,
-        input.workspaceId,
-      );
+      const isMember = await this.isWorkspaceMember(user.id, input.workspaceId);
       if (!isMember) {
         this.logger.warn(
           `SSO refusé : workspace demandé hors périmètre du user (user_id=${user.id}, workspace_id=${input.workspaceId})`,

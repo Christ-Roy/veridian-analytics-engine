@@ -15,7 +15,11 @@ import { UsersModule } from '../users/users.module';
  * d'un login classique (même durée, même révocabilité).
  */
 @Module({
-  imports: [ConfigModule, forwardRef(() => AuthModule), forwardRef(() => UsersModule)],
+  imports: [
+    ConfigModule,
+    forwardRef(() => AuthModule),
+    forwardRef(() => UsersModule),
+  ],
   controllers: [SsoController],
   providers: [SsoService, HubHmacGuard],
   exports: [SsoService],

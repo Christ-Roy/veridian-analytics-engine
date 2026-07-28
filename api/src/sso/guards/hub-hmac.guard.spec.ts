@@ -84,7 +84,7 @@ describe('HubHmacGuard', () => {
     expect(guard.canActivate(ctx)).toBe(true);
   });
 
-  it('refuse tout si aucun secret n\'est configuré (fail-closed)', () => {
+  it("refuse tout si aucun secret n'est configuré (fail-closed)", () => {
     // Le cas le plus dangereux : une variable oubliée au déploiement ne doit
     // jamais ouvrir la route, elle doit la fermer.
     const guard = guardWith({});
