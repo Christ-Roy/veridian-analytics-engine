@@ -21,8 +21,13 @@ RUN npm ci --omit=optional && npm cache clean --force
 
 COPY src ./src
 
-# Optionally chown for non-root
-RUN chown -R app:app /app
+# npm et npx ne sont pas nécessaires au runtime : Prisma et tsx sont installés
+# localement. Les retirer supprime aussi les dépendances vulnérables embarquées
+# dans le npm global de l'image Node officielle.
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    /usr/local/bin/npm \
+    /usr/local/bin/npx \
+    && chown -R app:app /app
 
 USER app
 
@@ -30,4 +35,4 @@ EXPOSE 3002
 
 # Au boot : applique les migrations si nécessaires puis démarre le bridge.
 # `migrate deploy` est idempotent, safe à lancer même sans migration en attente.
-CMD ["sh", "-c", "npx prisma migrate deploy --schema=./prisma/schema.prisma && npx tsx src/index.ts"]
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma && exec ./node_modules/.bin/tsx src/index.ts"]
