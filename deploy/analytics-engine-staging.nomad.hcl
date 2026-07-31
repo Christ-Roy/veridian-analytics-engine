@@ -22,6 +22,10 @@ job "analytics-engine-staging" {
   group "stack" {
     count = 1
 
+    # Scale-to-zero Sablier : les routes permanentes de l'ingress ciblent les
+    # ports statiques 19102/19103 et réveillent ce job par son nom.
+    meta = { "sablier.enable" = "true" }
+
     # Épinglé à ovh-dev : les DB bind sur /opt/veridian-staging du nœud ovh-dev uniquement.
     constraint {
       attribute = "${meta.provider}"
@@ -51,10 +55,12 @@ job "analytics-engine-staging" {
       # host_network tailscale : les ports CNI bind sur l'IP Tailscale du nœud uniquement
       # → apps injoignables en public, Traefik route via Tailscale.
       port "http" {
+        static       = 19102
         to           = 3000
         host_network = "tailscale"
       }
       port "bridge" {
+        static       = 19103
         to           = 3002
         host_network = "tailscale"
       }
@@ -65,22 +71,12 @@ job "analytics-engine-staging" {
       name     = "analytics-engine-staging"
       provider = "nomad"
       port     = "http"
-      tags = [
-        "traefik.enable=true",
-        "traefik.http.middlewares.internal-only.ipallowlist.sourcerange=100.64.0.0/10,127.0.0.1/32",
-        "traefik.http.routers.analytics-engine-staging.rule=Host(`analytics-engine.staging.veridian.site`)",
-        "traefik.http.routers.analytics-engine-staging.entrypoints=web",
-        "traefik.http.routers.analytics-engine-staging.middlewares=internal-only@nomad",
-        "traefik.http.routers.analytics-engine-stagingsec.rule=Host(`analytics-engine.staging.veridian.site`)",
-        "traefik.http.routers.analytics-engine-stagingsec.entrypoints=websecure",
-        "traefik.http.routers.analytics-engine-stagingsec.tls=true",
-        "traefik.http.routers.analytics-engine-stagingsec.tls.certresolver=letsencrypt",
-        "traefik.http.routers.analytics-engine-stagingsec.middlewares=internal-only@nomad",
-      ]
+      # Le routage est déclaré une seule fois dans ingress.nomad.hcl (@file).
+      tags = ["traefik.enable=false"]
       check {
         type     = "http"
         path     = "/api/setup.status"
-        interval = "15s"
+        interval = "5s"
         timeout  = "5s"
       }
     }
@@ -90,21 +86,11 @@ job "analytics-engine-staging" {
       name     = "analytics-bridge-staging"
       provider = "nomad"
       port     = "bridge"
-      tags = [
-        "traefik.enable=true",
-        "traefik.http.routers.analytics-bridge-staging.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
-        "traefik.http.routers.analytics-bridge-staging.entrypoints=web",
-        "traefik.http.routers.analytics-bridge-staging.middlewares=internal-only@nomad",
-        "traefik.http.routers.analytics-bridge-stagingsec.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
-        "traefik.http.routers.analytics-bridge-stagingsec.entrypoints=websecure",
-        "traefik.http.routers.analytics-bridge-stagingsec.tls=true",
-        "traefik.http.routers.analytics-bridge-stagingsec.tls.certresolver=letsencrypt",
-        "traefik.http.routers.analytics-bridge-stagingsec.middlewares=internal-only@nomad",
-      ]
+      tags = ["traefik.enable=false"]
       check {
         type     = "http"
         path     = "/health"
-        interval = "15s"
+        interval = "5s"
         timeout  = "5s"
       }
     }
