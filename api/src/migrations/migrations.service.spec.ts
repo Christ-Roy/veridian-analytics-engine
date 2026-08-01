@@ -48,6 +48,8 @@ describe('MigrationsRunner', () => {
     process.env.CLICKHOUSE_USER = 'default';
     process.env.CLICKHOUSE_PASSWORD = '';
     process.env.CLICKHOUSE_SYSTEM_DATABASE = 'test_system';
+    process.env.CLICKHOUSE_STARTUP_RETRY_ATTEMPTS = '3';
+    process.env.CLICKHOUSE_STARTUP_RETRY_DELAY_MS = '1';
 
     // Reset mocks
     mockMajorVersion = 2;
@@ -447,6 +449,39 @@ describe('MigrationsRunner', () => {
     });
 
     describe('database initialization', () => {
+      it('absorbs a transient ClickHouse readiness race without exiting', async () => {
+        mockCommand
+          .mockRejectedValueOnce(
+            new Error('connect ECONNREFUSED 127.0.0.1:8123'),
+          )
+          .mockResolvedValue(undefined);
+        mockQuery.mockResolvedValueOnce(createQueryResult([]));
+        mockQuery.mockResolvedValueOnce(createQueryResult([{ value: '2' }]));
+
+        runner = new MigrationsRunner();
+        await expect(runner.run()).resolves.toBe(false);
+
+        const createDatabaseCalls = mockCommand.mock.calls.filter(
+          ([request]) =>
+            request.query === 'CREATE DATABASE IF NOT EXISTS test_system',
+        );
+        expect(createDatabaseCalls).toHaveLength(2);
+        expect(mockClose).toHaveBeenCalled();
+      });
+
+      it('fails closed after the bounded startup retry budget is exhausted', async () => {
+        process.env.CLICKHOUSE_STARTUP_RETRY_ATTEMPTS = '2';
+        mockCommand.mockRejectedValue(
+          new Error('connect ECONNREFUSED 127.0.0.1:8123'),
+        );
+
+        runner = new MigrationsRunner();
+        await expect(runner.run()).rejects.toThrow('ECONNREFUSED');
+
+        expect(mockCommand).toHaveBeenCalledTimes(2);
+        expect(mockClose).toHaveBeenCalled();
+      });
+
       it('creates system database and settings table on startup', async () => {
         // Lock check - no lock
         mockQuery.mockResolvedValueOnce(createQueryResult([]));
