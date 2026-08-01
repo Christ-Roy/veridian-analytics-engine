@@ -27,6 +27,8 @@ for hcl in "$prod_hcl" "$staging_hcl"; do
   require_count "$hcl" 'init  = true' 2 "init Docker app+bridge absent dans $(basename "$hcl")"
   require_count "$hcl" 'memory_max = 7000' 4 "plafonds mémoire incomplets dans $(basename "$hcl")"
   require_count "$hcl" 'check_restart {' 2 "self-heal app+bridge incomplet dans $(basename "$hcl")"
+  require_count "$hcl" 'path     = "/api/health"' 2 "checks engine non alignés sur le probe stable dans $(basename "$hcl")"
+  reject_fixed "$hcl" '/api/setup.status' "ancien probe throttlé encore utilisé dans $(basename "$hcl")"
   require_count "$hcl" 'shutdown_delay = "10s"' 2 "shutdown propre app+bridge incomplet dans $(basename "$hcl")"
 done
 

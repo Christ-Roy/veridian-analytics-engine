@@ -78,7 +78,7 @@ job "analytics-engine" {
       ]
       check {
         type     = "http"
-        path     = "/api/setup.status"
+        path     = "/api/health"
         interval = "15s"
         timeout  = "5s"
       }
@@ -181,7 +181,7 @@ EOH
         tags     = ["traefik.enable=false"]
         check {
           type     = "http"
-          path     = "/api/setup.status"
+          path     = "/api/health"
           interval = "15s"
           timeout  = "5s"
           check_restart {
