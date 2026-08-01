@@ -18,6 +18,7 @@ variable "image_tag" {
 job "analytics-engine-staging" {
   datacenters = ["veridian-eu"]
   type        = "service"
+  priority    = 50
 
   group "stack" {
     count = 1
@@ -120,8 +121,9 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 500
-        memory = 1024
+        cpu        = 500
+        memory     = 1024
+        memory_max = 7000
       }
     }
 
@@ -147,16 +149,39 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 200
-        memory = 256
+        cpu        = 200
+        memory     = 256
+        memory_max = 7000
       }
     }
 
     # ---- Engine (console analytics, port 3000) — bumpé par la CI ----
     task "engine" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+
+      service {
+        name     = "analytics-engine-staging-selfheal"
+        provider = "nomad"
+        port     = "http"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/api/setup.status"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "120s"
+            ignore_warnings = false
+          }
+        }
+      }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-engine:${var.image_tag}"
+        init  = true
         ports = ["http"]
       }
       template {
@@ -192,16 +217,39 @@ HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 EOH
       }
       resources {
-        cpu    = 400
-        memory = 512
+        cpu        = 400
+        memory     = 512
+        memory_max = 7000
       }
     }
 
     # ---- Bridge (port 3002) — bumpé par la CI ----
     task "bridge" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+
+      service {
+        name     = "analytics-bridge-staging-selfheal"
+        provider = "nomad"
+        port     = "bridge"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/health"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "90s"
+            ignore_warnings = false
+          }
+        }
+      }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-bridge:${var.image_tag}"
+        init  = true
         ports = ["bridge"]
       }
       template {
@@ -230,8 +278,9 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 300
-        memory = 384
+        cpu        = 300
+        memory     = 384
+        memory_max = 7000
       }
     }
   }
