@@ -237,7 +237,10 @@ export class SubscriptionsController {
 
     // Generate and send report
     const reportData = await this.reportGenerator.generate(subscription);
-    const html = this.reportGenerator.renderEmail(reportData, subscription);
+    const html = await this.reportGenerator.renderEmail(
+      reportData,
+      subscription,
+    );
     const subject = `${subscription.name} - ${reportData.dateRangeLabel}`;
 
     await this.mailService.sendReport(
@@ -296,7 +299,10 @@ export class SubscriptionsController {
     };
 
     const reportData = await this.reportGenerator.generate(tempSubscription);
-    const html = this.reportGenerator.renderEmail(reportData, tempSubscription);
+    const html = await this.reportGenerator.renderEmail(
+      reportData,
+      tempSubscription,
+    );
     return { html };
   }
 

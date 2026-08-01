@@ -23,6 +23,8 @@ export class MigrationsRunner {
   private client: ClickHouseClient;
   private systemDb: string;
   private lockTimeout = 300; // 5 minutes in seconds
+  private startupRetryAttempts: number;
+  private startupRetryDelayMs: number;
 
   constructor() {
     this.client = createClient({
@@ -32,6 +34,14 @@ export class MigrationsRunner {
     });
     this.systemDb =
       process.env.CLICKHOUSE_SYSTEM_DATABASE || 'staminads_system';
+    this.startupRetryAttempts = this.readPositiveInteger(
+      process.env.CLICKHOUSE_STARTUP_RETRY_ATTEMPTS,
+      12,
+    );
+    this.startupRetryDelayMs = this.readPositiveInteger(
+      process.env.CLICKHOUSE_STARTUP_RETRY_DELAY_MS,
+      500,
+    );
   }
 
   /**
@@ -43,7 +53,7 @@ export class MigrationsRunner {
       console.log('[Migrations] Starting migration check...');
 
       // Ensure system database and settings table exist
-      await this.ensureSystemDatabase();
+      await this.ensureSystemDatabaseWithRetry();
 
       // Try to acquire lock
       const lockAcquired = await this.acquireLock();
@@ -112,6 +122,44 @@ export class MigrationsRunner {
     } finally {
       await this.client.close();
     }
+  }
+
+  /**
+   * ClickHouse and the API are colocated in the same Nomad allocation and may
+   * start concurrently. Absorb that short, expected readiness race here so a
+   * healthy deployment does not consume a Nomad task restart. The retry is
+   * deliberately limited to initial connectivity; migration failures still
+   * fail immediately and remain visible to the orchestrator.
+   */
+  private async ensureSystemDatabaseWithRetry(): Promise<void> {
+    for (let attempt = 1; attempt <= this.startupRetryAttempts; attempt += 1) {
+      try {
+        await this.ensureSystemDatabase();
+        return;
+      } catch (error) {
+        if (attempt === this.startupRetryAttempts) {
+          throw error;
+        }
+
+        const delayMs = Math.min(
+          this.startupRetryDelayMs * 2 ** (attempt - 1),
+          5_000,
+        );
+        const message = error instanceof Error ? error.message : String(error);
+        console.warn(
+          `[Migrations] ClickHouse unavailable during startup (${message}); retry ${attempt}/${this.startupRetryAttempts} in ${delayMs}ms`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
+  private readPositiveInteger(
+    value: string | undefined,
+    fallback: number,
+  ): number {
+    const parsed = Number.parseInt(value ?? '', 10);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
   }
 
   private async ensureSystemDatabase(): Promise<void> {

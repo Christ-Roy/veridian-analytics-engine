@@ -10,8 +10,8 @@
 #
 # 4 composants dans UN group (namespace réseau bridge partagé) → 127.0.0.1 (remplace les
 # hostnames compose clickhouse/postgres-bridge/engine). ClickHouse + Postgres bridge sont
-# STATEFUL (volumes bind sur /opt/veridian-lab/analytics-engine du bastion) → group épinglé
-# `provider=contabo`. Secrets = Nomad Variable `nomad/jobs/analytics-engine` (jamais en clair).
+# STATEFUL (volumes bind sur /opt/veridian-lab/analytics-engine d'ovh-prod) → group épinglé
+# `provider=ovh-prod`. Secrets = Nomad Variable `nomad/jobs/analytics-engine` (jamais en clair).
 # TLS = Let's Encrypt via l'ingress Traefik (websecure). engine+bridge bumpés par la CI.
 
 variable "image_tag" {
@@ -28,7 +28,7 @@ job "analytics-engine" {
   group "stack" {
     count = 1
 
-    # Épinglé au bastion : clickhouse/pg-bridge bind sur /opt/veridian-lab/analytics-engine du bastion uniquement.
+    # Épinglé à ovh-prod : ClickHouse/pg-bridge utilisent des bind mounts locaux.
     constraint {
       attribute = "${meta.provider}"
       value     = "ovh-prod"
@@ -38,10 +38,12 @@ job "analytics-engine" {
     # healthy (checks HTTP engine+bridge) sous healthy_deadline, Nomad REVIENT
     # automatiquement à la dernière version saine. Pas de job de rollback CI.
     update {
-      max_parallel     = 1
-      min_healthy_time = "15s"
-      healthy_deadline = "5m"
-      auto_revert      = true
+      max_parallel      = 1
+      health_check      = "checks"
+      min_healthy_time  = "15s"
+      healthy_deadline  = "5m"
+      progress_deadline = "10m"
+      auto_revert       = true
     }
 
     restart {
@@ -78,7 +80,7 @@ job "analytics-engine" {
       ]
       check {
         type     = "http"
-        path     = "/api/setup.status"
+        path     = "/api/health"
         interval = "15s"
         timeout  = "5s"
       }
@@ -175,6 +177,7 @@ EOH
       driver         = "docker"
       shutdown_delay = "10s"
       kill_timeout   = "30s"
+
       service {
         name     = "analytics-engine-selfheal"
         provider = "nomad"
@@ -182,7 +185,7 @@ EOH
         tags     = ["traefik.enable=false"]
         check {
           type     = "http"
-          path     = "/api/setup.status"
+          path     = "/api/health"
           interval = "15s"
           timeout  = "5s"
           check_restart {
@@ -192,8 +195,10 @@ EOH
           }
         }
       }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-engine:${var.image_tag}"
+        init  = true
         ports = ["http"]
       }
       template {
@@ -217,6 +222,11 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 ENCRYPTION_KEY={{ .ENCRYPTION_KEY }}
 PLATFORM_ADMIN_API_KEY={{ .PLATFORM_ADMIN_API_KEY }}
 DEMO_SECRET={{ .DEMO_SECRET }}
+# Secret HMAC partagé avec le Hub, requis par HubHmacGuard (routes SSO).
+# Même valeur que celle déjà servie au bridge ci-dessous, et que le Hub nomme
+# ANALYTICS_HUB_API_SECRET de son côté. Sans cette variable, l'engine
+# refusera TOUTES les demandes d'autologin (fail-closed volontaire).
+HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 {{ end }}
 EOH
       }
@@ -232,6 +242,7 @@ EOH
       driver         = "docker"
       shutdown_delay = "10s"
       kill_timeout   = "30s"
+
       service {
         name     = "analytics-engine-bridge-selfheal"
         provider = "nomad"
@@ -249,8 +260,10 @@ EOH
           }
         }
       }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-bridge:${var.image_tag}"
+        init  = true
         ports = ["bridge"]
       }
       template {

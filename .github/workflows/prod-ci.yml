@@ -1,16 +1,13 @@
 # Veridian Analytics Engine — Prod CI/CD
 #
-# Trigger : push sur `staging` (auto-promotion vers main si tier 🟢 BAS)
-#           OU push direct sur main (cas d'urgence + post-rollback)
-#           OU workflow_dispatch manuel
+# Trigger : push contrôlé sur `main` après preuve staging, ou
+#           `workflow_dispatch` manuel sur `main`.
 #
 # Pipeline :
 #   1. structural-gate     — exige staging vert ≤24h si fichiers structurels
-#   2. promote-to-main     — ff-merge staging → main si [risk:low] dans subject
-#   3. (sur main) build    — image GHCR + Trivy bloquant (bridge)
-#   4. deploy-prod         — Dokploy API (composeId TBD) ou SSH prod-pub
-#   5. e2e-prod-smoke      — Playwright contre URLs prod
-#   6. rollback-prod       — retag :rollback + redeploy si smoke fail
+#   2. build               — images GHCR immuables + Trivy bloquant (bridge)
+#   3. deploy-prod         — backups vérifiés + Nomad via bastion
+#   4. e2e-prod-smoke      — Playwright contre les URLs prod
 #
 # Inspiré directement de veridian-hub/.github/workflows/hub-ci.yml.
 
@@ -129,6 +126,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Invariants GitOps Nomad
+        run: ./scripts/ci/check-nomad-gitops-reliability.sh
+
       - id: tag
         run: |
           SHA=${GITHUB_SHA:0:7}
@@ -228,7 +228,7 @@ jobs:
     needs: [build, trivy-bridge]
     if: ${{ !cancelled() && needs.build.result == 'success' && needs.trivy-bridge.result == 'success' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     environment:
       name: production
       url: https://analytics-engine.app.veridian.site
@@ -252,7 +252,15 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.NOMAD_DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.NOMAD_BASTION_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          for attempt in 1 2 3; do
+            if ssh-keyscan -T 15 -H "${{ secrets.NOMAD_BASTION_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null; then
+              exit 0
+            fi
+            echo "ssh-keyscan tentative $attempt/3 en échec"
+            sleep 3
+          done
+          echo "::error::impossible de récupérer la clé SSH du bastion"
+          exit 1
 
       # HCL DU REPO (déclare `variable "image_tag"`), jamais la copie du bastion.
       - name: Copy HCL to bastion
@@ -261,10 +269,10 @@ jobs:
             "$JOB_FILE" \
             "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}:$REMOTE_HCL"
 
-      # Pré-pull authentifié LOCAL (nœud prod = contabo = bastion) + deploy +
+      # Sauvegarde canonique + pré-pull authentifié sur ovh-prod + deploy +
       # monitoring CIBLÉ (canon prospection, ticket NOMAD-GITOPS §4 pièges).
-      # (2) Nomad ne pull pas ghcr privé → pré-pull local sur le bastion (auth
-      # ghcr déjà en place) ; (4) monitor du DeploymentID EXACT via Evaluation ID
+      # (2) Nomad ne pull pas ghcr privé → pré-pull via prod-pub (auth GHCR déjà
+      # en place) ; (4) monitor du DeploymentID EXACT via Evaluation ID
       # (pas un poll `job status | grep successful` qui lit le déploiement précédent).
       - name: Pré-pull + nomad plan + run -detach + monitor ciblé
         run: |
@@ -275,20 +283,52 @@ jobs:
           source ~/credentials/nomad-bastion.env
           export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
 
-          # (2) Pré-pull LOCAL des 2 images sur le bastion (nœud prod contabo).
-          echo "== pré-pull engine+bridge (local bastion) =="
-          docker pull "ghcr.io/christ-roy/veridian-analytics-engine:${IMAGE_TAG}"
-          docker pull "ghcr.io/christ-roy/veridian-analytics-bridge:${IMAGE_TAG}"
-
           echo "== nomad job validate =="
           /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
-          echo "== nomad job plan (diff, inoffensif — exit 1 = allocs à créer) =="
-          /usr/bin/nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true
+          echo "== nomad job plan (diff, inoffensif) =="
+          set +e
+          PLAN_OUTPUT=$(/usr/bin/nomad job plan -no-color \
+            -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" 2>&1)
+          PLAN_STATUS=$?
+          set -e
+          printf '%s\n' "$PLAN_OUTPUT"
+          case "$PLAN_STATUS" in
+            0) echo "plan sans création ou destruction d'allocation" ;;
+            1) echo "plan avec remplacement d'allocation attendu" ;;
+            *) echo "::error::nomad job plan a échoué (code=$PLAN_STATUS)"; exit "$PLAN_STATUS" ;;
+          esac
+          MODIFY_INDEX=$(printf '%s\n' "$PLAN_OUTPUT" \
+            | sed -n 's/^Job Modify Index: \([0-9][0-9]*\)$/\1/p' | tail -1)
+          RUN_INDEX_ARGS=()
+          [ -n "$MODIFY_INDEX" ] && RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")
+
+          # Le groupe redémarre ClickHouse et PostgreSQL. Réutilise les deux
+          # runners canoniques : snapshot logique cross-nœud, puis copie R2 des
+          # six PostgreSQL. Toute sauvegarde vide ou non vérifiée bloque le run.
+          echo "== sauvegarde stateful cross-nœud pré-déploiement =="
+          /home/brunon5/nomad-veridian/scripts/veridian-node-backup.sh
+          echo "== sauvegarde PostgreSQL hors site vers R2 =="
+          /home/brunon5/all-cron/backups/prod-r2-backup.sh
+
+          echo "== pré-pull engine+bridge sur ovh-prod =="
+          PULLED=""
+          for attempt in 1 2 3; do
+            if timeout 240s ssh -n -o BatchMode=yes -o ConnectTimeout=15 prod-pub \
+              "docker pull ghcr.io/christ-roy/veridian-analytics-engine:${IMAGE_TAG} && docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${IMAGE_TAG}"; then
+              PULLED=1
+              break
+            fi
+            echo "pré-pull prod tentative $attempt/3 en échec"
+            sleep $((attempt * 10))
+          done
+          [ -n "$PULLED" ] || { echo "::error::pré-pull prod impossible après 3 tentatives"; exit 1; }
 
           # (4) run -detach → Evaluation ID → DeploymentID → monitor CE déploiement.
           # Si failed → update{auto_revert} a déjà ramené la version saine.
           echo "== nomad job run -detach + monitor ciblé (image_tag=${IMAGE_TAG}) =="
-          EVAL=$(/usr/bin/nomad job run -detach -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" | grep -oP 'Evaluation ID:\s+\K\S+')
+          EVAL=$(/usr/bin/nomad job run -detach "${RUN_INDEX_ARGS[@]}" \
+            -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" \
+            | grep -oP 'Evaluation ID:\s+\K\S+')
           echo "eval: ${EVAL:-none}"
           DEP=""
           for i in $(seq 1 15); do
@@ -303,6 +343,13 @@ jobs:
             /usr/bin/nomad deployment status -monitor "$DEP"
           fi
           REMOTE
+
+      - name: Cleanup remote HCL
+        if: always()
+        run: |
+          ssh -i ~/.ssh/id_ed25519 \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "rm -f '$REMOTE_HCL'" || true
 
       - name: Cleanup secrets
         if: always()
@@ -346,4 +393,3 @@ jobs:
           name: playwright-prod-smoke-trace
           path: veridian-bridge/test-results/
           retention-days: 7
-

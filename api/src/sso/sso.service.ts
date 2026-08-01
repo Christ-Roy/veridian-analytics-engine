@@ -1,0 +1,395 @@
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { ClickHouseService } from '../database/clickhouse.service';
+import { UsersService } from '../users/users.service';
+import { AuthService } from '../auth/auth.service';
+import { AuditService } from '../audit/audit.service';
+import { generateId, generateToken, hashToken } from '../common/crypto';
+import {
+  toClickHouseDateTime,
+  parseClickHouseDateTime,
+} from '../common/utils/datetime.util';
+
+/**
+ * Durée de vie d'un jeton d'autologin.
+ *
+ * 2 minutes, pas 5 : un jeton SSO n'est pas fait pour être stocké ni transmis,
+ * il est consommé par une redirection immédiate du navigateur après un clic
+ * dans le Hub. Le seul délai légitime entre l'émission et la consommation est
+ * un aller-retour réseau. Toute durée plus longue n'ajoute aucun confort pour
+ * l'utilisateur et n'élargit que la fenêtre d'exploitation d'un jeton fuité.
+ */
+const SSO_TOKEN_TTL_MS = 2 * 60 * 1000;
+
+export interface SsoTokenRow {
+  id: string;
+  token_hash: string;
+  user_id: string;
+  workspace_id: string;
+  status: 'pending' | 'used';
+  issued_to_hub_user_id: string;
+  expires_at: string;
+  consumed_at: string | null;
+  consumed_ip: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IssueTokenInput {
+  email?: string;
+  hubUserId?: string;
+  workspaceId?: string;
+}
+
+export interface IssueTokenResult {
+  autologin_url: string;
+  expires_in: number;
+}
+
+export interface ConsumeTokenResult {
+  access_token: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    is_super_admin: boolean;
+  };
+  workspace_id: string | null;
+}
+
+/**
+ * Émission et consommation des jetons d'autologin SSO.
+ *
+ * Le Hub, qui a déjà authentifié le client chez lui, demande ici un jeton
+ * à usage unique et très court, puis redirige le navigateur du client vers
+ * l'URL retournée. Le client atterrit connecté dans son espace Analytics.
+ *
+ * ── Ce que ce mécanisme protège, et comment ──────────────────────────────
+ *
+ * 1. **Fuite du jeton par l'URL.** C'est la faiblesse classique de ce genre de
+ *    flux, et la raison pour laquelle l'URL retournée place le jeton dans un
+ *    FRAGMENT (`/sso#<token>`) et non dans une query string (`?t=<token>`).
+ *    Un fragment n'est jamais envoyé au serveur : il n'apparaît ni dans les
+ *    logs d'accès, ni dans les traces du reverse-proxy, ni dans l'en-tête
+ *    `Referer` des requêtes que la page émet ensuite. Avec `?t=`, le jeton
+ *    aurait fuité dans les journaux des DEUX côtés à chaque redirection.
+ *
+ * 2. **Rejeu.** Usage unique (`status`/`consumed_at`) + TTL de 2 minutes.
+ *    Voir la limite ClickHouse documentée sur `consume()`.
+ *
+ * 3. **Fuite entre tenants.** Le jeton est lié à un `workspace_id` À
+ *    L'ÉMISSION, et l'appartenance du user à ce workspace est vérifiée à ce
+ *    moment-là. Un jeton ne peut donc pas servir à entrer dans le workspace
+ *    d'un autre client, même si le Hub se trompe de cible plus tard.
+ *
+ * 4. **Énumération d'adresses email.** Toutes les issues négatives de
+ *    l'émission renvoient la même erreur générique. Le Hub ne peut pas se
+ *    servir de cette route pour découvrir quels emails ont un compte.
+ *
+ * ── Ce que ce mécanisme ne protège PAS ───────────────────────────────────
+ *
+ * Quiconque détient le secret HMAC peut se faire ouvrir la session de
+ * n'importe quel client. Ce secret a exactement la valeur d'un mot de passe
+ * maître : il ne doit jamais quitter le Hub et le coffre de credentials.
+ */
+@Injectable()
+export class SsoService {
+  private readonly logger = new Logger(SsoService.name);
+
+  constructor(
+    private readonly clickhouse: ClickHouseService,
+    private readonly usersService: UsersService,
+    private readonly authService: AuthService,
+    private readonly auditService: AuditService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  /**
+   * Émet un jeton d'autologin pour un utilisateur.
+   *
+   * Renvoie systématiquement `UnauthorizedException` en cas d'échec, quelle
+   * qu'en soit la raison (email inconnu, compte désactivé, pas de workspace,
+   * workspace demandé dont le user n'est pas membre). C'est délibéré : des
+   * messages distincts transformeraient cette route en oracle permettant de
+   * cartographier la base clients. L'appelant légitime est le Hub, qui sait
+   * déjà qui il demande — il n'a pas besoin du détail.
+   */
+  async issueToken(
+    input: IssueTokenInput,
+    ipAddress?: string,
+  ): Promise<IssueTokenResult> {
+    const genericFailure = () =>
+      new UnauthorizedException('Unable to issue SSO token');
+
+    if (!input.email && !input.hubUserId) {
+      throw genericFailure();
+    }
+
+    // Résolution par email. `hub_user_id` seul n'est pas encore une clé de
+    // résolution : l'engine ne stocke aucune correspondance vers les
+    // identifiants Hub. On le conserve pour l'audit, et il deviendra une clé
+    // le jour où le Hub écrira cette correspondance au provisioning.
+    if (!input.email) {
+      this.logger.warn(
+        'issueToken appelé avec hub_user_id seul — non résoluble côté engine (aucune correspondance stockée)',
+      );
+      throw genericFailure();
+    }
+
+    const user = await this.usersService.findByEmail(input.email);
+    if (!user) {
+      this.logger.log(
+        `SSO refusé : aucun compte pour l'email demandé (hub_user_id=${input.hubUserId ?? 'n/a'})`,
+      );
+      throw genericFailure();
+    }
+
+    // Un compte suspendu ou supprimé ne doit pas pouvoir être rouvert par le
+    // Hub. Sans ce contrôle, le SSO deviendrait un contournement de la
+    // désactivation de compte.
+    if (user.status !== 'active') {
+      this.logger.warn(
+        `SSO refusé : compte non actif (user_id=${user.id}, status=${user.status})`,
+      );
+      throw genericFailure();
+    }
+
+    // Périmètre du jeton. Si le Hub nomme un workspace, on VÉRIFIE que le user
+    // en est membre — c'est le contrôle qui empêche un jeton d'ouvrir l'espace
+    // d'un autre client. Sinon, on retombe sur le premier workspace du user,
+    // jamais sur un workspace arbitraire.
+    let workspaceId: string;
+    if (input.workspaceId) {
+      const isMember = await this.isWorkspaceMember(
+        user.id,
+        input.workspaceId,
+      );
+      if (!isMember) {
+        this.logger.warn(
+          `SSO refusé : workspace demandé hors périmètre du user (user_id=${user.id}, workspace_id=${input.workspaceId})`,
+        );
+        throw genericFailure();
+      }
+      workspaceId = input.workspaceId;
+    } else {
+      const first = await this.getFirstWorkspaceForUser(user.id);
+      if (!first) {
+        // Un user sans workspace n'a nulle part où atterrir. Émettre un jeton
+        // le déposerait sur une console vide ; autant refuser franchement.
+        this.logger.warn(
+          `SSO refusé : user sans workspace (user_id=${user.id})`,
+        );
+        throw genericFailure();
+      }
+      workspaceId = first;
+    }
+
+    const { token, hash } = generateToken();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + SSO_TOKEN_TTL_MS);
+
+    await this.clickhouse.insertSystem('sso_login_tokens', [
+      {
+        id: generateId(),
+        token_hash: hash,
+        user_id: user.id,
+        workspace_id: workspaceId,
+        status: 'pending',
+        issued_to_hub_user_id: input.hubUserId ?? '',
+        expires_at: toClickHouseDateTime(expiresAt),
+        consumed_at: null,
+        consumed_ip: '',
+        created_at: toClickHouseDateTime(now),
+        updated_at: toClickHouseDateTime(now),
+      },
+    ]);
+
+    await this.auditService.log({
+      user_id: user.id,
+      workspace_id: workspaceId,
+      action: 'sso.token_issued',
+      target_type: 'user',
+      target_id: user.id,
+      metadata: { hub_user_id: input.hubUserId ?? null },
+      ip_address: ipAddress,
+      user_agent: undefined,
+    });
+
+    return {
+      autologin_url: this.buildAutologinUrl(token),
+      expires_in: Math.floor(SSO_TOKEN_TTL_MS / 1000),
+    };
+  }
+
+  /**
+   * Consomme un jeton d'autologin et ouvre une session.
+   *
+   * ⚠️ Limite assumée, à ne pas maquiller : ClickHouse n'offre pas de
+   * compare-and-swap. La consommation est donc un read-then-write. Cela ferme
+   * le rejeu SÉQUENTIEL — le cas réellement exploitable, où un jeton est
+   * retrouvé plus tard dans un historique de navigation, un signet ou un log
+   * et rejoué. Cela ne ferme pas une course strictement simultanée, où deux
+   * requêtes liraient l'état « pending » avant que l'une n'ait écrit.
+   *
+   * Ce qui rend ce résidu acceptable : la fenêtre de course se compte en
+   * millisecondes, l'attaquant devrait déjà détenir le jeton, et les deux
+   * sessions obtenues appartiendraient de toute façon au MÊME utilisateur —
+   * il n'y a aucun gain de privilège à la clé. Les défenses qui tiennent dans
+   * tous les cas restent le TTL de 2 minutes et le fait que le jeton ne
+   * transite qu'en fragment d'URL.
+   *
+   * Si un jour ce résidu devient inacceptable, le correctif propre n'est pas
+   * de bricoler un verrou : c'est de déplacer cette table hors de ClickHouse,
+   * vers un store offrant une écriture conditionnelle.
+   */
+  async consume(
+    rawToken: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<ConsumeTokenResult> {
+    // Message unique pour tous les refus : un jeton inconnu, expiré ou déjà
+    // consommé doivent être indiscernables, sinon la route devient un oracle
+    // permettant de tester la validité de jetons à l'aveugle.
+    const invalid = () =>
+      new UnauthorizedException('Invalid or expired SSO token');
+
+    if (!rawToken || rawToken.length === 0) {
+      throw invalid();
+    }
+
+    const tokenHash = hashToken(rawToken);
+
+    const rows = await this.clickhouse.querySystem<SsoTokenRow>(
+      `
+      SELECT * FROM sso_login_tokens FINAL
+      WHERE token_hash = {tokenHash:String}
+      LIMIT 1
+    `,
+      { tokenHash },
+    );
+
+    const row = rows[0];
+    if (!row) {
+      throw invalid();
+    }
+
+    if (row.status !== 'pending' || row.consumed_at !== null) {
+      // Un jeton rejoué est un signal : soit un double-clic anodin, soit
+      // quelqu'un qui exploite un jeton ramassé quelque part. On le trace au
+      // niveau warning pour qu'il soit visible dans les logs.
+      this.logger.warn(
+        `Jeton SSO déjà consommé, rejeu refusé (user_id=${row.user_id})`,
+      );
+      throw invalid();
+    }
+
+    if (parseClickHouseDateTime(row.expires_at) < new Date()) {
+      throw invalid();
+    }
+
+    const user = await this.usersService.findById(row.user_id);
+    if (!user) {
+      throw invalid();
+    }
+
+    // Re-contrôle du statut AU MOMENT DE LA CONSOMMATION, pas seulement à
+    // l'émission. Un compte peut avoir été suspendu dans l'intervalle : la
+    // vérification faite à l'émission ne vaut plus rien ici.
+    if (user.status !== 'active') {
+      this.logger.warn(
+        `Consommation SSO refusée : compte devenu non actif depuis l'émission (user_id=${user.id})`,
+      );
+      throw invalid();
+    }
+
+    // Marque consommé AVANT d'émettre la session : si l'ouverture de session
+    // échoue ensuite, le jeton est brûlé plutôt que réutilisable. On préfère
+    // un client qui reclique dans le Hub à un jeton qui survit à une erreur.
+    const now = toClickHouseDateTime();
+    await this.clickhouse.insertSystem('sso_login_tokens', [
+      {
+        ...row,
+        status: 'used',
+        consumed_at: now,
+        consumed_ip: ipAddress ?? '',
+        updated_at: now,
+      },
+    ]);
+
+    const session = await this.authService.issueSessionForUser(
+      user.id,
+      user.email,
+      ipAddress,
+      userAgent,
+    );
+
+    await this.auditService.log({
+      user_id: user.id,
+      workspace_id: row.workspace_id || undefined,
+      action: 'sso.token_consumed',
+      target_type: 'user',
+      target_id: user.id,
+      metadata: { session_id: session.session_id },
+      ip_address: ipAddress,
+      user_agent: undefined,
+    });
+
+    return {
+      access_token: session.access_token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        is_super_admin: user.is_super_admin,
+      },
+      workspace_id: row.workspace_id || null,
+    };
+  }
+
+  /**
+   * Construit l'URL d'atterrissage.
+   *
+   * Le jeton est placé dans le FRAGMENT (`#`), jamais dans la query string.
+   * Un fragment n'est pas transmis au serveur par le navigateur : il n'entre
+   * ni dans les logs d'accès de l'engine, ni dans ceux du reverse-proxy, ni
+   * dans l'en-tête `Referer` des requêtes suivantes. C'est la différence entre
+   * un secret qui vit deux minutes en mémoire du navigateur et un secret
+   * archivé en clair dans des journaux conservés des mois.
+   */
+  private buildAutologinUrl(token: string): string {
+    const baseUrl = (
+      this.configService.get<string>('APP_URL') ?? 'http://localhost:5173'
+    ).replace(/\/+$/, '');
+    return `${baseUrl}/sso#${token}`;
+  }
+
+  private async isWorkspaceMember(
+    userId: string,
+    workspaceId: string,
+  ): Promise<boolean> {
+    const rows = await this.clickhouse.querySystem<{ count: number }>(
+      `
+      SELECT count() as count FROM workspace_memberships FINAL
+      WHERE user_id = {userId:String}
+        AND workspace_id = {workspaceId:String}
+    `,
+      { userId, workspaceId },
+    );
+    return (rows[0]?.count ?? 0) > 0;
+  }
+
+  private async getFirstWorkspaceForUser(
+    userId: string,
+  ): Promise<string | null> {
+    const rows = await this.clickhouse.querySystem<{ workspace_id: string }>(
+      `
+      SELECT workspace_id FROM workspace_memberships FINAL
+      WHERE user_id = {userId:String}
+      ORDER BY workspace_id
+      LIMIT 1
+    `,
+      { userId },
+    );
+    return rows[0]?.workspace_id || null;
+  }
+}

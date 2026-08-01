@@ -167,20 +167,21 @@ matcher `^[a-z][a-z0-9_]*$` (2..50) ; si un workspace existe déjà avec cet id 
 openssl rand -base64 48
 ```
 
-Puis injecter via Dokploy API :
+Puis injecter comme secret Nomad (⚠️ Dokploy décommissionné 2026-07-10 — plus de
+`compose.update`/`compose.deploy`). L'engine est un **job Nomad** ; les env/secrets
+vivent dans la **Nomad Variable** `nomad/jobs/analytics-engine` (`template{env=true}`),
+puis on redéploie le job :
 
 ```bash
-curl -X POST "https://dokploy.veridian.site/api/compose.update" \
-  -H "x-api-key: $DOKPLOY_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{ "composeId": "...", "env": "PLATFORM_ADMIN_API_KEY=<value>\n..." }'
-curl -X POST "https://dokploy.veridian.site/api/compose.deploy" \
-  -H "x-api-key: $DOKPLOY_API_KEY" \
-  -d '{ "composeId": "..." }'
+# depuis le bastion : source ~/credentials/nomad-bastion.env
+nomad var get   nomad/jobs/analytics-engine          # inspecter
+nomad var put   nomad/jobs/analytics-engine PLATFORM_ADMIN_API_KEY=<value> ...  # poser/rotate
+nomad-v run analytics-engine                         # redéployer (recharge le template)
 ```
+Cf `deploy/README.md` (source de vérité GitOps Nomad) + skill `/nomad`.
 
 **Rotation** : poser la nouvelle valeur côté Hub + Engine simultanément
-(Dokploy compose-update sur les deux), puis redeploy. Pas de fenêtre de
+(Nomad Variable des deux jobs), puis redeploy (`nomad-v run <job>`). Pas de fenêtre de
 dual-key support en V1 (à câbler si rotation fréquente devient
 nécessaire).
 

@@ -18,9 +18,14 @@ variable "image_tag" {
 job "analytics-engine-staging" {
   datacenters = ["veridian-eu"]
   type        = "service"
+  priority    = 50
 
   group "stack" {
     count = 1
+
+    # Scale-to-zero Sablier : les routes permanentes de l'ingress ciblent les
+    # ports statiques 19102/19103 et réveillent ce job par son nom.
+    meta = { "sablier.enable" = "true" }
 
     # Épinglé à ovh-dev : les DB bind sur /opt/veridian-staging du nœud ovh-dev uniquement.
     constraint {
@@ -51,10 +56,12 @@ job "analytics-engine-staging" {
       # host_network tailscale : les ports CNI bind sur l'IP Tailscale du nœud uniquement
       # → apps injoignables en public, Traefik route via Tailscale.
       port "http" {
+        static       = 19102
         to           = 3000
         host_network = "tailscale"
       }
       port "bridge" {
+        static       = 19103
         to           = 3002
         host_network = "tailscale"
       }
@@ -65,22 +72,12 @@ job "analytics-engine-staging" {
       name     = "analytics-engine-staging"
       provider = "nomad"
       port     = "http"
-      tags = [
-        "traefik.enable=true",
-        "traefik.http.middlewares.internal-only.ipallowlist.sourcerange=100.64.0.0/10,127.0.0.1/32",
-        "traefik.http.routers.analytics-engine-staging.rule=Host(`analytics-engine.staging.veridian.site`)",
-        "traefik.http.routers.analytics-engine-staging.entrypoints=web",
-        "traefik.http.routers.analytics-engine-staging.middlewares=internal-only@nomad",
-        "traefik.http.routers.analytics-engine-stagingsec.rule=Host(`analytics-engine.staging.veridian.site`)",
-        "traefik.http.routers.analytics-engine-stagingsec.entrypoints=websecure",
-        "traefik.http.routers.analytics-engine-stagingsec.tls=true",
-        "traefik.http.routers.analytics-engine-stagingsec.tls.certresolver=letsencrypt",
-        "traefik.http.routers.analytics-engine-stagingsec.middlewares=internal-only@nomad",
-      ]
+      # Le routage est déclaré une seule fois dans ingress.nomad.hcl (@file).
+      tags = ["traefik.enable=false"]
       check {
         type     = "http"
-        path     = "/api/setup.status"
-        interval = "15s"
+        path     = "/api/health"
+        interval = "5s"
         timeout  = "5s"
       }
     }
@@ -90,21 +87,11 @@ job "analytics-engine-staging" {
       name     = "analytics-bridge-staging"
       provider = "nomad"
       port     = "bridge"
-      tags = [
-        "traefik.enable=true",
-        "traefik.http.routers.analytics-bridge-staging.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
-        "traefik.http.routers.analytics-bridge-staging.entrypoints=web",
-        "traefik.http.routers.analytics-bridge-staging.middlewares=internal-only@nomad",
-        "traefik.http.routers.analytics-bridge-stagingsec.rule=Host(`analytics-engine-bridge.staging.veridian.site`)",
-        "traefik.http.routers.analytics-bridge-stagingsec.entrypoints=websecure",
-        "traefik.http.routers.analytics-bridge-stagingsec.tls=true",
-        "traefik.http.routers.analytics-bridge-stagingsec.tls.certresolver=letsencrypt",
-        "traefik.http.routers.analytics-bridge-stagingsec.middlewares=internal-only@nomad",
-      ]
+      tags = ["traefik.enable=false"]
       check {
         type     = "http"
         path     = "/health"
-        interval = "15s"
+        interval = "5s"
         timeout  = "5s"
       }
     }
@@ -134,8 +121,9 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 500
-        memory = 1024
+        cpu        = 500
+        memory     = 1024
+        memory_max = 7000
       }
     }
 
@@ -161,16 +149,39 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 200
-        memory = 256
+        cpu        = 200
+        memory     = 256
+        memory_max = 7000
       }
     }
 
     # ---- Engine (console analytics, port 3000) — bumpé par la CI ----
     task "engine" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+
+      service {
+        name     = "analytics-engine-staging-selfheal"
+        provider = "nomad"
+        port     = "http"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/api/health"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "120s"
+            ignore_warnings = false
+          }
+        }
+      }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-engine:${var.image_tag}"
+        init  = true
         ports = ["http"]
       }
       template {
@@ -197,20 +208,48 @@ CORS_ALLOWED_ORIGINS=https://analytics-engine.staging.veridian.site,https://anal
 CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 ENCRYPTION_KEY={{ .ENCRYPTION_KEY }}
 PLATFORM_ADMIN_API_KEY={{ .PLATFORM_ADMIN_API_KEY }}
+# Secret HMAC partagé avec le Hub, requis par HubHmacGuard (routes SSO).
+# Même valeur que celle déjà servie au bridge ci-dessous, et que le Hub nomme
+# ANALYTICS_HUB_API_SECRET de son côté. Sans cette variable, l'engine
+# refusera TOUTES les demandes d'autologin (fail-closed volontaire).
+HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 {{ end }}
 EOH
       }
       resources {
-        cpu    = 400
-        memory = 512
+        cpu        = 400
+        memory     = 512
+        memory_max = 7000
       }
     }
 
     # ---- Bridge (port 3002) — bumpé par la CI ----
     task "bridge" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+
+      service {
+        name     = "analytics-bridge-staging-selfheal"
+        provider = "nomad"
+        port     = "bridge"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/health"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "90s"
+            ignore_warnings = false
+          }
+        }
+      }
+
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-bridge:${var.image_tag}"
+        init  = true
         ports = ["bridge"]
       }
       template {
@@ -239,8 +278,9 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 300
-        memory = 384
+        cpu        = 300
+        memory     = 384
+        memory_max = 7000
       }
     }
   }

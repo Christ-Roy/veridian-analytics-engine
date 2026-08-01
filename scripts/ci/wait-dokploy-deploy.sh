@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# ⚠️ OBSOLÈTE — Dokploy décommissionné 2026-07-10. Ce script CI ne sert plus :
+#    le déploiement prod passe par SSH→bastion + `nomad job run` et le verdict
+#    de réussite = `nomad deployment status -monitor <DeploymentID>`.
+#    Voir deploy/README.md (GitOps Nomad) + skill /nomad. Conservé pour historique.
+#
 # wait-dokploy-deploy.sh — juge la réussite d'un déploiement prod Dokploy.
 #
 # Exécuté SUR le VPS prod (via ssh), lit DOKPLOY_API_KEY dans ~/credentials.

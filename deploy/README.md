@@ -8,7 +8,7 @@ Nomad 3 nœuds terminée).
 
 | Fichier | Job | Nœud | Route | Secrets Nomad Var |
 |---|---|---|---|---|
-| `analytics-engine.nomad.hcl` | `analytics-engine` (prod) | `contabo` (bastion) | `analytics-engine.app.veridian.site` (public, Let's Encrypt) | `nomad/jobs/analytics-engine` |
+| `analytics-engine.nomad.hcl` | `analytics-engine` (prod) | `ovh-prod` | `analytics-engine.app.veridian.site` (public, Let's Encrypt) | `nomad/jobs/analytics-engine` |
 | `analytics-engine-staging.nomad.hcl` | `analytics-engine-staging` | `ovh-dev` | `analytics-engine.staging.veridian.site` (privé Tailscale, `internal-only@nomad`) | `nomad/jobs/analytics-engine-staging` |
 
 Chaque job = 4 tasks dans UN group réseau `bridge` partagé (127.0.0.1) :
@@ -26,9 +26,11 @@ Variables + `template{env=true}`.
 2. Deploy job : **SSH → bastion** (`NOMAD_BASTION_HOST`/`_USER`/`NOMAD_DEPLOY_SSH_KEY`),
    scp du HCL **de ce repo** (celui qui déclare `variable "image_tag"`), puis IN SITU :
    `source ~/credentials/nomad-bastion.env`, **pré-pull authentifié** des 2 images
-   (staging : `ssh -n dev-pub docker pull` ; prod : `docker pull` local sur le bastion —
+   (staging : `ssh -n dev-pub docker pull` ; prod : `ssh -n prod-pub docker pull` —
    Nomad ne pull pas ghcr privé), `nomad job validate/plan`, `run -detach`.
-   **Le NOMAD_TOKEN ne quitte jamais le bastion.**
+   **Le NOMAD_TOKEN ne quitte jamais le bastion.** Les plans n'acceptent que
+   les codes Nomad 0/1 et le run reprend le `ModifyIndex` via `-check-index` :
+   toute erreur ou modification concurrente bloque le déploiement.
 3. Vérif CIBLÉE : `run -detach` → Evaluation ID → `nomad eval status -json` → DeploymentID
    → `nomad deployment status -monitor <DeploymentID>` (bloque jusqu'à terminal).
    PAS un poll `job status | grep successful` (faux positif : lit le déploiement précédent).
@@ -50,6 +52,11 @@ TAG=staging-<sha7>   # ou prod-<sha7>
 ```
 
 Rollback : `nomad job revert <job> <version>` OU redéployer un `image_tag` antérieur.
+
+Avant chaque mutation prod, la CI exécute les runners existants, sans créer de
+backup parallèle : `veridian-node-backup.sh` exporte PostgreSQL + ClickHouse et
+réplique le snapshot sur plusieurs nœuds, puis `prod-r2-backup.sh` vérifie les
+six PostgreSQL hors site. Un échec bloque le `nomad job run`.
 
 > ⚠️ Un déploiement recrée le group (image change → `create/destroy update`), donc
 > restart bref de clickhouse+postgres aussi (volumes bind persistants → données saines).

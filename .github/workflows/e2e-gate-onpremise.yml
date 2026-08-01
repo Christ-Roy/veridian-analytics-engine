@@ -46,8 +46,12 @@ on:
       - "api/**"
       - "sdk/**"
       - "console/**"
+      - "deploy/*.nomad.hcl"
       - "tests/e2e/00-gate-onpremise/**"
       - ".github/workflows/e2e-gate-onpremise.yml"
+      - ".github/workflows/staging-deploy.yml"
+      - ".github/workflows/prod-ci.yml"
+      - "scripts/ci/check-nomad-gitops-reliability.sh"
   workflow_dispatch:
 
 # Non-cancel : on NE veut PAS qu'un push staging suivant annule un gate en
@@ -90,12 +94,13 @@ jobs:
 
       # Pré-check healthy DEPUIS dev-pub (bypass Traefik/tailnet) — grace ~12 min.
       #
-      # On poll l'état du container engine staging via `docker compose ps`
-      # (réseau Docker local, indépendant de Traefik/DNS/tailnet) PUIS un
-      # HTTP réel via `docker exec`. Un push staging qui joue une migration
+      # Le staging tourne sous Nomad. On résout donc le conteneur engine actif
+      # par son nom Nomad (`engine-<alloc>`) et son image GHCR, puis on confirme
+      # un HTTP réel via `docker exec`. Un push staging qui joue une migration
       # lourde (recreate + crash-loop temporaire) peut rendre l'engine DOWN
       # plusieurs minutes : on attend qu'il redevienne sain au lieu d'échouer
-      # à tort. Source de vérité = l'état réel du container, pas un curl public
+      # à tort. Source de vérité = l'état réel du conteneur Nomad, pas l'ancien
+      # projet Docker Compose décommissionné ni un curl public
       # (qui ne marchera jamais, cf en-tête). Ne distingue PAS un staging
       # "jamais sain" (vrai fail) d'un recreate transitoire qui finit OK.
       - name: Wait for staging engine healthy (via dev-pub, ~12 min grace)
@@ -104,24 +109,22 @@ jobs:
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes \
             staging-deploy@37.187.199.185 bash -s <<'HEALTHY'
             set -uo pipefail
-            cd /opt/staging/analytics-engine
-            COMPOSE="docker compose -p analytics-engine-staging --env-file .env -f compose/base.yml -f compose/staging.yml"
             # 72 × 10s = 12 min de marge (recreate + pull + migrate-on-boot).
             for i in $(seq 1 72); do
-              ENGINE_HEALTH=$($COMPOSE ps --format '{{.Name}} {{.Health}}' 2>/dev/null \
-                | awk '/engine/ {print $2}' | head -1)
-              if [ "$ENGINE_HEALTH" = "healthy" ]; then
-                # Confirme par un HTTP réel interne (port 3000, bypass Traefik).
-                if $COMPOSE exec -T engine wget -q -O- http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
-                  echo "✓ engine staging healthy + /api/health 200 (après $((i*10))s)"
-                  exit 0
-                fi
+              ENGINE_ID=$(docker ps \
+                --filter 'name=engine-' \
+                --format '{{.ID}} {{.Image}}' 2>/dev/null \
+                | awk '$2 ~ /^ghcr\.io\/christ-roy\/veridian-analytics-engine:staging-/ {print $1; exit}')
+              if [ -n "$ENGINE_ID" ] && \
+                 docker exec "$ENGINE_ID" wget -q -O- http://127.0.0.1:3000/api/health >/dev/null 2>&1; then
+                echo "✓ engine Nomad staging + /api/health 200 (après $((i*10))s)"
+                exit 0
               fi
-              echo "  tentative $i/72 → engine health='${ENGINE_HEALTH:-?}', retry 10s"
+              echo "  tentative $i/72 → engine Nomad='${ENGINE_ID:-absent}', retry 10s"
               sleep 10
             done
             echo "::error::engine staging jamais healthy après 12 min — staging réellement KO (pas un transitoire). Gate ne peut pas tourner."
-            $COMPOSE ps || true
+            docker ps --filter 'name=engine-' --format '{{.Names}} {{.Image}} {{.Status}}' || true
             exit 1
           HEALTHY
 

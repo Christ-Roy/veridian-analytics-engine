@@ -413,6 +413,35 @@ export class AuthService {
     await this.cacheManager.del(`user:${userId}`);
   }
 
+  /**
+   * Ouvre une session pour un user DÉJÀ authentifié par un autre moyen, et
+   * renvoie le JWT correspondant.
+   *
+   * Extrait de `login()` pour que le flux SSO (jeton d'autologin émis par le
+   * Hub) produise EXACTEMENT la même session qu'une connexion par mot de passe :
+   * même durée, même enregistrement en base, même révocabilité depuis
+   * « Mes sessions ». Une session SSO qui serait un objet à part échapperait
+   * aux révocations — un compte compromis resterait ouvert après un logout
+   * global.
+   *
+   * ⚠️ Cette méthode n'AUTHENTIFIE personne : elle fait confiance à son
+   * appelant. Tout appelant doit avoir vérifié l'identité en amont.
+   */
+  async issueSessionForUser(
+    userId: string,
+    email: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<{ access_token: string; session_id: string }> {
+    const session = await this.createSession(userId, ipAddress, userAgent);
+    const accessToken = this.jwtService.sign({
+      sub: userId,
+      email,
+      sessionId: session.id,
+    });
+    return { access_token: accessToken, session_id: session.id };
+  }
+
   private async createSession(
     userId: string,
     ipAddress?: string,

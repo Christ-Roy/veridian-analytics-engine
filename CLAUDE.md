@@ -323,7 +323,7 @@ branche dédiée + PR vers staging tolérée car c'est un changement de
 |---|---|---|---|
 | Dev hot-reload | `analytics-engine-dev.staging.veridian.site` (Tailnet only) | `dev` | bind-mount + watch |
 | Staging | `analytics-engine.staging.veridian.site` | `staging` | GHCR + SSH dev-pub auto |
-| Prod | `analytics-engine.app.veridian.site` | `main` | GHCR + Trivy + Dokploy API auto |
+| Prod | `analytics-engine.app.veridian.site` | `main` | GHCR + Trivy + **job Nomad** auto (SSH bastion → `nomad job run` ; ex-Dokploy décommissionné 2026-07-10, cf `deploy/README.md`) |
 
 ## Inter-services
 
