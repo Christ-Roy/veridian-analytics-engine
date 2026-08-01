@@ -254,7 +254,10 @@ describe('Report Generation E2E', () => {
       };
 
       const reportData = await reportGenerator.generate(mockSubscription);
-      const html = reportGenerator.renderEmail(reportData, mockSubscription);
+      const html = await reportGenerator.renderEmail(
+        reportData,
+        mockSubscription,
+      );
 
       // The HTML should contain formatted durations like "5m 30s"
       expect(html).toMatch(/\d+m \d+s/);

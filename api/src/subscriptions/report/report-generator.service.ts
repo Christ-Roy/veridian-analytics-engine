@@ -467,9 +467,14 @@ export class ReportGeneratorService {
     };
   }
 
-  renderEmail(reportData: ReportData, subscription: Subscription): string {
+  async renderEmail(
+    reportData: ReportData,
+    subscription: Subscription,
+  ): Promise<string> {
     const mjmlSource = this.buildMjml(reportData, subscription.name);
-    const { html, errors } = mjml(mjmlSource, { validationLevel: 'soft' });
+    const { html, errors } = await mjml(mjmlSource, {
+      validationLevel: 'soft',
+    });
 
     if (errors.length > 0) {
       this.logger.warn('MJML compilation warnings:', errors);

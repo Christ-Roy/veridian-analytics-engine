@@ -95,7 +95,10 @@ export class SubscriptionSchedulerService {
       const reportData = await this.reportGenerator.generate(subscription);
 
       // Render email
-      const html = this.reportGenerator.renderEmail(reportData, subscription);
+      const html = await this.reportGenerator.renderEmail(
+        reportData,
+        subscription,
+      );
 
       // Send email
       const subject = `${subscription.name} - ${reportData.dateRangeLabel}`;
