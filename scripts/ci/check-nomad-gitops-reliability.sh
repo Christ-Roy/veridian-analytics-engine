@@ -6,6 +6,7 @@ prod_hcl="$root/deploy/analytics-engine.nomad.hcl"
 staging_hcl="$root/deploy/analytics-engine-staging.nomad.hcl"
 prod_ci="$root/.github/workflows/prod-ci.yml"
 staging_ci="$root/.github/workflows/staging-deploy.yml"
+onprem_gate="$root/.github/workflows/e2e-gate-onpremise.yml"
 structural="$root/scripts/ci/check-structural-changes.sh"
 
 fail(){ echo "ERREUR: $*" >&2; exit 1; }
@@ -40,5 +41,8 @@ require_fixed "$staging_ci" 'nomad job plan a échoué' 'plan staging non fail-c
 reject_fixed "$prod_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan prod masquée'
 reject_fixed "$staging_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan staging masquée'
 require_fixed "$structural" "'^deploy/.*\\.nomad\\.hcl$'" 'HCL Nomad absent du structural gate'
+require_fixed "$onprem_gate" '- "deploy/*.nomad.hcl"' 'HCL Nomad absent du trigger E2E on-premise'
+require_fixed "$onprem_gate" '- ".github/workflows/staging-deploy.yml"' 'workflow staging absent du trigger E2E on-premise'
+require_fixed "$onprem_gate" '- ".github/workflows/prod-ci.yml"' 'workflow prod absent du trigger E2E on-premise'
 
 echo 'OK: invariants GitOps Nomad Analytics'

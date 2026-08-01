@@ -46,8 +46,12 @@ on:
       - "api/**"
       - "sdk/**"
       - "console/**"
+      - "deploy/*.nomad.hcl"
       - "tests/e2e/00-gate-onpremise/**"
       - ".github/workflows/e2e-gate-onpremise.yml"
+      - ".github/workflows/staging-deploy.yml"
+      - ".github/workflows/prod-ci.yml"
+      - "scripts/ci/check-nomad-gitops-reliability.sh"
   workflow_dispatch:
 
 # Non-cancel : on NE veut PAS qu'un push staging suivant annule un gate en
