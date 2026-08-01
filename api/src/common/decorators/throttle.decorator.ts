@@ -22,6 +22,21 @@ export function AnalyticsThrottle() {
 }
 
 /**
+ * Stable budget for public health/readiness probes.
+ *
+ * A probe must not inherit the strict `auth` bucket (10/min), otherwise normal
+ * monitoring creates 429 false positives. It is not left unbounded either:
+ * the existing `analytics` bucket is overridden to 600/min per tracker while
+ * every unrelated named throttler is explicitly skipped.
+ */
+export function HealthProbeThrottle() {
+  return applyDecorators(
+    SkipThrottle({ auth: true, default: true, ingest: true }),
+    Throttle({ analytics: { limit: 600, ttl: 60000 } }),
+  );
+}
+
+/**
  * Skip ALL rate limiting for high-volume endpoints.
  * CRITICAL: With named throttlers, must explicitly skip each by name.
  * Use this on track endpoints that may receive millions of requests from same IP.
