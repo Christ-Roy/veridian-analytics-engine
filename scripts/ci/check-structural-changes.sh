@@ -34,6 +34,7 @@ STRUCTURAL_PATTERNS=(
   '^sdk/package-lock\.json$'
   '^api/package\.json$'
   '^api/package-lock\.json$'
+  '^deploy/.*\.nomad\.hcl$'
   '^\.github/workflows/'
 )
 
