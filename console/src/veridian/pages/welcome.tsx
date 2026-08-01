@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -73,6 +73,17 @@ export function VeridianWelcomePage({
   const [copied, setCopied] = useState(false)
   const [verify, setVerify] = useState<VerifyState>({ kind: 'idle' })
   const abortRef = useRef<AbortController | null>(null)
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const snippet = useMemo(
     () => buildTrackerSnippet({ workspaceId, endpoint: trackerEndpoint }),
@@ -84,7 +95,13 @@ export function VeridianWelcomePage({
       await navigator.clipboard.writeText(snippet)
       setCopied(true)
       antdMessage.success('Snippet copié dans le presse-papier')
-      setTimeout(() => setCopied(false), 2200)
+      if (copyResetTimerRef.current !== null) {
+        clearTimeout(copyResetTimerRef.current)
+      }
+      copyResetTimerRef.current = setTimeout(() => {
+        copyResetTimerRef.current = null
+        setCopied(false)
+      }, 2200)
     } catch {
       // Clipboard refusé (permission, contexte non sécurisé) — on ne casse pas
       // l'UX, l'utilisateur peut sélectionner le code à la main.
