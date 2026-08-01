@@ -86,7 +86,7 @@ describe('SubscriptionSchedulerService', () => {
           provide: ReportGeneratorService,
           useValue: {
             generate: jest.fn().mockResolvedValue(mockReportData),
-            renderEmail: jest.fn().mockReturnValue('<html>Report</html>'),
+            renderEmail: jest.fn().mockResolvedValue('<html>Report</html>'),
           },
         },
         {

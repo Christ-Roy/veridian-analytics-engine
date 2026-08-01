@@ -207,7 +207,7 @@ describe('ReportGeneratorService', () => {
 
     it('should render correctly formatted HTML for dimension breakdowns', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       // TimeScore should be formatted as duration, not raw seconds
       expect(html).toContain('6m 24s');
@@ -222,7 +222,7 @@ describe('ReportGeneratorService', () => {
   describe('renderEmail', () => {
     it('should compile MJML to valid HTML', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('<!doctype html>');
       expect(html).toContain('<html');
@@ -230,14 +230,14 @@ describe('ReportGeneratorService', () => {
 
     it('should include metrics summary', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('Visites uniques');
     });
 
     it('should include dimension tables', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       // Should mention the dimension names
       expect(html).toContain('Landing');
@@ -245,21 +245,21 @@ describe('ReportGeneratorService', () => {
 
     it('should include unsubscribe link', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('unsubscribe');
     });
 
     it('should include dashboard link', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('View Dashboard');
     });
 
     it('should brand the report with the Veridian logo (never Staminads)', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       // Branding Veridian : le logo doit être veridian-logo.svg (servi par la
       // console à l'origine de dashboardUrl), jamais le favicon Staminads.
@@ -270,7 +270,7 @@ describe('ReportGeneratorService', () => {
 
     it('should include workspace info with website', async () => {
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain(reportData.workspace.name);
       expect(html).toContain('example.com'); // website without protocol
@@ -286,7 +286,7 @@ describe('ReportGeneratorService', () => {
       const loggerWarnSpy = jest.spyOn(service['logger'], 'warn');
 
       const reportData = await service.generate(mockSubscription);
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('<html');
       // The refactored code uses this.logger.warn — never console.warn.
@@ -327,7 +327,7 @@ describe('ReportGeneratorService', () => {
   });
 
   describe('renderEmail formatting', () => {
-    it('should render sessions as integers without decimals', () => {
+    it('should render sessions as integers without decimals', async () => {
       const reportData = {
         workspace: {
           id: 'ws-123',
@@ -385,7 +385,7 @@ describe('ReportGeneratorService', () => {
         unsubscribeUrl: 'http://localhost:5173/unsubscribe?token=test',
       };
 
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       // Sessions should appear as integers (165, 268), not floats
       expect(html).toContain('>165<');
@@ -393,7 +393,7 @@ describe('ReportGeneratorService', () => {
       expect(html).not.toMatch(/>\d+\.\d+</); // No decimal values in cells
     });
 
-    it('should render TimeScore as formatted duration', () => {
+    it('should render TimeScore as formatted duration', async () => {
       const reportData = {
         workspace: {
           id: 'ws-123',
@@ -451,7 +451,7 @@ describe('ReportGeneratorService', () => {
         unsubscribeUrl: 'http://localhost:5173/unsubscribe?token=test',
       };
 
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       // TimeScore should be formatted as duration, not raw seconds
       expect(html).toContain('7m 51s');
@@ -461,7 +461,7 @@ describe('ReportGeneratorService', () => {
       expect(html).not.toContain('>384<');
     });
 
-    it('should render TimeScore under 60s with seconds only', () => {
+    it('should render TimeScore under 60s with seconds only', async () => {
       const reportData = {
         workspace: {
           id: 'ws-123',
@@ -496,7 +496,7 @@ describe('ReportGeneratorService', () => {
         unsubscribeUrl: 'http://localhost:5173/unsubscribe?token=test',
       };
 
-      const html = service.renderEmail(reportData, mockSubscription);
+      const html = await service.renderEmail(reportData, mockSubscription);
 
       expect(html).toContain('45s');
     });

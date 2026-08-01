@@ -7,6 +7,7 @@ import {
   vi,
 } from 'vitest'
 import { render, screen, waitFor, act } from '@testing-library/react'
+import { message as antdMessage } from 'antd'
 
 // On mocke `../api` AVANT d'importer le composant : la vérification du tracker
 // passe désormais par `fetchCheckTracker` (appel unique, à la demand) et non
@@ -47,6 +48,7 @@ beforeEach(() => {
     clipboard: { writeText: vi.fn(async () => undefined) },
   })
   mockFetchCheckTracker.mockReset()
+  vi.spyOn(antdMessage, 'success').mockReturnValue(undefined as never)
 })
 
 afterEach(() => {
@@ -140,6 +142,28 @@ describe('VeridianWelcomePage — non-bloquant', () => {
     const copied = (navigator.clipboard.writeText as ReturnType<typeof vi.fn>)
       .mock.calls[0][0] as string
     expect(copied).toContain('demo_tenant')
+  })
+
+  it('cancels the copy reset timer when the page unmounts', async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    const { unmount } = render(
+      <VeridianWelcomePage workspaceId="demo_tenant" trackerEndpoint={ENDPOINT} />,
+    )
+
+    await act(async () => {
+      screen.getByTestId('welcome-copy-button').click()
+    })
+
+    const resetTimerIndex = setTimeoutSpy.mock.calls.findIndex(
+      ([, delay]) => delay === 2200,
+    )
+    expect(resetTimerIndex).toBeGreaterThanOrEqual(0)
+    const resetTimer = setTimeoutSpy.mock.results[resetTimerIndex]?.value
+
+    unmount()
+
+    expect(clearTimeoutSpy).toHaveBeenCalledWith(resetTimer)
   })
 })
 
