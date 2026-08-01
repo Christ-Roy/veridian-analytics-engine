@@ -2,6 +2,7 @@ import { Controller, Get, HttpCode } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { Public } from '../common/decorators/public.decorator';
+import { HealthProbeThrottle } from '../common/decorators/throttle.decorator';
 import { APP_VERSION, GIT_SHA } from '../version';
 
 /**
@@ -18,6 +19,7 @@ import { APP_VERSION, GIT_SHA } from '../version';
  */
 @ApiTags('health')
 @Controller('api')
+@HealthProbeThrottle()
 export class HealthController {
   constructor(private readonly clickhouse: ClickHouseService) {}
 

@@ -13,6 +13,17 @@ describe('HealthController', () => {
     );
   });
 
+  it('does not inherit unrelated strict rate limiters', () => {
+    for (const throttler of ['auth', 'default', 'ingest']) {
+      expect(
+        Reflect.getMetadata(`THROTTLER:SKIP${throttler}`, HealthController),
+      ).toBe(true);
+    }
+    expect(
+      Reflect.getMetadata('THROTTLER:LIMITanalytics', HealthController),
+    ).toBe(600);
+  });
+
   it('returns ok status when ClickHouse is reachable', async () => {
     clickhouse.querySystem.mockResolvedValue([{ '1': 1 }]);
     const res = await controller.health();

@@ -1,4 +1,8 @@
-import { ReadM2MThrottle, WriteM2MThrottle } from './throttle.decorator';
+import {
+  HealthProbeThrottle,
+  ReadM2MThrottle,
+  WriteM2MThrottle,
+} from './throttle.decorator';
 
 /**
  * Vérifie la config de rate-limit des décorateurs M2M plateforme
@@ -36,6 +40,18 @@ function metaFor(decorate: () => MethodDecorator) {
 }
 
 describe('M2M throttle decorators', () => {
+  describe('HealthProbeThrottle (probe stable mais bornée)', () => {
+    const m = metaFor(HealthProbeThrottle);
+
+    it('skips auth/default/ingest and keeps a dedicated 600/min budget', () => {
+      expect(m.skip('auth')).toBe(true);
+      expect(m.skip('default')).toBe(true);
+      expect(m.skip('ingest')).toBe(true);
+      expect(m.skip('analytics')).toBeUndefined();
+      expect(m.limit('analytics')).toBe(600);
+    });
+  });
+
   describe('ReadM2MThrottle (lecture généreuse)', () => {
     const m = metaFor(ReadM2MThrottle);
 
