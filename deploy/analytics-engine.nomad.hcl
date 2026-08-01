@@ -23,6 +23,7 @@ variable "image_tag" {
 job "analytics-engine" {
   datacenters = ["veridian-eu"]
   type        = "service"
+  priority    = 80
 
   group "stack" {
     count = 1
@@ -30,19 +31,17 @@ job "analytics-engine" {
     # Épinglé au bastion : clickhouse/pg-bridge bind sur /opt/veridian-lab/analytics-engine du bastion uniquement.
     constraint {
       attribute = "${meta.provider}"
-      value     = "contabo"
+      value     = "ovh-prod"
     }
 
     # Rollback idiomatique Nomad : si le nouveau déploiement n'atteint pas l'état
     # healthy (checks HTTP engine+bridge) sous healthy_deadline, Nomad REVIENT
     # automatiquement à la dernière version saine. Pas de job de rollback CI.
     update {
-      max_parallel      = 1
-      health_check      = "checks"
-      min_healthy_time  = "10s"
-      healthy_deadline  = "15m"
-      progress_deadline = "20m"
-      auto_revert       = true
+      max_parallel     = 1
+      min_healthy_time = "15s"
+      healthy_deadline = "5m"
+      auto_revert      = true
     }
 
     restart {
@@ -67,8 +66,10 @@ job "analytics-engine" {
         "traefik.enable=true",
         "traefik.http.routers.analytics-engine.rule=Host(`analytics-engine-lab.veridian.site`)",
         "traefik.http.routers.analytics-engine.entrypoints=web",
+        "traefik.http.routers.analytics-engine.middlewares=internal-only@nomad",
         "traefik.http.routers.analytics-enginesec.rule=Host(`analytics-engine-lab.veridian.site`)",
         "traefik.http.routers.analytics-enginesec.entrypoints=websecure",
+        "traefik.http.routers.analytics-enginesec.middlewares=internal-only@nomad",
         "traefik.http.routers.analytics-enginesec.tls=true",
         "traefik.http.routers.analytics-engineprod.rule=Host(`analytics-engine.app.veridian.site`)",
         "traefik.http.routers.analytics-engineprod.entrypoints=websecure",
@@ -92,8 +93,10 @@ job "analytics-engine" {
         "traefik.enable=true",
         "traefik.http.routers.analytics-engine-bridge.rule=Host(`analytics-engine-bridge-lab.veridian.site`)",
         "traefik.http.routers.analytics-engine-bridge.entrypoints=web",
+        "traefik.http.routers.analytics-engine-bridge.middlewares=internal-only@nomad",
         "traefik.http.routers.analytics-engine-bridgesec.rule=Host(`analytics-engine-bridge-lab.veridian.site`)",
         "traefik.http.routers.analytics-engine-bridgesec.entrypoints=websecure",
+        "traefik.http.routers.analytics-engine-bridgesec.middlewares=internal-only@nomad",
         "traefik.http.routers.analytics-engine-bridgesec.tls=true",
         "traefik.http.routers.analytics-engine-bridgeprod.rule=Host(`analytics-engine-bridge.app.veridian.site`)",
         "traefik.http.routers.analytics-engine-bridgeprod.entrypoints=websecure",
@@ -133,8 +136,9 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 500
-        memory = 3072
+        cpu        = 500
+        memory     = 512
+        memory_max = 7000
       }
     }
 
@@ -160,14 +164,34 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 200
-        memory = 256
+        cpu        = 200
+        memory     = 256
+        memory_max = 7000
       }
     }
 
     # ---- Engine (console analytics, port 3000) — bumpé par la CI ----
     task "engine" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+      service {
+        name     = "analytics-engine-selfheal"
+        provider = "nomad"
+        port     = "http"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/api/setup.status"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "120s"
+            ignore_warnings = false
+          }
+        }
+      }
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-engine:${var.image_tag}"
         ports = ["http"]
@@ -197,14 +221,34 @@ DEMO_SECRET={{ .DEMO_SECRET }}
 EOH
       }
       resources {
-        cpu    = 400
-        memory = 512
+        cpu        = 400
+        memory     = 384
+        memory_max = 7000
       }
     }
 
     # ---- Bridge (port 3002) — bumpé par la CI ----
     task "bridge" {
-      driver = "docker"
+      driver         = "docker"
+      shutdown_delay = "10s"
+      kill_timeout   = "30s"
+      service {
+        name     = "analytics-engine-bridge-selfheal"
+        provider = "nomad"
+        port     = "bridge"
+        tags     = ["traefik.enable=false"]
+        check {
+          type     = "http"
+          path     = "/health"
+          interval = "15s"
+          timeout  = "5s"
+          check_restart {
+            limit           = 4
+            grace           = "90s"
+            ignore_warnings = false
+          }
+        }
+      }
       config {
         image = "ghcr.io/christ-roy/veridian-analytics-bridge:${var.image_tag}"
         ports = ["bridge"]
@@ -235,8 +279,9 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu    = 300
-        memory = 384
+        cpu        = 300
+        memory     = 192
+        memory_max = 7000
       }
     }
   }
