@@ -67,6 +67,9 @@ jobs:
       - name: Invariants GitOps Nomad
         run: ./scripts/ci/check-nomad-gitops-reliability.sh
 
+      - name: Plafonds ressources staging
+        run: python3 scripts/ci/check-staging-resources.py
+
       - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
