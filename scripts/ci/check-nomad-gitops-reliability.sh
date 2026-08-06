@@ -43,6 +43,7 @@ require_fixed "$prod_ci" 'RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")' 'check-
 require_fixed "$staging_ci" 'RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")' 'check-index staging absent'
 require_fixed "$prod_ci" 'nomad job plan a échoué' 'plan prod non fail-closed'
 require_fixed "$staging_ci" 'nomad job plan a échoué' 'plan staging non fail-closed'
+require_fixed "$staging_ci" 'check-clickhouse-log-retention.py' 'contrat rétention ClickHouse staging absent de la CI'
 reject_fixed "$prod_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan prod masquée'
 reject_fixed "$staging_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan staging masquée'
 require_fixed "$structural" "'^deploy/.*\\.nomad\\.hcl$'" 'HCL Nomad absent du structural gate'

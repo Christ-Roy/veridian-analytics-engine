@@ -104,8 +104,54 @@ job "analytics-engine-staging" {
         volumes = [
           "/opt/veridian-staging/analytics/clickhouse:/var/lib/clickhouse",
           "/opt/veridian-staging/analytics/clickhouse-users.xml:/etc/clickhouse-server/users.d/users.xml:ro",
+          "local/clickhouse-system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro",
         ]
         ulimit { nofile = "262144:262144" }
+      }
+      # Les valeurs par défaut ClickHouse 24.8 gardent les logs système sans
+      # TTL, avec logger/text_log en trace et metric_log toutes les secondes.
+      # Staging conserve 7 jours de diagnostic, sans croissance non bornée.
+      template {
+        destination = "local/clickhouse-system-logs.xml"
+        change_mode = "restart"
+        data        = <<CLICKHOUSE_SYSTEM_LOGS_XML
+<clickhouse>
+  <logger>
+    <level>information</level>
+    <size>100M</size>
+    <count>3</count>
+  </logger>
+  <text_log>
+    <level>information</level>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </text_log>
+  <metric_log>
+    <collect_interval_milliseconds>5000</collect_interval_milliseconds>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </metric_log>
+  <asynchronous_metric_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </asynchronous_metric_log>
+  <trace_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </trace_log>
+  <processors_profile_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </processors_profile_log>
+  <query_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </query_log>
+  <part_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </part_log>
+  <error_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </error_log>
+  <query_views_log>
+    <ttl>event_date + INTERVAL 7 DAY</ttl>
+  </query_views_log>
+</clickhouse>
+CLICKHOUSE_SYSTEM_LOGS_XML
       }
       template {
         destination = "secrets/ch.env"
@@ -125,6 +171,61 @@ EOH
         memory     = 1024
         # Pic 7 j observé : 1 334 MiB. Fusible x2,3 sans pouvoir affamer la VM.
         memory_max = 3072
+      }
+    }
+
+    # ClickHouse renomme une table system_log existante lorsque son moteur
+    # change. Cette tâche applique le même TTL aux tables actives et à leurs
+    # archives numérotées, sans scanner ni lire les données clientes.
+    task "clickhouse-log-retention" {
+      driver = "docker"
+      lifecycle {
+        hook    = "poststart"
+        sidecar = false
+      }
+      config {
+        image   = "clickhouse/clickhouse-server:24.8"
+        command = "/bin/sh"
+        args = [
+          "-ec",
+          <<CLICKHOUSE_RETENTION_SH
+ready=0
+for attempt in $(seq 1 60); do
+  if clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+[ "$ready" -eq 1 ] || { echo "ClickHouse indisponible après 120s" >&2; exit 1; }
+
+for base in asynchronous_metric_log error_log metric_log part_log processors_profile_log query_log query_views_log text_log trace_log; do
+  tables=$(clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "SELECT name FROM system.tables WHERE database = 'system' AND match(name, '^$base(_[0-9]+)?$') AND engine LIKE '%MergeTree%' FORMAT TSVRaw")
+  for table in $tables; do
+    case "$table" in
+      "$base"|"$base"_[0-9]*) ;;
+      *) echo "Table hors allowlist: $table" >&2; exit 1 ;;
+    esac
+    clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "ALTER TABLE system.$table MODIFY TTL event_date + INTERVAL 7 DAY"
+  done
+done
+CLICKHOUSE_RETENTION_SH
+        ]
+      }
+      template {
+        destination = "secrets/ch-retention.env"
+        env         = true
+        data        = <<EOH
+CLICKHOUSE_USER=default
+{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
+CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
+{{ end }}
+EOH
+      }
+      resources {
+        cpu        = 50
+        memory     = 64
+        memory_max = 128
       }
     }
 
