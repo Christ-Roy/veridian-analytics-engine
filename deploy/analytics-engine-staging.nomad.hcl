@@ -174,61 +174,6 @@ EOH
       }
     }
 
-    # ClickHouse renomme une table system_log existante lorsque son moteur
-    # change. Cette tâche applique le même TTL aux tables actives et à leurs
-    # archives numérotées, sans scanner ni lire les données clientes.
-    task "clickhouse-log-retention" {
-      driver = "docker"
-      lifecycle {
-        hook    = "poststart"
-        sidecar = false
-      }
-      config {
-        image   = "clickhouse/clickhouse-server:24.8"
-        command = "/bin/sh"
-        args = [
-          "-ec",
-          <<CLICKHOUSE_RETENTION_SH
-ready=0
-for attempt in $(seq 1 60); do
-  if clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "SELECT 1" >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  sleep 2
-done
-[ "$ready" -eq 1 ] || { echo "ClickHouse indisponible après 120s" >&2; exit 1; }
-
-for base in asynchronous_metric_log error_log metric_log part_log processors_profile_log query_log query_views_log text_log trace_log; do
-  tables=$(clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "SELECT name FROM system.tables WHERE database = 'system' AND match(name, '^$base(_[0-9]+)?$') AND engine LIKE '%MergeTree%' FORMAT TSVRaw")
-  for table in $tables; do
-    case "$table" in
-      "$base"|"$base"_[0-9]*) ;;
-      *) echo "Table hors allowlist: $table" >&2; exit 1 ;;
-    esac
-    clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "ALTER TABLE system.$table MODIFY TTL event_date + INTERVAL 7 DAY"
-  done
-done
-CLICKHOUSE_RETENTION_SH
-        ]
-      }
-      template {
-        destination = "secrets/ch-retention.env"
-        env         = true
-        data        = <<EOH
-CLICKHOUSE_USER=default
-{{ with nomadVar "nomad/jobs/analytics-engine-staging" }}
-CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
-{{ end }}
-EOH
-      }
-      resources {
-        cpu        = 50
-        memory     = 64
-        memory_max = 128
-      }
-    }
-
     # ---- Postgres bridge (interne, données staging migrées) ----
     task "postgres-bridge" {
       driver = "docker"

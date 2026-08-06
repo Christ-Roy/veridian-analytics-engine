@@ -53,19 +53,11 @@ assert root.findtext("metric_log/collect_interval_milliseconds") == "5000", (
 assert "local/clickhouse-system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro" in text, (
     "fragment ClickHouse non monté en lecture seule"
 )
-assert 'task "clickhouse-log-retention"' in text, "rattrapage TTL des tables existantes absent"
-assert 'hook    = "poststart"' in text, "rattrapage TTL non exécuté après ClickHouse"
-
-allowlist_match = re.search(r"for base in ([a-z_ ]+); do", text)
-assert allowlist_match, "allowlist shell du rattrapage absente"
-runtime_allowlist = set(allowlist_match.group(1).split())
-assert runtime_allowlist == LOG_TABLES, (
-    f"allowlist runtime inattendue: {sorted(runtime_allowlist)} != {sorted(LOG_TABLES)}"
+assert 'task "clickhouse-log-retention"' not in text, (
+    "ALTER TTL des archives interdit: il déclenche une mutation non bornée"
 )
 
-for forbidden in ("DELETE FROM", "TRUNCATE TABLE", "DROP TABLE", "MATERIALIZE TTL"):
+for forbidden in ("ALTER TABLE", "DELETE FROM", "TRUNCATE TABLE", "DROP TABLE", "MATERIALIZE TTL"):
     assert forbidden not in text.upper(), f"mutation destructive interdite: {forbidden}"
-
-assert f"MODIFY TTL {TTL}" in text, "rattrapage limité à MODIFY TTL absent"
 
 print("OK ClickHouse staging logs: TTL 7j, verbosité et allowlist bornées")
