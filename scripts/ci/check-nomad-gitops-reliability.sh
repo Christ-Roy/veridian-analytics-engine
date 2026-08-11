@@ -23,9 +23,16 @@ require_fixed "$prod_hcl" 'value     = "ovh-prod"' 'placement prod ovh-prod abse
 require_fixed "$prod_hcl" 'auto_revert       = true' 'auto-revert prod absent'
 require_fixed "$prod_hcl" 'progress_deadline = "10m"' 'deadline prod bornée absente'
 
+require_count "$prod_hcl" 'memory_max =' 4 "fusibles mémoire prod incomplets dans $(basename "$prod_hcl")"
+require_count "$prod_hcl" 'memory_max = 512' 2 "fusibles mémoire prod 512 MiB incomplets"
+require_fixed "$prod_hcl" 'memory_max = 1024' 'fusible mémoire engine prod incorrect'
+require_fixed "$prod_hcl" 'memory_max = 3072' 'fusible mémoire ClickHouse prod incorrect'
+reject_fixed "$prod_hcl" 'memory_max = 7000' 'fusible mémoire prod dangereux encore présent'
+require_count "$staging_hcl" 'memory_max =' 4 "fusibles mémoire staging incomplets dans $(basename "$staging_hcl")"
+reject_fixed "$staging_hcl" 'memory_max = 7000' 'fusible mémoire staging dangereux encore présent'
+
 for hcl in "$prod_hcl" "$staging_hcl"; do
   require_count "$hcl" 'init  = true' 2 "init Docker app+bridge absent dans $(basename "$hcl")"
-  require_count "$hcl" 'memory_max = 7000' 4 "plafonds mémoire incomplets dans $(basename "$hcl")"
   require_count "$hcl" 'check_restart {' 2 "self-heal app+bridge incomplet dans $(basename "$hcl")"
   require_count "$hcl" 'path     = "/api/health"' 2 "checks engine non alignés sur le probe stable dans $(basename "$hcl")"
   reject_fixed "$hcl" '/api/setup.status' "ancien probe throttlé encore utilisé dans $(basename "$hcl")"

@@ -12,7 +12,7 @@
 variable "image_tag" {
   type        = string
   description = "Tag des images GHCR engine+bridge (staging-<sha7>). Injecté par la CI."
-  default     = "staging-b95e022"
+  default     = "staging-54abb67"
 }
 
 job "analytics-engine-staging" {
@@ -121,9 +121,12 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 500
-        memory     = 1024
-        memory_max = 7000
+        # Pics live 2026-08-11: la réservation de placement est abaissée;
+        # le fusible 3 GiB continue d'absorber les pointes ClickHouse.
+        cpu        = 250
+        memory     = 512
+        # Pic 7 j observé : 1 334 MiB. Fusible x2,3 sans pouvoir affamer la VM.
+        memory_max = 3072
       }
     }
 
@@ -149,9 +152,10 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 200
-        memory     = 256
-        memory_max = 7000
+        # Pics 7 j observés : 25 MHz / 19 MiB.
+        cpu        = 50
+        memory     = 64
+        memory_max = 512
       }
     }
 
@@ -218,8 +222,9 @@ EOH
       }
       resources {
         cpu        = 400
-        memory     = 512
-        memory_max = 7000
+        # Pic 7 j observé : 142 MiB, réserve +35 %, fusible x7.
+        memory     = 192
+        memory_max = 1024
       }
     }
 
@@ -278,9 +283,10 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 300
-        memory     = 384
-        memory_max = 7000
+        # Pics 7 j observés : 11 MHz / 65 MiB.
+        cpu        = 50
+        memory     = 96
+        memory_max = 512
       }
     }
   }
