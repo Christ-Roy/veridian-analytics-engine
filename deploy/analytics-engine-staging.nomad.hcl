@@ -121,8 +121,10 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 500
-        memory     = 1024
+        # Pics live 2026-08-11: la réservation de placement est abaissée;
+        # le fusible 3 GiB continue d'absorber les pointes ClickHouse.
+        cpu        = 250
+        memory     = 512
         # Pic 7 j observé : 1 334 MiB. Fusible x2,3 sans pouvoir affamer la VM.
         memory_max = 3072
       }
