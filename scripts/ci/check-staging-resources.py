@@ -6,7 +6,8 @@ import re
 
 JOB = Path("deploy/analytics-engine-staging.nomad.hcl")
 EXPECTED = {
-    "clickhouse": (500, 1024, 3072),
+    # Réservations live recalibrées le 2026-08-11; memory_max reste le fusible.
+    "clickhouse": (250, 512, 3072),
     "postgres-bridge": (50, 64, 512),
     "engine": (400, 192, 1024),
     "bridge": (50, 96, 512),
