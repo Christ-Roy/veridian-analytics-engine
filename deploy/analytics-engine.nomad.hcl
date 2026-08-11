@@ -55,7 +55,7 @@ job "analytics-engine" {
 
     network {
       mode = "bridge"
-      port "http"   { to = 3000 }
+      port "http" { to = 3000 }
       port "bridge" { to = 3002 }
     }
 
@@ -140,7 +140,7 @@ EOH
       resources {
         cpu        = 500
         memory     = 512
-        memory_max = 7000
+        memory_max = 3072
       }
     }
 
@@ -166,9 +166,9 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 200
+        cpu        = 50
         memory     = 256
-        memory_max = 7000
+        memory_max = 512
       }
     }
 
@@ -231,9 +231,9 @@ HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 EOH
       }
       resources {
-        cpu        = 400
+        cpu        = 100
         memory     = 384
-        memory_max = 7000
+        memory_max = 1024
       }
     }
 
@@ -292,9 +292,9 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 300
+        cpu        = 50
         memory     = 192
-        memory_max = 7000
+        memory_max = 512
       }
     }
   }

@@ -23,7 +23,11 @@ require_fixed "$prod_hcl" 'value     = "ovh-prod"' 'placement prod ovh-prod abse
 require_fixed "$prod_hcl" 'auto_revert       = true' 'auto-revert prod absent'
 require_fixed "$prod_hcl" 'progress_deadline = "10m"' 'deadline prod bornée absente'
 
-require_count "$prod_hcl" 'memory_max = 7000' 4 "plafonds mémoire prod incomplets dans $(basename "$prod_hcl")"
+require_count "$prod_hcl" 'memory_max =' 4 "fusibles mémoire prod incomplets dans $(basename "$prod_hcl")"
+require_count "$prod_hcl" 'memory_max = 512' 2 "fusibles mémoire prod 512 MiB incomplets"
+require_fixed "$prod_hcl" 'memory_max = 1024' 'fusible mémoire engine prod incorrect'
+require_fixed "$prod_hcl" 'memory_max = 3072' 'fusible mémoire ClickHouse prod incorrect'
+reject_fixed "$prod_hcl" 'memory_max = 7000' 'fusible mémoire prod dangereux encore présent'
 require_count "$staging_hcl" 'memory_max =' 4 "fusibles mémoire staging incomplets dans $(basename "$staging_hcl")"
 reject_fixed "$staging_hcl" 'memory_max = 7000' 'fusible mémoire staging dangereux encore présent'
 
