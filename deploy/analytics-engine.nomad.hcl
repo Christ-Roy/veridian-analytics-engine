@@ -17,7 +17,7 @@
 variable "image_tag" {
   type        = string
   description = "Tag des images GHCR engine+bridge (prod-<sha7>). Injecté par la CI."
-  default     = "prod-b95e022"
+  default     = "prod-e48c79b"
 }
 
 job "analytics-engine" {
@@ -140,7 +140,7 @@ EOH
       resources {
         cpu        = 500
         memory     = 512
-        memory_max = 3072
+        memory_max = 7000
       }
     }
 
@@ -166,9 +166,9 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 50
+        cpu        = 200
         memory     = 256
-        memory_max = 512
+        memory_max = 7000
       }
     }
 
@@ -231,9 +231,9 @@ HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 EOH
       }
       resources {
-        cpu        = 100
+        cpu        = 400
         memory     = 384
-        memory_max = 1024
+        memory_max = 7000
       }
     }
 
@@ -292,9 +292,9 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 EOH
       }
       resources {
-        cpu        = 50
+        cpu        = 300
         memory     = 192
-        memory_max = 512
+        memory_max = 7000
       }
     }
   }
