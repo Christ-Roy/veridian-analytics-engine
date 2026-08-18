@@ -1,4 +1,8 @@
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SsoService } from './sso.service';
 import { hashToken } from '../common/crypto';
@@ -7,9 +11,32 @@ import { hashToken } from '../common/crypto';
  * Tests du cœur de sécurité du SSO.
  *
  * On teste ici ce qui, s'il cassait, donnerait une prise de contrôle de compte
- * client : le rejeu, l'expiration, le cloisonnement entre workspaces, et le
- * refus d'énumérer les comptes existants.
+ * client : le rejeu, l'expiration et le cloisonnement entre workspaces.
+ *
+ * Sur l'émission, on vérifie AUSSI que chaque refus porte son code : le Hub
+ * doit pouvoir distinguer « ce client n'a pas de compte » de « mon workspace
+ * est périmé » (contrat Hub §3.1). C'est le remplacement assumé de l'ancien
+ * 401 opaque — l'anti-énumération est portée par `HubHmacGuard`, pas par
+ * l'uniformité des messages.
  */
+
+/** Extrait le `hint` de la réponse NestJS (distingue deux user_not_in_app). */
+function errorHint(e: unknown): string | undefined {
+  const res = (e as { response?: unknown })?.response;
+  if (res && typeof res === 'object' && 'hint' in res) {
+    return String((res as { hint: unknown }).hint);
+  }
+  return undefined;
+}
+
+/** Extrait le code d'erreur métier de la réponse NestJS. */
+function errorCode(e: unknown): string | undefined {
+  const res = (e as { response?: unknown })?.response;
+  if (res && typeof res === 'object' && 'error' in res) {
+    return String((res as { error: unknown }).error);
+  }
+  return undefined;
+}
 
 interface FakeRow {
   id: string;
@@ -29,56 +56,73 @@ function chDate(d: Date): string {
   return d.toISOString().replace('T', ' ').replace('Z', '').slice(0, 23);
 }
 
-function makeHarness(opts: {
-  users?: Record<string, { id: string; email: string; name: string; status: string; is_super_admin: boolean }>;
-  memberships?: Array<{ user_id: string; workspace_id: string }>;
-  tokenRows?: FakeRow[];
-} = {}) {
+function makeHarness(
+  opts: {
+    users?: Record<
+      string,
+      {
+        id: string;
+        email: string;
+        name: string;
+        status: string;
+        is_super_admin: boolean;
+      }
+    >;
+    memberships?: Array<{ user_id: string; workspace_id: string }>;
+    tokenRows?: FakeRow[];
+  } = {},
+) {
   const users = opts.users ?? {};
   const memberships = opts.memberships ?? [];
   const tokenRows = opts.tokenRows ?? [];
-  const inserted: Array<{ table: string; rows: Record<string, unknown>[] }> = [];
+  const inserted: Array<{ table: string; rows: Record<string, unknown>[] }> =
+    [];
 
   const clickhouse = {
-    insertSystem: jest.fn(async (table: string, rows: Record<string, unknown>[]) => {
-      inserted.push({ table, rows });
-      if (table === 'sso_login_tokens') {
-        for (const row of rows) {
-          const idx = tokenRows.findIndex(
-            (r) => r.token_hash === row.token_hash,
-          );
-          if (idx >= 0) tokenRows[idx] = row as unknown as FakeRow;
-          else tokenRows.push(row as unknown as FakeRow);
+    insertSystem: jest.fn(
+      async (table: string, rows: Record<string, unknown>[]) => {
+        inserted.push({ table, rows });
+        if (table === 'sso_login_tokens') {
+          for (const row of rows) {
+            const idx = tokenRows.findIndex(
+              (r) => r.token_hash === row.token_hash,
+            );
+            if (idx >= 0) tokenRows[idx] = row as unknown as FakeRow;
+            else tokenRows.push(row as unknown as FakeRow);
+          }
         }
-      }
-    }),
-    querySystem: jest.fn(async (sql: string, params: Record<string, string>) => {
-      if (sql.includes('FROM sso_login_tokens')) {
-        return tokenRows.filter((r) => r.token_hash === params.tokenHash);
-      }
-      if (sql.includes('FROM workspace_memberships')) {
-        const mine = memberships.filter((m) => m.user_id === params.userId);
-        if (params.workspaceId !== undefined) {
-          return [
-            {
-              count: mine.filter((m) => m.workspace_id === params.workspaceId)
-                .length,
-            },
-          ];
+      },
+    ),
+    querySystem: jest.fn(
+      async (sql: string, params: Record<string, string>) => {
+        if (sql.includes('FROM sso_login_tokens')) {
+          return tokenRows.filter((r) => r.token_hash === params.tokenHash);
         }
-        return mine
-          .slice()
-          .sort((a, b) => a.workspace_id.localeCompare(b.workspace_id))
-          .map((m) => ({ workspace_id: m.workspace_id }));
-      }
-      return [];
-    }),
+        if (sql.includes('FROM workspace_memberships')) {
+          const mine = memberships.filter((m) => m.user_id === params.userId);
+          if (params.workspaceId !== undefined) {
+            return [
+              {
+                count: mine.filter((m) => m.workspace_id === params.workspaceId)
+                  .length,
+              },
+            ];
+          }
+          return mine
+            .slice()
+            .sort((a, b) => a.workspace_id.localeCompare(b.workspace_id))
+            .map((m) => ({ workspace_id: m.workspace_id }));
+        }
+        return [];
+      },
+    ),
   };
 
   const usersService = {
     findByEmail: jest.fn(async (email: string) => {
       return (
-        Object.values(users).find((u) => u.email === email.toLowerCase()) ?? null
+        Object.values(users).find((u) => u.email === email.toLowerCase()) ??
+        null
       );
     }),
     findById: jest.fn(async (id: string) => users[id] ?? null),
@@ -106,7 +150,15 @@ function makeHarness(opts: {
     configService,
   );
 
-  return { service, clickhouse, usersService, authService, auditService, tokenRows, inserted };
+  return {
+    service,
+    clickhouse,
+    usersService,
+    authService,
+    auditService,
+    tokenRows,
+    inserted,
+  };
 }
 
 const ACTIVE_USER = {
@@ -118,7 +170,7 @@ const ACTIVE_USER = {
 };
 
 describe('SsoService — émission', () => {
-  it('émet un jeton et place celui-ci dans le FRAGMENT de l\'URL, jamais en query string', async () => {
+  it("émet un jeton et place celui-ci dans le FRAGMENT de l'URL, jamais en query string", async () => {
     const { service, inserted } = makeHarness({
       users: { 'user-1': ACTIVE_USER },
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
@@ -162,19 +214,22 @@ describe('SsoService — émission', () => {
     );
   });
 
-  it('refuse un workspace dont le user n\'est pas membre (cloisonnement entre tenants)', async () => {
+  it("refuse un workspace dont le user n'est pas membre (cloisonnement entre tenants)", async () => {
     // Le scénario redouté : un jeton qui ouvrirait l'espace d'un autre client.
     const { service } = makeHarness({
       users: { 'user-1': ACTIVE_USER },
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
     });
 
-    await expect(
-      service.issueToken({
+    const err = await service
+      .issueToken({
         email: 'client@example.com',
         workspaceId: 'ws-du-voisin',
-      }),
-    ).rejects.toThrow(UnauthorizedException);
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(errorCode(err)).toBe('workspace_mismatch');
   });
 
   it('refuse un compte suspendu — le SSO ne doit pas contourner une désactivation', async () => {
@@ -185,22 +240,36 @@ describe('SsoService — émission', () => {
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
     });
 
-    await expect(
-      service.issueToken({ email: 'client@example.com' }),
-    ).rejects.toThrow(UnauthorizedException);
+    const err = await service
+      .issueToken({ email: 'client@example.com' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('user_not_active');
   });
 
   it('refuse un user sans aucun workspace', async () => {
     const { service } = makeHarness({ users: { 'user-1': ACTIVE_USER } });
 
-    await expect(
-      service.issueToken({ email: 'client@example.com' }),
-    ).rejects.toThrow(UnauthorizedException);
+    const err = await service
+      .issueToken({ email: 'client@example.com' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('user_not_in_app');
+    // Même code que « email inconnu » — c'est voulu, le Hub n'en fait qu'une
+    // seule chose. Le `hint` garde la distinction de notre côté.
+    expect(errorHint(err)).toBe(
+      'account exists but has no analytics workspace',
+    );
   });
 
-  it('ne permet pas de distinguer un email inconnu d\'un compte non éligible', async () => {
-    // Anti-énumération : les deux refus doivent être indiscernables, sinon la
-    // route devient un outil de cartographie de la base clients.
+  it("distingue un email inconnu d'un compte non éligible", async () => {
+    // Renversement assumé de l'ancien test d'anti-énumération. Cette route est
+    // derrière `HubHmacGuard` : qui l'atteint détient déjà le secret maître et
+    // peut ouvrir la session de n'importe quel client. Lui cacher qu'un email
+    // est inconnu ne protégeait personne, et privait le Hub du seul signal
+    // dont il a besoin pour afficher autre chose qu'un lien cassé.
     const { service } = makeHarness({
       users: { 'user-1': { ...ACTIVE_USER, status: 'suspended' } },
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
@@ -208,17 +277,37 @@ describe('SsoService — émission', () => {
 
     const inconnu = await service
       .issueToken({ email: 'personne@example.com' })
-      .catch((e: Error) => e);
+      .catch((e: unknown) => e);
     const suspendu = await service
       .issueToken({ email: 'client@example.com' })
-      .catch((e: Error) => e);
+      .catch((e: unknown) => e);
 
-    expect((inconnu as Error).message).toBe((suspendu as Error).message);
+    expect(inconnu).toBeInstanceOf(BadRequestException);
+    expect(errorCode(inconnu)).toBe('user_not_in_app');
+    expect(errorHint(inconnu)).toBe('no analytics account for this email');
+    expect(suspendu).toBeInstanceOf(BadRequestException);
+    expect(errorCode(suspendu)).toBe('user_not_active');
   });
 
   it('refuse une demande sans identifiant', async () => {
     const { service } = makeHarness();
-    await expect(service.issueToken({})).rejects.toThrow(UnauthorizedException);
+    const err = await service.issueToken({}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('identity_required');
+  });
+
+  it("refuse un hub_user_id seul, et le dit — l'engine ne sait pas le résoudre", async () => {
+    // Le Hub peut légitimement croire que `hub_user_id` suffit : c'est le pont
+    // cross-app utilisé pour Notifuse. Ici il ne l'est pas (l'engine ne stocke
+    // aucune correspondance), et un refus muet l'aurait laissé chercher.
+    const { service } = makeHarness();
+
+    const err = await service
+      .issueToken({ hubUserId: '7f3a1c2e-0000-4000-8000-000000000001' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('identity_unresolvable');
   });
 });
 
@@ -256,7 +345,7 @@ describe('SsoService — consommation', () => {
     expect(authService.issueSessionForUser).toHaveBeenCalledTimes(1);
   });
 
-  it('refuse le rejeu d\'un jeton déjà consommé', async () => {
+  it("refuse le rejeu d'un jeton déjà consommé", async () => {
     const { service, authService } = makeHarness({
       users: { 'user-1': ACTIVE_USER },
       tokenRows: [pendingRow()],
@@ -296,7 +385,7 @@ describe('SsoService — consommation', () => {
     expect(clickhouse.querySystem).not.toHaveBeenCalled();
   });
 
-  it('re-vérifie le statut du compte à la consommation, pas seulement à l\'émission', async () => {
+  it("re-vérifie le statut du compte à la consommation, pas seulement à l'émission", async () => {
     // Un compte suspendu APRÈS l'émission ne doit pas pouvoir être rouvert par
     // un jeton encore valide.
     const { service } = makeHarness({
@@ -309,7 +398,7 @@ describe('SsoService — consommation', () => {
     );
   });
 
-  it('brûle le jeton avant d\'ouvrir la session', async () => {
+  it("brûle le jeton avant d'ouvrir la session", async () => {
     // Si l'ouverture de session échoue, le jeton ne doit pas rester
     // réutilisable.
     const { service, authService, tokenRows } = makeHarness({

@@ -304,18 +304,66 @@ sont écrasés mutuellement.
 Cf doc cross-repo `~/Bureau/veridian-platform/CLAUDE.md` §"🔥 Règle d'or :
 trunk-based sur `staging`".
 
-- **`staging`** : trunk de travail. Toutes modifs vont ici directement
-  (`git push origin staging`)
-- **`main`** : photo de prod, reçoit via **auto-promotion** depuis staging
-  (jamais via PR humaine)
-- ❌ Pas de branche feature longue
-- ❌ Pas de PR éternelle
+- **`staging`** : trunk de travail, et **cible de tout le travail courant**
+- **`main`** : photo de prod, reçoit par promotion depuis `staging`
 - ✅ Markers de risque dans le commit subject (`[risk:low|medium|high]`)
-  pour driver l'auto-promotion (cf §20 protocole Hub, à migrer ici)
+- ❌ Pas de branche feature longue, pas de PR éternelle
 
-Exception : pour ce ticket précis (mise à jour `CLAUDE.md` v2026-05-25),
-branche dédiée + PR vers staging tolérée car c'est un changement de
-**doctrine** qui mérite trace explicite.
+### La réalité du dépôt : branche courte + PR vers `staging`
+
+Corrigé le 2026-08-18 après constat sur le terrain. La description « toutes
+modifs vont directement sur staging » ne décrit pas ce qui se passe, et le
+croire fait pousser à côté du banc d'essai.
+
+En pratique, et c'est ce qu'il faut faire :
+
+```bash
+git fetch origin
+git worktree add ~/worktrees/<slug> -b <type>/<slug> origin/staging
+# … travail, commits conventionnels avec marqueur de risque …
+git push -u origin <type>/<slug>
+gh pr create --base staging
+```
+
+Une branche courte + une PR vers `staging` n'est pas une entorse au
+trunk-based : c'est ce qui **déclenche `dev-checks.yml`** (il ne se lance que
+sur `pull_request` vers `staging` ou `main`). Pousser directement sur
+`staging` saute cette vérification.
+
+### 🔴 Le piège qui a tué `staging` — à ne pas refaire
+
+Le 2026-08-11, la PR de promotion #173 (`staging` → `main`) a été mergée avec
+`--delete-branch`. GitHub supprime la branche **source** : `staging` a donc
+disparu du remote. (`delete_branch_on_merge` du dépôt est à `false` — c'est
+bien le flag de la commande qui l'a fait, pas un réglage.)
+
+Conséquences, invisibles pendant une semaine :
+
+- `staging-deploy.yml`, `e2e-gate-onpremise.yml` et `e2e-smoke-staging.yml`
+  se déclenchent sur `push: branches: [staging]` → plus rien ne partait ;
+- le pre-push résolvait sa base sur `origin/staging`, ne la trouvait pas, et
+  retombait **en silence** sur `HEAD~1` : ALL GREEN sans rien contrôler ;
+- tout le travail est parti directement sur `main`, donc **en production sans
+  qu'aucun banc d'essai n'ait tourné**.
+
+**Donc : ne JAMAIS merger la promotion `staging` → `main` avec
+`--delete-branch`.** La promotion se fait en fast-forward, sans supprimer
+quoi que ce soit :
+
+```bash
+git checkout main && git merge --ff-only origin/staging && git push origin main
+```
+
+Si `staging` venait à disparaître à nouveau, le pre-push refuse désormais de
+tourner (il ne se dégrade plus en silence) et le dit. La recréer :
+
+```bash
+git push origin origin/main:refs/heads/staging
+```
+
+⚠️ Recréer la branche ainsi ne déclenche **aucun** workflow : le push ne
+contient aucun fichier modifié, donc les filtres `paths-ignore` l'écartent.
+Il faut un vrai push de contenu pour vérifier que la chaîne est revenue.
 
 ## URLs & deploy
 
@@ -358,6 +406,11 @@ Tout changement de l'API admin doit être **coordonné avec le repo Hub**
   --audit-level high`)
 - **JAMAIS** push direct sur `main` (photo de prod, auto-promotion only)
 - **JAMAIS** `--no-verify` sur Husky
+- **JAMAIS** `--delete-branch` en mergeant la promotion `staging` → `main`
+  (c'est ce qui a supprimé `staging` le 2026-08-11 et débranché tout le banc
+  d'essai pendant une semaine — cf. §Workflow Git)
+- **TOUJOURS** vérifier `git config --get core.hooksPath` (doit valoir
+  `.husky`) après un clone : sans ça les hooks ne tournent pas, en silence
 - **JAMAIS** créer une sous-route Veridian dédiée dans la console
 - **JAMAIS** introduire une page admin UI custom (provisioning = skill +
   API M2M)

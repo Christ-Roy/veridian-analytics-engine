@@ -1,5 +1,9 @@
 # Dependencies
 node_modules/
+# Sans le slash aussi : le no-install local (CLAUDE.md) fait qu'on symlinke
+# parfois api/node_modules vers un autre checkout, et un lien n'est pas un
+# répertoire — `node_modules/` seul ne l'attrape pas.
+node_modules
 
 # Build output
 dist/

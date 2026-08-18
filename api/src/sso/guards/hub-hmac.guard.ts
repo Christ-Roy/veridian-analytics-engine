@@ -126,10 +126,7 @@ export class HubHmacGuard implements CanActivate {
     return candidates.find((v) => typeof v === 'string' && v.length > 0) ?? '';
   }
 
-  private headerOf(
-    request: Request,
-    name: string,
-  ): string | undefined {
+  private headerOf(request: Request, name: string): string | undefined {
     const value = request.headers[name];
     if (Array.isArray(value)) return value[0];
     return value;

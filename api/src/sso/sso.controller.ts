@@ -63,9 +63,19 @@ export class SsoController {
     },
   })
   @ApiResponse({
+    status: 400,
+    description:
+      "Code métier dans le champ `error`, précision dans `hint`. `user_not_in_app` : aucun compte Analytics pour cet email, OU compte sans workspace — c'est le seul cas sur lequel le Hub sait agir (il propose l'inscription). `user_not_active` : compte suspendu. `identity_required` / `identity_unresolvable` : demande inexploitable.",
+  })
+  @ApiResponse({
     status: 401,
     description:
-      "Signature invalide, ou compte non éligible. Réponse volontairement identique dans les deux cas : distinguer les motifs permettrait d'énumérer les comptes existants.",
+      'Signature HMAC absente, invalide ou hors fenêtre anti-rejeu. Refus volontairement muet : avant authentification, rien ne filtre.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      "Workspace hors du périmètre du user (`workspace_mismatch`). Injoignable depuis le Hub actuel, qui n'envoie pas `workspace_id`.",
   })
   async issueToken(
     @Body() dto: IssueTokenDto,

@@ -4,7 +4,65 @@
 > **Owner** : agent veridian-analytics-engine
 > **Créé** : 2026-06-22
 > **Demandeur** : Robert
-> **Statut** : ⏸️ NON CÂBLÉ — design figé, exécution reportée (cf. décision 2026-06-23)
+> **Statut** : ✅ **LIVRÉ côté engine + console** (2026-07-28, commit `00ea003`).
+> Reste à faire : le Hub doit appeler `sso.issueToken` (ticket miroir
+> `veridian-hub/todo/2026-06-22-brancher-analytics-au-broker-sso-autologin.md`).
+
+## ✅ Ce qui a été livré le 2026-07-28
+
+Routes réellement montées (les noms diffèrent du design ci-dessous, cf. écarts) :
+
+- **`POST /api/sso.issueToken`** — `HubHmacGuard`, rend `{ autologin_url, expires_in }`
+- **`POST /api/sso.exchange`** — public + throttle auth, rend `{ access_token, user, workspace_id }`
+- **Page console `/sso`** — reçoit le jeton, l'échange, dépose le JWT en localStorage
+- **Migration v13** `sso_login_tokens` + entrée dans `SYSTEM_SCHEMAS` (fresh installs)
+- **`HUB_HMAC_SECRET`** ajouté au template *engine* des deux jobs Nomad (seul le
+  bridge le recevait ; la variable existait déjà dans les deux Nomad vars)
+
+### Trois écarts assumés par rapport au design figé ci-dessous
+
+1. **Le jeton voyage dans le FRAGMENT (`/sso#<token>`), pas en query string
+   (`?t=<token>`).** Un fragment n'est jamais transmis au serveur : il n'entre
+   ni dans les logs d'accès, ni dans ceux du reverse-proxy, ni dans l'en-tête
+   `Referer`. Avec `?t=`, chaque autologin aurait déposé un ouvre-session en
+   clair dans des journaux conservés des mois, des deux côtés.
+
+2. **La consommation est un `POST` depuis la page console, pas un `GET` qui pose
+   un cookie.** La note du 2026-06-23 ci-dessous l'avait vu juste : l'auth de la
+   console vit en localStorage, un cookie de session ne connecte personne.
+
+3. **Table dédiée `sso_login_tokens`, pas de réutilisation de
+   `password_reset_tokens`.** Un jeton de reset change un mot de passe, un jeton
+   SSO ouvre une session : les séparer rend la confusion de type structurellement
+   impossible entre les deux flux.
+
+### Limite connue, documentée dans le code
+
+ClickHouse n'offre pas de compare-and-swap : la consommation est un
+read-then-write. Ferme le rejeu **séquentiel** (le cas réellement exploitable :
+un jeton retrouvé dans un historique ou un log et rejoué plus tard), pas une
+course strictement simultanée — qui n'apporte de toute façon aucun gain de
+privilège, les deux sessions appartenant au même utilisateur. Le TTL de
+2 minutes et le fragment d'URL tiennent dans tous les cas. Si ce résidu devient
+inacceptable, le correctif propre est de sortir cette table de ClickHouse vers
+un store à écriture conditionnelle, pas d'ajouter un verrou maison.
+
+### Numéro de migration
+
+Le registry était à **v12** (et non v9 comme l'écrivait la note de 2026-06-23) ;
+la migration SSO est donc **v13**. La collision redoutée ne s'est pas produite,
+les migrations v10 à v12 ayant été posées entre-temps.
+
+### Note de nommage — à ne plus reperdre
+
+Le secret HMAC porte **deux noms légitimes pour une même valeur** :
+`HUB_HMAC_SECRET` côté engine et bridge, `ANALYTICS_HUB_API_SECRET` côté Hub.
+Ce n'est pas une erreur du ticket. `HubHmacGuard` lit les deux, pour que l'app
+démarre quelle que soit la convention employée au déploiement.
+
+---
+
+## Design figé d'origine (conservé pour mémoire — voir les écarts ci-dessus)
 
 ## ⚠️ Décision 2026-06-23 (sprint quick-wins) — NON CÂBLÉ ce sprint, ENV CONSERVÉE
 
