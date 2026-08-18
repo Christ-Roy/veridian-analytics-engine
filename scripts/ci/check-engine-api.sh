@@ -34,9 +34,16 @@ GREEN=$'\033[0;32m'
 YELLOW=$'\033[1;33m'
 NC=$'\033[0m'
 
+# Base introuvable => on REFUSE, on ne se rabat pas sur HEAD~1 en silence.
+# Vécu le 2026-08-18 : origin/staging supprimée du remote, ce script comparait
+# un seul commit et annonçait « aucun fichier api/src touché » sur un push qui
+# modifiait api/src/sso/. Un check qui se dégrade tout seul ment.
 BASE_REF="${BASE_REF:-origin/staging}"
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-  BASE_REF="HEAD~1"
+  echo "${RED}✗ check-engine-api : base '$BASE_REF' introuvable.${NC}" >&2
+  echo "  Refus de comparer sur une base approximative (git fetch origin ?)." >&2
+  echo "  Base explicite : BASE_REF=origin/main $0" >&2
+  exit 1
 fi
 
 # Fichiers api/src/*.ts touchés (Added/Copied/Modified/Renamed), hors specs.

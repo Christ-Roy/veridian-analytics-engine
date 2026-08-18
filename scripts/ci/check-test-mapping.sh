@@ -37,9 +37,14 @@ if [ "$BASE_REF" = "HEAD" ]; then
   CHANGED=$(git diff --name-only HEAD; git diff --cached --name-only)
   CHANGED=$(echo "$CHANGED" | sort -u | grep -v '^$' || true)
 else
+  # Pas de fallback HEAD~1 : comparer un seul commit ferait passer au vert un
+  # push entier sans avoir rien contrôlé (vécu le 2026-08-18, origin/staging
+  # supprimée du remote). On refuse, bruyamment.
   if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    echo "${YELLOW}⚠ $BASE_REF inaccessible, fallback HEAD~1${NC}"
-    BASE_REF="HEAD~1"
+    echo "${RED}✗ test-mapping : base '$BASE_REF' introuvable.${NC}" >&2
+    echo "  Refus de comparer sur une base approximative (git fetch origin ?)." >&2
+    echo "  Base explicite : BASE_REF=origin/main $0" >&2
+    exit 1
   fi
   CHANGED=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null || true)
 fi

@@ -128,16 +128,31 @@ is_allowlisted() {
 }
 
 # ─── Diff resolution ────────────────────────────────────────────────────────
+# Une base fournie EXPLICITEMENT n'est jamais remplacée en douce : si elle est
+# fausse, on le dit. Seule la base DÉDUITE (origin/<branche>, qui n'existe pas
+# tant que la branche n'a pas été poussée) peut retomber sur le tronc.
+BASE_REF_EXPLICIT="${BASE_REF:-}"
 BASE_REF="${BASE_REF:-origin/$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo staging)}"
 if [ "$BASE_REF" = "HEAD" ]; then
   CHANGED=$( (git diff --name-only HEAD; git diff --cached --name-only) | sort -u | grep -v '^$' || true)
 else
   if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
+    if [ -n "$BASE_REF_EXPLICIT" ]; then
+      echo "${RED}✗ integration-coverage : BASE_REF='$BASE_REF' fourni mais introuvable.${NC}" >&2
+      echo "  Refus de lui substituer une autre base sans le dire." >&2
+      exit 1
+    fi
     BASE_REF="origin/staging"
   fi
+  # Anciennement : skip silencieux « premier push ? ». C'est exactement le
+  # motif qui a laissé ce gate inopérant pendant une semaine (origin/staging
+  # supprimée le 2026-08-11, constaté le 2026-08-18). Un gate qui se
+  # désactive tout seul n'est pas un gate.
   if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-    echo "${YELLOW}⚠ BASE_REF inaccessible (premier push?), integration-coverage skip${NC}"
-    exit 0
+    echo "${RED}✗ integration-coverage : base '$BASE_REF' introuvable.${NC}" >&2
+    echo "  Refus de sauter le contrôle (git fetch origin ?)." >&2
+    echo "  Base explicite : BASE_REF=origin/main $0" >&2
+    exit 1
   fi
   CHANGED=$(git diff --name-only "$BASE_REF"...HEAD 2>/dev/null || true)
 fi

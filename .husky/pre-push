@@ -41,15 +41,43 @@ fi
 
 # ─── BASE_REF resolution ─────────────────────────────────────────
 # Préférence : origin/<branche-courante> si remote existe
+# ⚠️ CE BLOC DOIT ÉCHOUER BRUYAMMENT, JAMAIS SE DÉGRADER EN SILENCE.
+#
+# Vécu le 2026-08-18 : `origin/staging` avait été supprimée du remote (par le
+# `--delete-branch` de la PR de promotion staging→main, #173 du 2026-08-11).
+# L'ancien code retombait alors sur `HEAD~1` SANS RIEN DIRE. Conséquence : les
+# étapes 3, 4 et 9 comparaient UN commit au lieu de la branche entière, et le
+# hook affichait ALL GREEN en n'ayant presque rien regardé. Un push avec
+# `api/src/sso/` modifié annonçait « aucun fichier api/src touché → skip ».
+#
+# Un garde-fou qui se dégrade tout seul ne protège pas : il rassure à tort,
+# ce qui est pire que pas de garde-fou du tout. D'où le refus explicite.
 BASE_REF="${BASE_REF:-origin/$CURRENT_BRANCH}"
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-  # Pas de remote pour cette branche, fallback sur origin/staging
-  # (modèle de branches refondu 2026-05-22 : main ← staging, plus de 'dev')
+  # Pas de remote pour cette branche (cas normal d'une branche neuve) :
+  # on compare au tronc. Ce n'est pas une dégradation, c'est la bonne base.
   BASE_REF="origin/staging"
 fi
 if ! git rev-parse --verify --quiet "$BASE_REF" >/dev/null 2>&1; then
-  # Fallback ultime
-  BASE_REF="HEAD~1"
+  echo ""
+  echo "✗ Pre-push AVORTÉ — base de comparaison introuvable : 'origin/staging'"
+  echo ""
+  echo "  Le hook ne sait pas à quoi comparer ta branche. Il REFUSE de"
+  echo "  continuer sur une base approximative : les checks test-mapping,"
+  echo "  integration-coverage et engine-api ne verraient qu'un commit et"
+  echo "  passeraient au vert sans rien avoir contrôlé."
+  echo ""
+  echo "  Causes probables :"
+  echo "    - 'staging' a été supprimée du remote (typiquement le"
+  echo "      '--delete-branch' d'une PR de promotion staging→main)"
+  echo "    - le remote n'a jamais été fetché : git fetch origin"
+  echo ""
+  echo "  Débloquer :"
+  echo "    git fetch origin                       # si c'est juste un cache froid"
+  echo "    git ls-remote --heads origin staging   # la branche existe-t-elle ?"
+  echo "    BASE_REF=origin/main git push ...      # base explicite, en connaissance de cause"
+  echo ""
+  exit 1
 fi
 export BASE_REF
 
