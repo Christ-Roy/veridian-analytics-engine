@@ -56,8 +56,43 @@ async function postSigned(
   });
 }
 
+/**
+ * Réveille la cible et REFUSE de tester tant qu'elle dort.
+ *
+ * ⚠️ Piège vérifié sur staging le 2026-08-18 : la stack dort derrière Sablier,
+ * et tant qu'elle démarre, le proxy répond **200 + une page HTML** « Veridian —
+ * démarrage en cours » à N'IMPORTE QUELLE requête, y compris un POST non signé
+ * sur une route qui n'existe pas.
+ *
+ * Conséquence pour les assertions de ce fichier :
+ *   - `expect(status).not.toBe(404)` passe alors qu'aucune route n'est montée ;
+ *   - `expect(status).toBe(401)` échoue alors que le guard est parfaitement en
+ *     place.
+ *
+ * Autrement dit, sans ce garde, la suite rend un verdict sur le proxy et non
+ * sur l'application — dans les deux sens, faux positif comme faux négatif.
+ */
+async function awakenTarget(): Promise<void> {
+  const deadline = Date.now() + 120_000;
+  let lastStatus = 0;
+  while (Date.now() < deadline) {
+    const res = await fetch(`${target.engineUrl}/health`);
+    lastStatus = res.status;
+    const contentType = res.headers.get("content-type") ?? "";
+    if (!contentType.includes("text/html")) return; // l'app répond elle-même
+    await new Promise((r) => setTimeout(r, 3_000));
+  }
+  throw new Error(
+    `Cible ${target.engineUrl} encore endormie après 120s (dernier statut ${lastStatus}, ` +
+      `réponse HTML = page de démarrage Sablier). Tester maintenant donnerait ` +
+      `un verdict sur le proxy, pas sur l'application.`,
+  );
+}
+
 test.describe(`SSO — contrat Hub issue-magic-link [${TARGET}]`, () => {
   test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");
+
+  test.beforeAll(awakenTarget);
 
   // Ce bloc existe parce que la route a été absente pendant tout le temps où
   // le Hub l'appelait : il prenait un 404 et le traduisait en « app
@@ -120,6 +155,8 @@ test.describe(`SSO — contrat Hub issue-magic-link [${TARGET}]`, () => {
 
 test.describe(`SSO — rejets [${TARGET}]`, () => {
   test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");
+
+  test.beforeAll(awakenTarget);
 
   test("la route existe (ne renvoie plus 404)", async () => {
     // Ce test a une valeur historique : avant ce chantier, TOUTES les routes
