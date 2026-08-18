@@ -29,6 +29,8 @@ const TARGET = (process.env.TARGET ?? "staging") as TargetName;
 const target = getTarget(TARGET);
 
 const ISSUE_PATH = "/api/sso.issueToken";
+/** La forme que le Hub appelle réellement (lib/auth/bounce-apps.ts). */
+const MAGIC_LINK_PATH = "/api/sso/issue-magic-link";
 const EXCHANGE_PATH = "/api/sso.exchange";
 
 const HUB_SECRET = process.env.HUB_HMAC_SECRET ?? "";
@@ -53,6 +55,68 @@ async function postSigned(
     body: rawBody,
   });
 }
+
+test.describe(`SSO — contrat Hub issue-magic-link [${TARGET}]`, () => {
+  test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");
+
+  // Ce bloc existe parce que la route a été absente pendant tout le temps où
+  // le Hub l'appelait : il prenait un 404 et le traduisait en « app
+  // injoignable ». Un échec de contrat déguisé en panne d'infrastructure, la
+  // pire façon d'échouer. Ces tests garantissent qu'on s'en apercevrait.
+
+  test("la route que le Hub appelle est montée (le 404 est CE bug)", async () => {
+    const res = await fetch(`${target.engineUrl}${MAGIC_LINK_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(PAYLOAD),
+    });
+    // 401 attendu (pas de signature). 404 = la route a disparu, et le Hub
+    // recommencerait à annoncer « app injoignable ».
+    expect(res.status).not.toBe(404);
+    expect(res.status).toBe(401);
+  });
+
+  test("elle refuse une requête non signée, comme sso.issueToken", async () => {
+    const res = await fetch(`${target.engineUrl}${MAGIC_LINK_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(PAYLOAD),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.text()).not.toContain("magic_link_url");
+  });
+
+  test("elle refuse une signature aléatoire", async () => {
+    const res = await postSigned(MAGIC_LINK_PATH, PAYLOAD, "mauvais-secret");
+    expect(res.status).toBe(401);
+  });
+
+  test("flux nominal : rend un magic_link_url exploitable par le Hub", async () => {
+    test.skip(
+      !HUB_SECRET || !E2E_EMAIL,
+      "HUB_HMAC_SECRET + SSO_E2E_EMAIL requis",
+    );
+
+    const res = await postSigned(
+      MAGIC_LINK_PATH,
+      { email: E2E_EMAIL, hub_user_id: "e2e-hub-user" },
+      HUB_SECRET,
+    );
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as { magic_link_url?: string };
+    // La clé exacte : le Hub lève invalid_response sur toute autre.
+    expect(typeof body.magic_link_url).toBe("string");
+
+    // Les deux contraintes que le Hub applique avant de rediriger dessus.
+    const url = new URL(body.magic_link_url as string);
+    expect(url.protocol).toBe("https:");
+    expect(url.host).toMatch(/\.veridian\.site$/);
+    // Et le jeton reste dans le fragment, jamais en query string.
+    expect(url.hash).toMatch(/^#[0-9a-f]{64}$/);
+    expect(url.search).toBe("");
+  });
+});
 
 test.describe(`SSO — rejets [${TARGET}]`, () => {
   test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");

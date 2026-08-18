@@ -90,6 +90,74 @@ describe('SsoController', () => {
     ).rejects.toBe(refus);
   });
 
+  // ─── POST /api/sso/issue-magic-link — la forme que le Hub appelle ───────
+  //
+  // Ces trois tests gardent le CONTRAT, pas l'implémentation. Ils sont écrits
+  // pour échouer si quelqu'un renomme la clé de réponse, change l'hôte, ou
+  // « factorise » les deux routes en supprimant celle-ci.
+
+  it("renvoie la clé 'magic_link_url' — c'est la seule que le Hub sait lire", async () => {
+    // Le client Hub (lib/auth/bounce-apps.ts) exige littéralement
+    // 'magic_link_url' dans le corps ; toute autre clé, y compris
+    // 'autologin_url', lui fait lever BounceError('invalid_response').
+    const { controller } = makeHarness();
+
+    const res = await controller.issueMagicLink({
+      email: 'client@example.com',
+      hub_user_id: '7f3a1c2e-0000-4000-8000-000000000001',
+    });
+
+    expect(res).toEqual({
+      magic_link_url: 'https://analytics.example.test/sso#deadbeef',
+    });
+    expect(res).not.toHaveProperty('autologin_url');
+  });
+
+  it('rend une URL https sur un hôte veridian — sinon le Hub la rejette', async () => {
+    // Garde-fou anti-redirection du Hub : il refuse tout magic_link_url qui
+    // n'est pas https ET sur *.veridian.site. Une régression sur APP_URL
+    // (http, ou un autre domaine) casserait le flux sans toucher à ce code —
+    // d'où le test sur la FORME de l'URL, au point où elle sort.
+    const { controller, ssoService } = makeHarness();
+    ssoService.issueToken.mockResolvedValueOnce({
+      autologin_url: 'https://analytics-engine.staging.veridian.site/sso#abc',
+      expires_in: 120,
+    });
+
+    const { magic_link_url } = await controller.issueMagicLink({
+      email: 'client@example.com',
+    });
+
+    const url = new URL(magic_link_url);
+    expect(url.protocol).toBe('https:');
+    expect(url.host).toMatch(/\.veridian\.site$/);
+    // Le jeton reste dans le FRAGMENT : il ne doit jamais atteindre un serveur.
+    expect(url.hash).toBe('#abc');
+    expect(url.search).toBe('');
+  });
+
+  it('applique la même traduction de DTO que sso.issueToken', async () => {
+    const { controller, ssoService } = makeHarness();
+
+    await controller.issueMagicLink(
+      {
+        email: 'client@example.com',
+        hub_user_id: '7f3a1c2e-0000-4000-8000-000000000001',
+        workspace_id: 'ws-beta',
+      },
+      '203.0.113.7, 10.0.0.1',
+    );
+
+    expect(ssoService.issueToken).toHaveBeenCalledWith(
+      {
+        email: 'client@example.com',
+        hubUserId: '7f3a1c2e-0000-4000-8000-000000000001',
+        workspaceId: 'ws-beta',
+      },
+      '203.0.113.7',
+    );
+  });
+
   it("transmet l'ip et le user-agent à la consommation (piste d'audit)", async () => {
     const { controller, ssoService } = makeHarness();
 
