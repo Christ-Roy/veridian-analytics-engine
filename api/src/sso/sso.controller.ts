@@ -93,6 +93,79 @@ export class SsoController {
   }
 
   /**
+   * Même chose, sous le nom et la forme que le Hub appelle réellement.
+   *
+   * ── Pourquoi cette route existe EN PLUS de `sso.issueToken` ──────────────
+   *
+   * Le Hub est l'orchestrateur de la plateforme : il pilote toutes les apps en
+   * aval selon un motif uniforme (`POST <app>/api/sso/issue-magic-link`
+   * → `{ magic_link_url }`), déjà en service pour Notifuse et Prospection.
+   * C'est donc l'engine qui s'aligne, pas le contraire — sinon chaque app
+   * imposerait son dialecte au seul composant censé les unifier.
+   *
+   * Avant cette route, le client Hub (`lib/auth/bounce-apps.ts`) appelait ce
+   * chemin, prenait un 404, et le traduisait en « app injoignable ». Le SSO
+   * autologin Hub → Analytics ne fonctionnait donc pas — et l'échec ressemblait
+   * à une panne d'infrastructure, ce qui est la pire façon d'échouer : on
+   * cherche du côté du réseau un problème de contrat.
+   *
+   * ── Additive, jamais substitutive ────────────────────────────────────────
+   *
+   * `sso.issueToken` reste en place et inchangée. Elle est utilisée par les
+   * tests E2E existants et potentiellement par des appelants qu'on ne connaît
+   * pas ; la remplacer aurait échangé une panne contre une autre. Les deux
+   * routes partagent la même logique, le même guard et le même jeton : seule
+   * la CLÉ de la réponse diffère (`magic_link_url` vs `autologin_url`), parce
+   * que c'est celle que le Hub sait lire.
+   *
+   * ── Sur la durée de vie du jeton ─────────────────────────────────────────
+   *
+   * Le contrat Hub suggère « TTL court (≈15 min) ». On garde volontairement
+   * les 2 minutes de `sso.issueToken` : le Hub redirige le navigateur
+   * IMMÉDIATEMENT sur l'URL rendue, il ne l'envoie jamais par email. Le seul
+   * délai légitime est un aller-retour réseau ; 15 minutes n'ajouteraient
+   * aucun confort et élargiraient d'autant la fenêtre d'un jeton fuité.
+   */
+  @Post('sso/issue-magic-link')
+  @HttpCode(200)
+  @Public()
+  @UseGuards(HubHmacGuard)
+  @ApiOperation({
+    summary:
+      "Émet un lien de session à usage unique — forme attendue par le Hub",
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Lien émis',
+    schema: { properties: { magic_link_url: { type: 'string' } } },
+  })
+  @ApiResponse({
+    status: 400,
+    description:
+      'Mêmes codes que `sso.issueToken` : `user_not_in_app`, `user_not_active`, `identity_required`, `identity_unresolvable`. Code dans le champ `error`.',
+  })
+  @ApiResponse({ status: 401, description: 'Signature HMAC invalide.' })
+  @ApiResponse({
+    status: 403,
+    description: 'Workspace hors du périmètre du user (`workspace_mismatch`).',
+  })
+  async issueMagicLink(
+    @Body() dto: IssueTokenDto,
+    @Headers('x-forwarded-for') forwardedFor?: string,
+  ): Promise<{ magic_link_url: string }> {
+    const ipAddress = forwardedFor?.split(',')[0].trim();
+    const result = await this.ssoService.issueToken(
+      {
+        email: dto.email,
+        hubUserId: dto.hub_user_id,
+        workspaceId: dto.workspace_id,
+      },
+      ipAddress,
+    );
+    return { magic_link_url: result.autologin_url };
+  }
+
+  /**
    * Consommation — publique, appelée par la page console `/sso`.
    *
    * Publique par nécessité : l'appelant n'est justement pas encore connecté.
