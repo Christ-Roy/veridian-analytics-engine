@@ -345,4 +345,4 @@ Tant que cet endpoint n'existe pas, le skill doit faire le ballet via le bridge 
 - **i18n trous** : `console/src/components/goals/GoalDashboardDrawer.tsx:28,35,36,41,191-210,233`
 - **Sécu manquante** : `api/src/main.ts` (pas de helmet), `api/src/tools/tools.controller.ts:43` (favicon public)
 - **Bridge auth fragile** : `veridian-bridge/src/app.ts:147-194` (`getAdminToken` via super_admin password)
-- **Bugs legacy** : `/home/brunon5/Bureau/veridian-platform/veridian-analytics/todo/bugs-2026-05-23/`
+- **Bugs legacy** : `/home/brunon5/Bureau/veridian-platform/archive/legacy/veridian-analytics/todo/bugs-2026-05-23/`
