@@ -41,6 +41,8 @@
   },
   "overrides": {
     "picomatch": "^4.0.4",
-    "esbuild": "^0.28.1"
+    "esbuild": "^0.28.1",
+    "deepmerge-ts": ">=8.0.1",
+    "body-parser": ">=1.20.6 <2"
   }
 }
