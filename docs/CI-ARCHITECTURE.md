@@ -65,6 +65,29 @@ compose/base.yml -f compose/prod.yml up -d --remove-orphans`. Cf. §3.4bis.
 
 Trois hooks Husky bloquants. Constitution CI §3 : **jamais `--no-verify`**.
 
+### §2.0 ⚠️ Activation — obligatoire à chaque clone
+
+Ce dépôt n'a **pas de `package.json` à la racine** : il n'y a donc aucun
+`npm install` racine, donc aucun `prepare: husky` pour câbler les hooks. Le seul
+câblage est `core.hooksPath`, qui vit dans `.git/config` — **local et non
+versionné**. Après un `git clone` frais, les hooks sont donc INACTIFS.
+
+```bash
+./scripts/ci/install-hooks.sh          # à lancer une fois par clone
+git config --get core.hooksPath        # doit afficher .husky
+```
+
+**Le mode de panne est silencieux, et c'est ce qui le rend grave** : sans
+`core.hooksPath`, git cherche les hooks dans `.git/hooks/`, ne trouve rien, et
+pousse sans rien dire. On se croit couvert par un pre-push ultra-strict alors
+qu'on pousse à nu. Constaté sur ce dépôt le 2026-08-18 : `core.hooksPath`
+n'était pas positionné, les huit contrôles du pre-push étaient contournés en
+silence — état pire qu'une absence de hook, puisqu'il inspire une confiance
+qu'il ne mérite pas.
+
+Le réflexe de vérification, avant de faire confiance à un `git push` vert :
+`git config --get core.hooksPath`.
+
 ### §2.1 `pre-commit` (rapide, < 5s)
 
 1. **`check-protected-branch.sh`** — refuse les commits sur `main` (upstream).
