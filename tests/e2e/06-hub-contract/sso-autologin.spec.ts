@@ -21,20 +21,20 @@
  * à staging.
  */
 
-import { test, expect } from '@playwright/test';
-import { getTarget, type TargetName } from '../helpers/targets';
-import { signHubRequest } from '../helpers/hub-hmac';
+import { test, expect } from "@playwright/test";
+import { getTarget, type TargetName } from "../helpers/targets";
+import { signHubRequest } from "../helpers/hub-hmac";
 
-const TARGET = (process.env.TARGET ?? 'staging') as TargetName;
+const TARGET = (process.env.TARGET ?? "staging") as TargetName;
 const target = getTarget(TARGET);
 
-const ISSUE_PATH = '/api/sso.issueToken';
-const EXCHANGE_PATH = '/api/sso.exchange';
+const ISSUE_PATH = "/api/sso.issueToken";
+const EXCHANGE_PATH = "/api/sso.exchange";
 
-const HUB_SECRET = process.env.HUB_HMAC_SECRET ?? '';
-const E2E_EMAIL = process.env.SSO_E2E_EMAIL ?? '';
+const HUB_SECRET = process.env.HUB_HMAC_SECRET ?? "";
+const E2E_EMAIL = process.env.SSO_E2E_EMAIL ?? "";
 
-const PAYLOAD = { email: 'sso-e2e-reject@veridian-test.local' };
+const PAYLOAD = { email: "sso-e2e-reject@veridian-test.local" };
 
 async function postSigned(
   path: string,
@@ -45,10 +45,10 @@ async function postSigned(
   const rawBody = JSON.stringify(body);
   const headers = signHubRequest(rawBody, secret, opts.timestampOverride);
   if (opts.signatureOverride !== undefined) {
-    headers['X-Veridian-Hub-Signature'] = opts.signatureOverride;
+    headers["X-Veridian-Hub-Signature"] = opts.signatureOverride;
   }
   return fetch(`${target.engineUrl}${path}`, {
-    method: 'POST',
+    method: "POST",
     headers,
     body: rawBody,
   });
@@ -57,75 +57,75 @@ async function postSigned(
 test.describe(`SSO — rejets [${TARGET}]`, () => {
   test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");
 
-  test('la route existe (ne renvoie plus 404)', async () => {
+  test("la route existe (ne renvoie plus 404)", async () => {
     // Ce test a une valeur historique : avant ce chantier, TOUTES les routes
     // SSO renvoyaient 404 et le client tombait sur un écran de login. Un
     // retour du 404 signifierait que le module n'est plus monté.
     const res = await fetch(`${target.engineUrl}${ISSUE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(PAYLOAD),
     });
     expect(res.status).not.toBe(404);
   });
 
-  test('émission sans signature → 401', async () => {
+  test("émission sans signature → 401", async () => {
     const res = await fetch(`${target.engineUrl}${ISSUE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(PAYLOAD),
     });
     expect(res.status).toBe(401);
   });
 
-  test('émission sans timestamp → 401', async () => {
+  test("émission sans timestamp → 401", async () => {
     const res = await fetch(`${target.engineUrl}${ISSUE_PATH}`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'X-Veridian-Hub-Signature': 'deadbeef'.repeat(8),
+        "Content-Type": "application/json",
+        "X-Veridian-Hub-Signature": "deadbeef".repeat(8),
       },
       body: JSON.stringify(PAYLOAD),
     });
     expect(res.status).toBe(401);
   });
 
-  test('émission avec signature aléatoire → 401', async () => {
-    const res = await postSigned(ISSUE_PATH, PAYLOAD, 'secret-bidon', {
-      signatureOverride: 'ab'.repeat(32),
+  test("émission avec signature aléatoire → 401", async () => {
+    const res = await postSigned(ISSUE_PATH, PAYLOAD, "secret-bidon", {
+      signatureOverride: "ab".repeat(32),
     });
     expect(res.status).toBe(401);
   });
 
-  test('émission avec un timestamp hors fenêtre → 401', async () => {
-    const res = await postSigned(ISSUE_PATH, PAYLOAD, 'secret-bidon', {
+  test("émission avec un timestamp hors fenêtre → 401", async () => {
+    const res = await postSigned(ISSUE_PATH, PAYLOAD, "secret-bidon", {
       timestampOverride: Date.now() - 10 * 60 * 1000,
     });
     expect(res.status).toBe(401);
   });
 
-  test('un jeton inventé ne s\'échange pas contre une session', async () => {
+  test("un jeton inventé ne s'échange pas contre une session", async () => {
     // La route d'échange est publique par nécessité : sa seule protection est
     // l'imprévisibilité du jeton. On vérifie qu'elle ne cède pas.
     const res = await fetch(`${target.engineUrl}${EXCHANGE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token: 'ff'.repeat(32) }),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: "ff".repeat(32) }),
     });
     expect(res.status).toBe(401);
     const body = await res.text();
-    expect(body).not.toContain('access_token');
+    expect(body).not.toContain("access_token");
   });
 });
 
 test.describe(`SSO — flux nominal [${TARGET}]`, () => {
   test.skip(
     !HUB_SECRET || !E2E_EMAIL,
-    'HUB_HMAC_SECRET et SSO_E2E_EMAIL requis (jamais commités)',
+    "HUB_HMAC_SECRET et SSO_E2E_EMAIL requis (jamais commités)",
   );
   test.skip(target.isDemo, "La démo n'expose pas le SSO Hub");
 
-  test('un jeton signé ouvre une session, et ne fonctionne qu\'une fois', async () => {
+  test("un jeton signé ouvre une session, et ne fonctionne qu'une fois", async () => {
     const res = await postSigned(ISSUE_PATH, { email: E2E_EMAIL }, HUB_SECRET);
     expect(res.status).toBe(200);
 
@@ -134,17 +134,17 @@ test.describe(`SSO — flux nominal [${TARGET}]`, () => {
     // Le jeton DOIT être dans le fragment. S'il repassait en query string, il
     // recommencerait à fuiter dans les logs d'accès et le Referer — c'est
     // précisément la régression que ce test doit attraper.
-    expect(autologin_url).toContain('/sso#');
-    expect(autologin_url).not.toContain('?t=');
+    expect(autologin_url).toContain("/sso#");
+    expect(autologin_url).not.toContain("?t=");
     expect(expires_in).toBeLessThanOrEqual(300);
 
-    const token = autologin_url.split('#')[1];
+    const token = autologin_url.split("#")[1];
     expect(token).toMatch(/^[0-9a-f]{64}$/);
 
     // Premier échange : doit ouvrir une session utilisable.
     const first = await fetch(`${target.engineUrl}${EXCHANGE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
     expect(first.status).toBe(200);
@@ -162,14 +162,14 @@ test.describe(`SSO — flux nominal [${TARGET}]`, () => {
 
     // Rejeu : le même jeton ne doit plus rien ouvrir.
     const replay = await fetch(`${target.engineUrl}${EXCHANGE_PATH}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
     expect(replay.status).toBe(401);
   });
 
-  test('un email inconnu est refusé avec un code exploitable par le Hub', async () => {
+  test("un email inconnu est refusé avec un code exploitable par le Hub", async () => {
     // Renversement assumé de l'ancien test d'anti-énumération : la route est
     // derrière HubHmacGuard, et cet appel-ci EST signé. Qui arrive jusqu'ici
     // détient le secret maître ; lui masquer le motif ne protège personne et
@@ -179,11 +179,14 @@ test.describe(`SSO — flux nominal [${TARGET}]`, () => {
     // rejet ci-dessus vérifient qu'un appel NON signé ne va nulle part.
     const res = await postSigned(
       ISSUE_PATH,
-      { email: 'personne-inexistante@veridian-test.local' },
+      { email: "personne-inexistante@veridian-test.local" },
       HUB_SECRET,
     );
-    expect(res.status).toBe(404);
+    // 400 et non 404 : le client Hub (lib/auth/bounce-apps.ts) traite tout 404
+    // comme « endpoint pas implémente ». Un 404 ici rendrait un client inconnu
+    // indiscernable d'un engine pas deploye.
+    expect(res.status).toBe(400);
     const body = (await res.json()) as { error?: string };
-    expect(body.error).toBe('user_not_found');
+    expect(body.error).toBe("user_not_in_app");
   });
 });

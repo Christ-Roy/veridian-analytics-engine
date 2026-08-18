@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ForbiddenException,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +19,15 @@ import { hashToken } from '../common/crypto';
  * 401 opaque — l'anti-énumération est portée par `HubHmacGuard`, pas par
  * l'uniformité des messages.
  */
+
+/** Extrait le `hint` de la réponse NestJS (distingue deux user_not_in_app). */
+function errorHint(e: unknown): string | undefined {
+  const res = (e as { response?: unknown })?.response;
+  if (res && typeof res === 'object' && 'hint' in res) {
+    return String((res as { hint: unknown }).hint);
+  }
+  return undefined;
+}
 
 /** Extrait le code d'erreur métier de la réponse NestJS. */
 function errorCode(e: unknown): string | undefined {
@@ -236,7 +244,7 @@ describe('SsoService — émission', () => {
       .issueToken({ email: 'client@example.com' })
       .catch((e: unknown) => e);
 
-    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(err).toBeInstanceOf(BadRequestException);
     expect(errorCode(err)).toBe('user_not_active');
   });
 
@@ -249,6 +257,11 @@ describe('SsoService — émission', () => {
 
     expect(err).toBeInstanceOf(BadRequestException);
     expect(errorCode(err)).toBe('user_not_in_app');
+    // Même code que « email inconnu » — c'est voulu, le Hub n'en fait qu'une
+    // seule chose. Le `hint` garde la distinction de notre côté.
+    expect(errorHint(err)).toBe(
+      'account exists but has no analytics workspace',
+    );
   });
 
   it("distingue un email inconnu d'un compte non éligible", async () => {
@@ -269,9 +282,10 @@ describe('SsoService — émission', () => {
       .issueToken({ email: 'client@example.com' })
       .catch((e: unknown) => e);
 
-    expect(inconnu).toBeInstanceOf(NotFoundException);
-    expect(errorCode(inconnu)).toBe('user_not_found');
-    expect(suspendu).toBeInstanceOf(ForbiddenException);
+    expect(inconnu).toBeInstanceOf(BadRequestException);
+    expect(errorCode(inconnu)).toBe('user_not_in_app');
+    expect(errorHint(inconnu)).toBe('no analytics account for this email');
+    expect(suspendu).toBeInstanceOf(BadRequestException);
     expect(errorCode(suspendu)).toBe('user_not_active');
   });
 

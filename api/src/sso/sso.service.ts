@@ -3,7 +3,6 @@ import {
   ForbiddenException,
   Injectable,
   Logger,
-  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -139,16 +138,46 @@ export class SsoService {
    * `body.error`). Avec `error_code`, le Hub n'aurait vu qu'un « HTTP 400 » et
    * tout ce travail de typage n'aurait servi à rien.
    *
-   * Le vocabulaire suit le contrat Hub (ticket
-   * `veridian-hub/todo/2026-07-28-autologin-analytics-contrat-et-etat-reel.md`
-   * §3.1) partout où celui-ci nomme déjà un cas : `user_not_in_app` (400),
-   * `workspace_mismatch` (403).
+   * ── Les statuts HTTP sont calés sur le CLIENT RÉEL, pas sur le ticket ────
    *
-   * ⚠️ Écart connu et assumé avec ce contrat : il prévoit un 409
-   * `workspace_required` (liste des workspaces) quand `workspace_id` est
-   * absent, là où l'engine retombe sur le premier workspace du user. Aucun
-   * code Hub ne consomme encore cette route, donc rien n'est cassé — mais
-   * c'est un écart à traiter avant de brancher le Hub pour de bon.
+   * Le consommateur est `veridian-hub/lib/auth/bounce-apps.ts`. Lu, et non
+   * supposé — le ticket décrit une intention à une date, le client décrit ce
+   * qui arrivera vraiment à l'utilisateur. Ce que ce client fait des statuts :
+   *
+   *   400 + `error: "user_not_in_app"` → SEUL cas actionnable. Le Hub redirige
+   *                                      vers `/dashboard?app=…&hint=signup`.
+   *   400 + tout autre code            → `unreachable`, code conservé au log.
+   *   401 ou 403                       → `unreachable`, libellé « secret
+   *                                      désync ? ». Alarme d'infra.
+   *   404 / 405 / 501                  → `unreachable`, « not implemented ».
+   *
+   * D'où deux choix qui contredisent la lettre du ticket, délibérément :
+   *
+   * - Un email sans compte renvoie **400 `user_not_in_app`**, pas 404. Un 404
+   *   serait lu comme « la route n'existe pas » et rendrait un client inconnu
+   *   indiscernable d'un engine pas déployé — pire que le 401 d'origine. Le
+   *   cas « pas de compte » et le cas « compte sans workspace » partagent donc
+   *   le même code : c'est correct, le Hub ne peut de toute façon en faire
+   *   qu'une seule chose (proposer l'inscription). La distinction reste dans
+   *   `hint` et dans les logs, pour nous.
+   *
+   * - Un compte suspendu renvoie **400 `user_not_active`**, pas 403. Un 403
+   *   déclencherait une alerte « secret désync » chez le Hub : on ferait
+   *   chercher un problème HMAC pour un compte simplement désactivé.
+   *
+   * `workspace_mismatch` reste en **403** : le statut est juste, il colle au
+   * ticket, et le client actuel n'envoie jamais `workspace_id` — ce chemin est
+   * donc injoignable depuis le Hub d'aujourd'hui. Si le Hub se met à le
+   * fournir, il faudra qu'il cesse de confondre 403 et secret désync.
+   *
+   * ⚠️ DEUX ÉCARTS OUVERTS, hors périmètre de ce correctif :
+   *   1. Le Hub appelle `POST /api/sso/issue-magic-link` et attend
+   *      `{ magic_link_url }` ; l'engine expose `POST /api/sso.issueToken` et
+   *      renvoie `{ autologin_url, expires_in }`. Route ET forme divergent :
+   *      aujourd'hui le Hub prend un 404 et conclut « app injoignable ».
+   *   2. Le ticket prévoit un 409 `workspace_required` avec la liste des
+   *      workspaces quand `workspace_id` est absent ; l'engine retombe sur le
+   *      premier workspace du user.
    */
   async issueToken(
     input: IssueTokenInput,
@@ -181,8 +210,9 @@ export class SsoService {
       this.logger.log(
         `SSO refusé : aucun compte pour l'email demandé (hub_user_id=${input.hubUserId ?? 'n/a'})`,
       );
-      throw new NotFoundException({
-        error: 'user_not_found',
+      throw new BadRequestException({
+        error: 'user_not_in_app',
+        hint: 'no analytics account for this email',
         message: 'Aucun compte Analytics pour cet email',
       });
     }
@@ -194,8 +224,9 @@ export class SsoService {
       this.logger.warn(
         `SSO refusé : compte non actif (user_id=${user.id}, status=${user.status})`,
       );
-      throw new ForbiddenException({
+      throw new BadRequestException({
         error: 'user_not_active',
+        hint: 'analytics account exists but is not active',
         message: 'Compte Analytics inactif',
       });
     }
@@ -421,6 +452,7 @@ export class SsoService {
       this.logger.warn(`SSO refusé : user sans workspace (user_id=${userId})`);
       throw new BadRequestException({
         error: 'user_not_in_app',
+        hint: 'account exists but has no analytics workspace',
         message: 'Aucun workspace Analytics pour cet utilisateur',
       });
     }

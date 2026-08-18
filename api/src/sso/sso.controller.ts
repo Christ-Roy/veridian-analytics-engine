@@ -65,7 +65,7 @@ export class SsoController {
   @ApiResponse({
     status: 400,
     description:
-      "Demande inexploitable (`identity_required`, `identity_unresolvable`) ou utilisateur sans workspace Analytics (`user_not_in_app`). Le code est dans le champ `error`.",
+      "Code métier dans le champ `error`, précision dans `hint`. `user_not_in_app` : aucun compte Analytics pour cet email, OU compte sans workspace — c'est le seul cas sur lequel le Hub sait agir (il propose l'inscription). `user_not_active` : compte suspendu. `identity_required` / `identity_unresolvable` : demande inexploitable.",
   })
   @ApiResponse({
     status: 401,
@@ -75,11 +75,7 @@ export class SsoController {
   @ApiResponse({
     status: 403,
     description:
-      'Compte non actif (`user_not_active`) ou workspace hors du périmètre du user (`workspace_mismatch`).',
-  })
-  @ApiResponse({
-    status: 404,
-    description: 'Aucun compte Analytics pour cet email (`user_not_found`).',
+      "Workspace hors du périmètre du user (`workspace_mismatch`). Injoignable depuis le Hub actuel, qui n'envoie pas `workspace_id`.",
   })
   async issueToken(
     @Body() dto: IssueTokenDto,
