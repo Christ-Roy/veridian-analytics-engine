@@ -13,6 +13,24 @@
 # STATEFUL (volumes bind sur /opt/veridian-lab/analytics-engine d'ovh-prod) → group épinglé
 # `provider=ovh-prod`. Secrets = Nomad Variable `nomad/jobs/analytics-engine` (jamais en clair).
 # TLS = Let's Encrypt via l'ingress Traefik (websecure). engine+bridge bumpés par la CI.
+#
+# ---------------------------------------------------------------------------
+# BUDGET MÉMOIRE — recalibré le 2026-08-18, d'où vient la place
+# ---------------------------------------------------------------------------
+# Réservations : 512+256+384+192 = 1344 MiB  →  2048+128+384+192 = 2752 MiB
+# Delta = +1408 MiB. ovh-prod : 9628 MiB ordonnançables, 8684 réservés,
+# donc 944 MiB libres. Les 464 MiB manquants ne se prennent à personne :
+# `odh-google-maps-worker-soak-prod2` réserve 1024 MiB en batch priorité 7,
+# déclaré `preemptible=true` / `checkpoint` dans WORKLOAD-CONTRACTS.tsv, et
+# la préemption batch est activée au niveau du scheduler. analytics-engine
+# est priorité 80 : il préempte, le soak reprend sur son checkpoint. C'est
+# le mécanisme prévu, pas un arbitrage au détriment d'un service client.
+#
+# Il n'y avait AUCUN gras à reprendre sur ovh-prod : sur 36 tâches mesurées
+# sur 30 j, la plus grasse (hors la nôtre) est à 14 % de sa réservation pour
+# 128 MiB. Le nœud n'est pas gaspilleur, il est sous-réservé — d'où le
+# réflexe collectif d'ouvrir les `memory_max`, qui masque le symptôme.
+# ---------------------------------------------------------------------------
 
 variable "image_tag" {
   type        = string
@@ -137,10 +155,36 @@ CLICKHOUSE_PASSWORD={{ .CLICKHOUSE_PASSWORD }}
 {{ end }}
 EOH
       }
+      # Mesuré le 2026-08-18 sur 30 j (Grafana Cloud, ratio conso/réservé —
+      # jamais les absolus, faussés par le doublement pendant les déploiements).
+      #
+      # Pourquoi ces chiffres, et pas 512 / 7000 :
+      # ClickHouse 24.8 lit la limite CGROUP, donc `memory_max`, PAS `memory`.
+      # Sous le plafond de 7000 il s'attribuait `max_server_memory_usage` =
+      # 0,9 × 6,84 GiB = 6,15 GiB et dimensionnait ses caches dessus
+      # (mark_cache 5 GiB, uncompressed_cache 8 GiB), pour une réservation
+      # déclarée de 512 MiB. Le plafond ne bornait pas la consommation :
+      # il la FABRIQUAIT. Mesures à l'appui, même binaire, même charge :
+      #   plafond 7000 (prod)    → pic 1679 MiB (328 % de la réservation)
+      #   plafond 3072 (staging) → pic 1354 MiB (264 % de la réservation)
+      # La consommation suit le plafond, pas le travail réel.
+      #
+      # memory     = 2048 : le pic réel entre DANS la réservation, donc le
+      #   scheduler place enfin la tâche pour ce qu'elle pèse (avant, il la
+      #   croyait 3 fois plus petite qu'elle n'était).
+      # memory_max = 3072 : vrai fusible. 1,5 × la réservation, et surtout
+      #   ovh-prod n'a que 11,4 GiB : un plafond de 7000 sur une tâche parmi
+      #   les 11 qui le portaient laissait le noyau OOM-killer arbitrer à
+      #   l'échelle du NŒUD. Un fusible doit griller la tâche fautive, pas
+      #   emporter les autres services de production avec elle.
+      #
+      # Ne pas rouvrir ce plafond pour « laisser de l'air » à ClickHouse :
+      # c'est le geste qui a créé le problème (commit 9b264f0, [skip ci]).
+      # Si ClickHouse manque vraiment de mémoire, monter `memory` — pas le max.
       resources {
         cpu        = 500
-        memory     = 512
-        memory_max = 7000
+        memory     = 2048
+        memory_max = 3072
       }
     }
 
@@ -165,10 +209,14 @@ POSTGRES_PASSWORD={{ .BRIDGE_DB_PASSWORD }}
 {{ end }}
 EOH
       }
+      # Mesuré 2026-08-18 / 30 j : pic 40 MiB, soit 14 % de la réservation.
+      # 128 MiB reste 3,2 × le pic ; les 128 MiB rendus financent ClickHouse
+      # ci-dessus. Fusible à 512 = 4 × la réservation, largement de quoi
+      # encaisser un VACUUM ou une reindexation sans menacer le nœud.
       resources {
         cpu        = 200
-        memory     = 256
-        memory_max = 7000
+        memory     = 128
+        memory_max = 512
       }
     }
 
@@ -230,10 +278,14 @@ HUB_HMAC_SECRET={{ .HUB_HMAC_SECRET }}
 {{ end }}
 EOH
       }
+      # Mesuré 2026-08-18 / 30 j : pic 184 MiB, soit 48 % de la réservation.
+      # 384 MiB = 2,1 × le pic, on garde. Fusible à 1024 = 2,7 × la
+      # réservation : de quoi encaisser un pic de requêtes console sans
+      # laisser une fuite Node emporter le nœud.
       resources {
         cpu        = 400
         memory     = 384
-        memory_max = 7000
+        memory_max = 1024
       }
     }
 
@@ -291,10 +343,12 @@ BRIDGE_DATABASE_URL=postgresql://{{ .BRIDGE_DB_USER }}:{{ .BRIDGE_DB_PASSWORD }}
 {{ end }}
 EOH
       }
+      # Mesuré 2026-08-18 / 30 j : pic 67 MiB, soit 35 % de la réservation.
+      # 192 MiB = 2,9 × le pic, on garde. Fusible à 512 = 2,7 × la réservation.
       resources {
         cpu        = 300
         memory     = 192
-        memory_max = 7000
+        memory_max = 512
       }
     }
   }
