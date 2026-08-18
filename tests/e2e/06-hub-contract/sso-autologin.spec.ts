@@ -169,17 +169,21 @@ test.describe(`SSO — flux nominal [${TARGET}]`, () => {
     expect(replay.status).toBe(401);
   });
 
-  test('un email inconnu est indiscernable d\'un compte non éligible', async () => {
-    // Anti-énumération : le Hub ne doit pas pouvoir se servir de cette route
-    // pour découvrir quels emails ont un compte.
+  test('un email inconnu est refusé avec un code exploitable par le Hub', async () => {
+    // Renversement assumé de l'ancien test d'anti-énumération : la route est
+    // derrière HubHmacGuard, et cet appel-ci EST signé. Qui arrive jusqu'ici
+    // détient le secret maître ; lui masquer le motif ne protège personne et
+    // prive le Hub du signal « ce client n'a pas de compte Analytics », dont
+    // il a besoin pour afficher autre chose qu'un lien cassé (contrat Hub
+    // §3.1). L'anti-énumération, elle, est portée par le guard : les tests de
+    // rejet ci-dessus vérifient qu'un appel NON signé ne va nulle part.
     const res = await postSigned(
       ISSUE_PATH,
       { email: 'personne-inexistante@veridian-test.local' },
       HUB_SECRET,
     );
-    expect(res.status).toBe(401);
-    const body = await res.text();
-    expect(body).not.toContain('not found');
-    expect(body).not.toContain('unknown');
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe('user_not_found');
   });
 });

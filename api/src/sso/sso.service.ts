@@ -1,4 +1,11 @@
-import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ClickHouseService } from '../database/clickhouse.service';
 import { UsersService } from '../users/users.service';
@@ -82,9 +89,10 @@ export interface ConsumeTokenResult {
  *    moment-là. Un jeton ne peut donc pas servir à entrer dans le workspace
  *    d'un autre client, même si le Hub se trompe de cible plus tard.
  *
- * 4. **Énumération d'adresses email.** Toutes les issues négatives de
- *    l'émission renvoient la même erreur générique. Le Hub ne peut pas se
- *    servir de cette route pour découvrir quels emails ont un compte.
+ * 4. **Énumération d'adresses email.** Elle est bloquée par le guard, pas par
+ *    l'opacité des messages : sans signature HMAC valide, on n'atteint jamais
+ *    la logique d'émission. Les refus de `issueToken` sont donc typés et
+ *    distincts, délibérément — détail et raisonnement sur la méthode.
  *
  * ── Ce que ce mécanisme ne protège PAS ───────────────────────────────────
  *
@@ -107,22 +115,50 @@ export class SsoService {
   /**
    * Émet un jeton d'autologin pour un utilisateur.
    *
-   * Renvoie systématiquement `UnauthorizedException` en cas d'échec, quelle
-   * qu'en soit la raison (email inconnu, compte désactivé, pas de workspace,
-   * workspace demandé dont le user n'est pas membre). C'est délibéré : des
-   * messages distincts transformeraient cette route en oracle permettant de
-   * cartographier la base clients. L'appelant légitime est le Hub, qui sait
-   * déjà qui il demande — il n'a pas besoin du détail.
+   * ── Sur le détail des erreurs ────────────────────────────────────────────
+   *
+   * Cette route renvoie des codes d'erreur DISTINCTS et actionnables, et non
+   * un 401 opaque. Ce n'est pas un relâchement : la route est derrière
+   * `HubHmacGuard`, donc un appelant qui atteint cette méthode détient déjà le
+   * secret partagé — c'est-à-dire le pouvoir d'ouvrir la session de n'importe
+   * quel client. Lui cacher qu'un email est inconnu ne le freine en rien ;
+   * l'anti-énumération sur une route à secret maître ne protège personne.
+   *
+   * En revanche, le coût de l'opacité est réel : le Hub doit savoir DISTINGUER
+   * « ce client n'a pas de compte Analytics » (afficher autre chose qu'un lien
+   * cassé) de « mon workspace en base est périmé » (resynchroniser). Un 401
+   * unique le laisse sans recours face à l'utilisateur.
+   *
+   * Le seul refus volontairement muet reste celui du guard : avant
+   * authentification, rien ne filtre.
+   *
+   * ── Forme de l'erreur ────────────────────────────────────────────────────
+   *
+   * Le code part dans un champ `error`, PAS `error_code` : c'est celui que le
+   * client Analytics du Hub lit (`lib/analytics/client.ts`, extraction de
+   * `body.error`). Avec `error_code`, le Hub n'aurait vu qu'un « HTTP 400 » et
+   * tout ce travail de typage n'aurait servi à rien.
+   *
+   * Le vocabulaire suit le contrat Hub (ticket
+   * `veridian-hub/todo/2026-07-28-autologin-analytics-contrat-et-etat-reel.md`
+   * §3.1) partout où celui-ci nomme déjà un cas : `user_not_in_app` (400),
+   * `workspace_mismatch` (403).
+   *
+   * ⚠️ Écart connu et assumé avec ce contrat : il prévoit un 409
+   * `workspace_required` (liste des workspaces) quand `workspace_id` est
+   * absent, là où l'engine retombe sur le premier workspace du user. Aucun
+   * code Hub ne consomme encore cette route, donc rien n'est cassé — mais
+   * c'est un écart à traiter avant de brancher le Hub pour de bon.
    */
   async issueToken(
     input: IssueTokenInput,
     ipAddress?: string,
   ): Promise<IssueTokenResult> {
-    const genericFailure = () =>
-      new UnauthorizedException('Unable to issue SSO token');
-
     if (!input.email && !input.hubUserId) {
-      throw genericFailure();
+      throw new BadRequestException({
+        error: 'identity_required',
+        message: 'email ou hub_user_id requis',
+      });
     }
 
     // Résolution par email. `hub_user_id` seul n'est pas encore une clé de
@@ -133,7 +169,11 @@ export class SsoService {
       this.logger.warn(
         'issueToken appelé avec hub_user_id seul — non résoluble côté engine (aucune correspondance stockée)',
       );
-      throw genericFailure();
+      throw new BadRequestException({
+        error: 'identity_unresolvable',
+        message:
+          "hub_user_id seul n'est pas résoluble côté engine — fournir email",
+      });
     }
 
     const user = await this.usersService.findByEmail(input.email);
@@ -141,45 +181,26 @@ export class SsoService {
       this.logger.log(
         `SSO refusé : aucun compte pour l'email demandé (hub_user_id=${input.hubUserId ?? 'n/a'})`,
       );
-      throw genericFailure();
+      throw new NotFoundException({
+        error: 'user_not_found',
+        message: 'Aucun compte Analytics pour cet email',
+      });
     }
 
     // Un compte suspendu ou supprimé ne doit pas pouvoir être rouvert par le
-    // Hub. Sans ce contrôle, le SSO deviendrait un contournement de la
-    // désactivation de compte.
+    // Hub. Sans ce contrôle, le SSO deviendrait un contournement silencieux de
+    // la désactivation de compte.
     if (user.status !== 'active') {
       this.logger.warn(
         `SSO refusé : compte non actif (user_id=${user.id}, status=${user.status})`,
       );
-      throw genericFailure();
+      throw new ForbiddenException({
+        error: 'user_not_active',
+        message: 'Compte Analytics inactif',
+      });
     }
 
-    // Périmètre du jeton. Si le Hub nomme un workspace, on VÉRIFIE que le user
-    // en est membre — c'est le contrôle qui empêche un jeton d'ouvrir l'espace
-    // d'un autre client. Sinon, on retombe sur le premier workspace du user,
-    // jamais sur un workspace arbitraire.
-    let workspaceId: string;
-    if (input.workspaceId) {
-      const isMember = await this.isWorkspaceMember(user.id, input.workspaceId);
-      if (!isMember) {
-        this.logger.warn(
-          `SSO refusé : workspace demandé hors périmètre du user (user_id=${user.id}, workspace_id=${input.workspaceId})`,
-        );
-        throw genericFailure();
-      }
-      workspaceId = input.workspaceId;
-    } else {
-      const first = await this.getFirstWorkspaceForUser(user.id);
-      if (!first) {
-        // Un user sans workspace n'a nulle part où atterrir. Émettre un jeton
-        // le déposerait sur une console vide ; autant refuser franchement.
-        this.logger.warn(
-          `SSO refusé : user sans workspace (user_id=${user.id})`,
-        );
-        throw genericFailure();
-      }
-      workspaceId = first;
-    }
+    const workspaceId = await this.resolveWorkspace(user.id, input.workspaceId);
 
     const { token, hash } = generateToken();
     const now = new Date();
@@ -358,6 +379,52 @@ export class SsoService {
       this.configService.get<string>('APP_URL') ?? 'http://localhost:5173'
     ).replace(/\/+$/, '');
     return `${baseUrl}/sso#${token}`;
+  }
+
+  /**
+   * Détermine le workspace auquel le jeton sera lié — et refuse plutôt que de
+   * deviner.
+   *
+   * C'est LE contrôle qui empêche un jeton d'ouvrir l'espace d'un autre
+   * client. Si le Hub nomme un workspace, on VÉRIFIE l'appartenance du user
+   * avant de scoper le jeton dessus ; on ne fait jamais confiance à la cible
+   * annoncée par l'appelant, même authentifié. Sinon, on retombe sur le
+   * premier workspace du user — jamais sur un workspace arbitraire.
+   */
+  private async resolveWorkspace(
+    userId: string,
+    requestedWorkspaceId?: string,
+  ): Promise<string> {
+    if (requestedWorkspaceId) {
+      const isMember = await this.isWorkspaceMember(
+        userId,
+        requestedWorkspaceId,
+      );
+      if (!isMember) {
+        this.logger.warn(
+          `SSO refusé : workspace demandé hors périmètre du user (user_id=${userId}, workspace_id=${requestedWorkspaceId})`,
+        );
+        throw new ForbiddenException({
+          error: 'workspace_mismatch',
+          message: "L'utilisateur n'a pas accès à ce workspace",
+        });
+      }
+      return requestedWorkspaceId;
+    }
+
+    const first = await this.getFirstWorkspaceForUser(userId);
+    if (!first) {
+      // Un user sans workspace n'a nulle part où atterrir. Émettre un jeton le
+      // déposerait sur une console vide ; autant refuser franchement, et le
+      // dire assez précisément pour que le Hub propose l'activation plutôt
+      // qu'une erreur brute.
+      this.logger.warn(`SSO refusé : user sans workspace (user_id=${userId})`);
+      throw new BadRequestException({
+        error: 'user_not_in_app',
+        message: 'Aucun workspace Analytics pour cet utilisateur',
+      });
+    }
+    return first;
   }
 
   private async isWorkspaceMember(

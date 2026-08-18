@@ -63,9 +63,23 @@ export class SsoController {
     },
   })
   @ApiResponse({
+    status: 400,
+    description:
+      "Demande inexploitable (`identity_required`, `identity_unresolvable`) ou utilisateur sans workspace Analytics (`user_not_in_app`). Le code est dans le champ `error`.",
+  })
+  @ApiResponse({
     status: 401,
     description:
-      "Signature invalide, ou compte non éligible. Réponse volontairement identique dans les deux cas : distinguer les motifs permettrait d'énumérer les comptes existants.",
+      'Signature HMAC absente, invalide ou hors fenêtre anti-rejeu. Refus volontairement muet : avant authentification, rien ne filtre.',
+  })
+  @ApiResponse({
+    status: 403,
+    description:
+      'Compte non actif (`user_not_active`) ou workspace hors du périmètre du user (`workspace_mismatch`).',
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Aucun compte Analytics pour cet email (`user_not_found`).',
   })
   async issueToken(
     @Body() dto: IssueTokenDto,

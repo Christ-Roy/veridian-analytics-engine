@@ -1,4 +1,9 @@
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { SsoService } from './sso.service';
 import { hashToken } from '../common/crypto';
@@ -7,9 +12,23 @@ import { hashToken } from '../common/crypto';
  * Tests du cœur de sécurité du SSO.
  *
  * On teste ici ce qui, s'il cassait, donnerait une prise de contrôle de compte
- * client : le rejeu, l'expiration, le cloisonnement entre workspaces, et le
- * refus d'énumérer les comptes existants.
+ * client : le rejeu, l'expiration et le cloisonnement entre workspaces.
+ *
+ * Sur l'émission, on vérifie AUSSI que chaque refus porte son code : le Hub
+ * doit pouvoir distinguer « ce client n'a pas de compte » de « mon workspace
+ * est périmé » (contrat Hub §3.1). C'est le remplacement assumé de l'ancien
+ * 401 opaque — l'anti-énumération est portée par `HubHmacGuard`, pas par
+ * l'uniformité des messages.
  */
+
+/** Extrait le code d'erreur métier de la réponse NestJS. */
+function errorCode(e: unknown): string | undefined {
+  const res = (e as { response?: unknown })?.response;
+  if (res && typeof res === 'object' && 'error' in res) {
+    return String((res as { error: unknown }).error);
+  }
+  return undefined;
+}
 
 interface FakeRow {
   id: string;
@@ -194,12 +213,15 @@ describe('SsoService — émission', () => {
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
     });
 
-    await expect(
-      service.issueToken({
+    const err = await service
+      .issueToken({
         email: 'client@example.com',
         workspaceId: 'ws-du-voisin',
-      }),
-    ).rejects.toThrow(UnauthorizedException);
+      })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(errorCode(err)).toBe('workspace_mismatch');
   });
 
   it('refuse un compte suspendu — le SSO ne doit pas contourner une désactivation', async () => {
@@ -210,22 +232,31 @@ describe('SsoService — émission', () => {
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
     });
 
-    await expect(
-      service.issueToken({ email: 'client@example.com' }),
-    ).rejects.toThrow(UnauthorizedException);
+    const err = await service
+      .issueToken({ email: 'client@example.com' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ForbiddenException);
+    expect(errorCode(err)).toBe('user_not_active');
   });
 
   it('refuse un user sans aucun workspace', async () => {
     const { service } = makeHarness({ users: { 'user-1': ACTIVE_USER } });
 
-    await expect(
-      service.issueToken({ email: 'client@example.com' }),
-    ).rejects.toThrow(UnauthorizedException);
+    const err = await service
+      .issueToken({ email: 'client@example.com' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('user_not_in_app');
   });
 
-  it("ne permet pas de distinguer un email inconnu d'un compte non éligible", async () => {
-    // Anti-énumération : les deux refus doivent être indiscernables, sinon la
-    // route devient un outil de cartographie de la base clients.
+  it("distingue un email inconnu d'un compte non éligible", async () => {
+    // Renversement assumé de l'ancien test d'anti-énumération. Cette route est
+    // derrière `HubHmacGuard` : qui l'atteint détient déjà le secret maître et
+    // peut ouvrir la session de n'importe quel client. Lui cacher qu'un email
+    // est inconnu ne protégeait personne, et privait le Hub du seul signal
+    // dont il a besoin pour afficher autre chose qu'un lien cassé.
     const { service } = makeHarness({
       users: { 'user-1': { ...ACTIVE_USER, status: 'suspended' } },
       memberships: [{ user_id: 'user-1', workspace_id: 'ws-alpha' }],
@@ -233,17 +264,36 @@ describe('SsoService — émission', () => {
 
     const inconnu = await service
       .issueToken({ email: 'personne@example.com' })
-      .catch((e: Error) => e);
+      .catch((e: unknown) => e);
     const suspendu = await service
       .issueToken({ email: 'client@example.com' })
-      .catch((e: Error) => e);
+      .catch((e: unknown) => e);
 
-    expect((inconnu as Error).message).toBe((suspendu as Error).message);
+    expect(inconnu).toBeInstanceOf(NotFoundException);
+    expect(errorCode(inconnu)).toBe('user_not_found');
+    expect(suspendu).toBeInstanceOf(ForbiddenException);
+    expect(errorCode(suspendu)).toBe('user_not_active');
   });
 
   it('refuse une demande sans identifiant', async () => {
     const { service } = makeHarness();
-    await expect(service.issueToken({})).rejects.toThrow(UnauthorizedException);
+    const err = await service.issueToken({}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('identity_required');
+  });
+
+  it("refuse un hub_user_id seul, et le dit — l'engine ne sait pas le résoudre", async () => {
+    // Le Hub peut légitimement croire que `hub_user_id` suffit : c'est le pont
+    // cross-app utilisé pour Notifuse. Ici il ne l'est pas (l'engine ne stocke
+    // aucune correspondance), et un refus muet l'aurait laissé chercher.
+    const { service } = makeHarness();
+
+    const err = await service
+      .issueToken({ hubUserId: '7f3a1c2e-0000-4000-8000-000000000001' })
+      .catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(BadRequestException);
+    expect(errorCode(err)).toBe('identity_unresolvable');
   });
 });
 
