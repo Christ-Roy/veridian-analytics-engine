@@ -219,9 +219,13 @@ jobs:
   # ─── Étage 2 : Deploy prod (Nomad via bastion) ────────────────────
   #
   # Migration Dokploy→Nomad (cluster 3 nœuds, Dokploy décommissionné 2026-07-10).
-  # Déploie le job versionné deploy/analytics-engine.nomad.hcl : SSH→bastion,
-  # token sourcé IN SITU, `nomad job plan`→`run -detach -var image_tag=prod-<sha>`.
-  # Rollback = auto_revert du job (stanza `update`) — Nomad ramène la version
+  # Déploie le job versionné deploy/analytics-engine.nomad.hcl via les VERBES
+  # CONTRAINTS du bastion (put-job / deploy / cleanup), servis par la commande
+  # forcée /usr/local/sbin/veridian-ci-deploy posée sur la clé
+  # analytics-engine-ci-deploy@github. La clé n'ouvre plus de shell : elle ne
+  # peut plus lire le jeton management Nomad, et l'application déployable est
+  # figée côté serveur (constat C4 de AUDIT-EXPOSITION.md).
+  # Rollback = auto_revert du job (stanza `update`) : Nomad ramène la version
   # saine si le déploiement échoue ses checks. Pas de job de rollback CI.
   deploy-prod:
     name: Deploy prod (Nomad)
@@ -236,7 +240,6 @@ jobs:
       IMAGE_TAG: ${{ needs.build.outputs.engine_tag }}
       JOB_FILE: deploy/analytics-engine.nomad.hcl
       NOMAD_JOB: analytics-engine
-      REMOTE_HCL: /tmp/analytics-engine-${{ github.run_id }}.nomad.hcl
     steps:
       - uses: actions/checkout@v4
 
@@ -262,94 +265,42 @@ jobs:
           echo "::error::impossible de récupérer la clé SSH du bastion"
           exit 1
 
-      # HCL DU REPO (déclare `variable "image_tag"`), jamais la copie du bastion.
-      - name: Copy HCL to bastion
+      # Le HCL DU REPO (celui qui déclare `variable "image_tag"`) part sur STDIN
+      # du verbe `put-job`, au lieu d'un scp vers un chemin choisi par le CI. Le
+      # bastion vérifie lui-même que ce HCL déclare bien le job `analytics-engine`
+      # avant de l'accepter, puis le range hors de portée du runner.
+      - name: Dépôt du HCL sur le bastion (put-job prod)
         run: |
-          scp -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new \
-            "$JOB_FILE" \
-            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}:$REMOTE_HCL"
-
-      # Sauvegarde canonique + pré-pull authentifié sur ovh-prod + deploy +
-      # monitoring CIBLÉ (canon prospection, ticket NOMAD-GITOPS §4 pièges).
-      # (2) Nomad ne pull pas ghcr privé → pré-pull via prod-pub (auth GHCR déjà
-      # en place) ; (4) monitor du DeploymentID EXACT via Evaluation ID
-      # (pas un poll `job status | grep successful` qui lit le déploiement précédent).
-      - name: Pré-pull + nomad plan + run -detach + monitor ciblé
-        run: |
-          ssh -i ~/.ssh/id_ed25519 \
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
             "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
-            "IMAGE_TAG='${IMAGE_TAG}' REMOTE_HCL='${REMOTE_HCL}' bash -s" <<'REMOTE'
-          set -euo pipefail
-          source ~/credentials/nomad-bastion.env
-          export NOMAD_ADDR NOMAD_TOKEN="$NOMAD_MGMT_TOKEN"
+            "put-job prod" < "$JOB_FILE"
 
-          echo "== nomad job validate =="
-          /usr/bin/nomad job validate -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL"
-          echo "== nomad job plan (diff, inoffensif) =="
-          set +e
-          PLAN_OUTPUT=$(/usr/bin/nomad job plan -no-color \
-            -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" 2>&1)
-          PLAN_STATUS=$?
-          set -e
-          printf '%s\n' "$PLAN_OUTPUT"
-          case "$PLAN_STATUS" in
-            0) echo "plan sans création ou destruction d'allocation" ;;
-            1) echo "plan avec remplacement d'allocation attendu" ;;
-            *) echo "::error::nomad job plan a échoué (code=$PLAN_STATUS)"; exit "$PLAN_STATUS" ;;
-          esac
-          MODIFY_INDEX=$(printf '%s\n' "$PLAN_OUTPUT" \
-            | sed -n 's/^Job Modify Index: \([0-9][0-9]*\)$/\1/p' | tail -1)
-          RUN_INDEX_ARGS=()
-          [ -n "$MODIFY_INDEX" ] && RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")
+      # Un seul verbe contraint remplace l'ancien heredoc `bash -s`. Le pré-pull
+      # authentifié sur ovh-prod, le `nomad job validate`, le `plan`, le
+      # `run -detach -check-index` et le suivi du DeploymentID EXACT vivent
+      # désormais dans /usr/local/sbin/veridian-ci-deploy, côté bastion. Le
+      # rollback reste l'`auto_revert` de la stanza `update` du job.
+      #
+      # ⚠ Les deux sauvegardes pré-déploiement (veridian-node-backup.sh puis
+      # prod-r2-backup.sh) étaient jouées ici avec le jeton management ; elles
+      # relèvent maintenant du pré-hook serveur, qui n'est pas encore déclaré
+      # pour analytics-engine/prod dans veridian-ci-deploy. Point signalé pour
+      # arbitrage : ce workflow ne peut plus les déclencher lui-même sans
+      # rouvrir un shell sur le bastion, ce qui est précisément ce que le
+      # correctif C4 supprime.
+      - name: Déploiement Nomad (deploy prod)
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
+            "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
+            "deploy prod ${IMAGE_TAG}"
 
-          # Le groupe redémarre ClickHouse et PostgreSQL. Réutilise les deux
-          # runners canoniques : snapshot logique cross-nœud, puis copie R2 des
-          # six PostgreSQL. Toute sauvegarde vide ou non vérifiée bloque le run.
-          echo "== sauvegarde stateful cross-nœud pré-déploiement =="
-          /home/brunon5/nomad-veridian/scripts/veridian-node-backup.sh
-          echo "== sauvegarde PostgreSQL hors site vers R2 =="
-          /home/brunon5/all-cron/backups/prod-r2-backup.sh
-
-          echo "== pré-pull engine+bridge sur ovh-prod =="
-          PULLED=""
-          for attempt in 1 2 3; do
-            if timeout 240s ssh -n -o BatchMode=yes -o ConnectTimeout=15 prod-pub \
-              "docker pull ghcr.io/christ-roy/veridian-analytics-engine:${IMAGE_TAG} && docker pull ghcr.io/christ-roy/veridian-analytics-bridge:${IMAGE_TAG}"; then
-              PULLED=1
-              break
-            fi
-            echo "pré-pull prod tentative $attempt/3 en échec"
-            sleep $((attempt * 10))
-          done
-          [ -n "$PULLED" ] || { echo "::error::pré-pull prod impossible après 3 tentatives"; exit 1; }
-
-          # (4) run -detach → Evaluation ID → DeploymentID → monitor CE déploiement.
-          # Si failed → update{auto_revert} a déjà ramené la version saine.
-          echo "== nomad job run -detach + monitor ciblé (image_tag=${IMAGE_TAG}) =="
-          EVAL=$(/usr/bin/nomad job run -detach "${RUN_INDEX_ARGS[@]}" \
-            -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" \
-            | grep -oP 'Evaluation ID:\s+\K\S+')
-          echo "eval: ${EVAL:-none}"
-          DEP=""
-          for i in $(seq 1 15); do
-            DEP=$(/usr/bin/nomad eval status -json "$EVAL" 2>/dev/null | python3 -c 'import sys,json;print(json.load(sys.stdin).get("DeploymentID") or "")' 2>/dev/null || true)
-            [ -n "$DEP" ] && break
-            sleep 2
-          done
-          if [ -z "$DEP" ]; then
-            echo "Pas de déploiement créé (job inchangé = no-op) → OK"
-          else
-            echo "deployment: $DEP — monitoring jusqu'à terminal…"
-            /usr/bin/nomad deployment status -monitor "$DEP"
-          fi
-          REMOTE
-
-      - name: Cleanup remote HCL
+      # Retire le HCL déposé côté bastion, que le déploiement ait réussi ou non.
+      - name: Cleanup du matériel déposé sur le bastion
         if: always()
         run: |
-          ssh -i ~/.ssh/id_ed25519 \
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
             "${{ secrets.NOMAD_BASTION_USER }}@${{ secrets.NOMAD_BASTION_HOST }}" \
-            "rm -f '$REMOTE_HCL'" || true
+            "cleanup prod" || true
 
       - name: Cleanup secrets
         if: always()
