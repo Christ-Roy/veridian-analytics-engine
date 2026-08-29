@@ -39,16 +39,32 @@ for hcl in "$prod_hcl" "$staging_hcl"; do
   require_count "$hcl" 'shutdown_delay = "10s"' 2 "shutdown propre app+bridge incomplet dans $(basename "$hcl")"
 done
 
-require_fixed "$prod_ci" 'veridian-node-backup.sh' 'backup ClickHouse cross-nœud prod absent'
-require_fixed "$prod_ci" 'prod-r2-backup.sh' 'backup PostgreSQL R2 prod absent'
-require_fixed "$prod_ci" 'pré-pull prod impossible après 3 tentatives' 'retry pré-pull prod absent'
-require_fixed "$staging_ci" 'pré-pull staging impossible après 3 tentatives' 'retry pré-pull staging absent'
-require_fixed "$prod_ci" 'RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")' 'check-index prod absent'
-require_fixed "$staging_ci" 'RUN_INDEX_ARGS=(-check-index "$MODIFY_INDEX")' 'check-index staging absent'
-require_fixed "$prod_ci" 'nomad job plan a échoué' 'plan prod non fail-closed'
-require_fixed "$staging_ci" 'nomad job plan a échoué' 'plan staging non fail-closed'
-reject_fixed "$prod_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan prod masquée'
-reject_fixed "$staging_ci" 'nomad job plan -var "image_tag=${IMAGE_TAG}" "$REMOTE_HCL" || true' 'erreur de plan staging masquée'
+# Déploiement via les VERBES CONTRAINTS du bastion (constat C4 de
+# AUDIT-EXPOSITION.md). La clé analytics-engine-ci-deploy@github porte une
+# commande forcée `/usr/local/sbin/veridian-ci-deploy analytics-engine` : elle
+# n'ouvre plus de shell et ne peut plus lire le jeton management Nomad.
+#
+# Les invariants d'exécution (pré-pull authentifié avec retry, `job validate`,
+# `plan` fail-closed, `run -detach -check-index`, suivi du DeploymentID exact,
+# sauvegardes pré-déploiement prod) ne sont donc plus assertables ICI : ils
+# vivent dans le script serveur, hors de ce dépôt. Le contrat qui les décrit est
+# ~/veridian/secrets-migration/C4-CONTRAT-CI.md sur le bastion.
+#
+# Ce que ce gate garde sous contrôle côté dépôt : les workflows passent bien par
+# les verbes, et ne réouvrent jamais un shell distant.
+require_fixed "$prod_ci" '"put-job prod" < "$JOB_FILE"' 'dépôt du HCL prod par put-job absent'
+require_fixed "$prod_ci" '"deploy prod ${IMAGE_TAG}"' 'déploiement prod par verbe contraint absent'
+require_fixed "$prod_ci" '"cleanup prod" || true' 'cleanup prod côté bastion absent'
+require_fixed "$staging_ci" '"put-job staging" < "$JOB_FILE"' 'dépôt du HCL staging par put-job absent'
+require_fixed "$staging_ci" '"deploy staging ${IMAGE_TAG}"' 'déploiement staging par verbe contraint absent'
+require_fixed "$staging_ci" '"cleanup staging" || true' 'cleanup staging côté bastion absent'
+require_fixed "$staging_ci" '"smoke staging"' 'smoke staging par verbe contraint absent'
+reject_fixed "$prod_ci" 'bash -s"' 'shell distant réouvert sur le bastion depuis prod-ci'
+reject_fixed "$staging_ci" 'bash -s"' 'shell distant réouvert sur le bastion depuis staging-deploy'
+reject_fixed "$prod_ci" 'nomad-bastion.env' 'jeton Nomad encore sourcé depuis la CI prod'
+reject_fixed "$staging_ci" 'nomad-bastion.env' 'jeton Nomad encore sourcé depuis la CI staging'
+require_fixed "$prod_ci" '-o BatchMode=yes' 'BatchMode absent des SSH prod (clés en no-pty)'
+require_fixed "$staging_ci" '-o BatchMode=yes' 'BatchMode absent des SSH staging (clés en no-pty)'
 require_fixed "$structural" "'^deploy/.*\\.nomad\\.hcl$'" 'HCL Nomad absent du structural gate'
 require_fixed "$onprem_gate" '- "deploy/*.nomad.hcl"' 'HCL Nomad absent du trigger E2E on-premise'
 require_fixed "$onprem_gate" '- ".github/workflows/staging-deploy.yml"' 'workflow staging absent du trigger E2E on-premise'
