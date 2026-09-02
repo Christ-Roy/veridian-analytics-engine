@@ -63,6 +63,24 @@ FROM node:22-alpine AS production
 
 WORKDIR /app
 
+# === 2026-09-02 === correctifs système.
+#
+# Ce stage n'avait AUCUN `apk upgrade` : les paquets présents dans
+# node:22-alpine (libssl3, libcrypto3, busybox, zlib…) restaient donc à la
+# version publiée le jour de construction de l'image de base, indéfiniment.
+# L'image de production n'a jamais reçu de correctif système, quel que soit le
+# nombre de constructions.
+#
+# 🔴 Et cette couche n'a d'effet que si elle est RÉELLEMENT EXÉCUTÉE :
+# `--no-cache` est une option d'apk, elle ne désactive PAS le cache de couches
+# de buildkit. Tant que le digest de node:22-alpine ne bouge pas, la clé de
+# cache est stable et `cache-from: type=gha` resservirait cette couche sans
+# jamais la jouer (mesuré sur notifuse-veridian, run 33254429451 :
+# `RUN apk upgrade … CACHED`). C'est pourquoi les trois workflows qui
+# construisent ce fichier portent `no-cache-filters: production` + `pull: true`.
+# Ne PAS renommer ce stage sans les corriger.
+RUN apk upgrade --no-cache
+
 # SHA du commit déployé (injecté par la CI via --build-arg GIT_SHA=${GITHUB_SHA}).
 # Exposé au runtime dans ENV GIT_SHA → /api/health.gitSha. Permet au verdict de
 # deploy prod de confirmer que LE BON code est servi (pas juste un code sain),

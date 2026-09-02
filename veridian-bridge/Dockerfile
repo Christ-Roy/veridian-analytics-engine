@@ -1,11 +1,20 @@
-FROM node:22-alpine
+FROM node:22-alpine AS runtime
 
-# Patch the alpine base openssl ahead of node:22-alpine rebumping its base:
-# CVE-2026-45447 (HIGH) in libssl3/libcrypto3 3.5.6-r0 is fixed in 3.5.7-r0.
-# Trivy Étage 2 (image scan, bloquant) fails the staging deploy otherwise.
-# Real fix (a patched version exists) — NOT a .trivyignore exception.
-# Remove once node:22-alpine ships a base with openssl >= 3.5.7-r0.
-RUN apk upgrade --no-cache libssl3 libcrypto3
+# Patch the alpine base ahead of node:22-alpine rebumping its base.
+# Historiquement ciblé sur libssl3/libcrypto3 (CVE-2026-45447), désormais
+# ÉLARGI À TOUS LES PAQUETS : nommer les paquets à corriger un par un oblige à
+# repasser derrière chaque nouvelle CVE, et la liste est toujours en retard
+# d'une publication. `apk upgrade` sans argument remonte tout ce qui a un
+# correctif, ce qui est exactement l'intention.
+#
+# 🔴 Cette couche n'a d'effet que si elle est RÉELLEMENT EXÉCUTÉE : `--no-cache`
+# est une option d'apk, elle ne désactive PAS le cache de couches de buildkit.
+# Tant que le digest de node:22-alpine ne bouge pas, la clé de cache est stable
+# et `cache-from: type=gha` resservait cette couche sans jamais la jouer
+# (mesuré sur notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+# D'où le nom de stage `runtime` et `no-cache-filters: runtime` + `pull: true`
+# dans les workflows. Ne PAS renommer ce stage sans les corriger.
+RUN apk upgrade --no-cache
 
 WORKDIR /app
 

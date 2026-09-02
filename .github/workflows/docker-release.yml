@@ -74,6 +74,14 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          # === 2026-09-02 === le stage `production` est EXCLU du cache de couches
+          # et l'image de base est re-résolue. `RUN apk upgrade --no-cache` ne se
+          # réexécute jamais tant que sa clé de cache est stable, or elle l'est :
+          # `--no-cache` est une option d'apk, pas du cache de couches (mesuré sur
+          # notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+          # Sans cette exclusion, l'image ne reçoit AUCUN correctif système.
+          no-cache-filters: production
+          pull: true
           build-args: |
             GIT_COMMIT=${{ steps.git-info.outputs.commit-sha }}
             GIT_COMMIT_SHORT=${{ steps.git-info.outputs.commit-short-sha }}

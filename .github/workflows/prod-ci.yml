@@ -169,6 +169,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:latest
           cache-from: type=gha,scope=engine-prod
           cache-to: type=gha,scope=engine-prod,mode=max
+          # === 2026-09-02 === le stage `production` est EXCLU du cache de couches
+          # et l'image de base est re-résolue. `RUN apk upgrade --no-cache` ne se
+          # réexécute jamais tant que sa clé de cache est stable, or elle l'est :
+          # `--no-cache` est une option d'apk, pas du cache de couches (mesuré sur
+          # notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+          # Sans cette exclusion, l'image ne reçoit AUCUN correctif système.
+          no-cache-filters: production
+          pull: true
 
       - name: Build + push bridge
         uses: docker/build-push-action@v5
@@ -181,6 +189,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:latest
           cache-from: type=gha,scope=bridge-prod
           cache-to: type=gha,scope=bridge-prod,mode=max
+          # === 2026-09-02 === le stage `runtime` est EXCLU du cache de couches
+          # et l'image de base est re-résolue. `RUN apk upgrade --no-cache` ne se
+          # réexécute jamais tant que sa clé de cache est stable, or elle l'est :
+          # `--no-cache` est une option d'apk, pas du cache de couches (mesuré sur
+          # notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+          # Sans cette exclusion, l'image ne reçoit AUCUN correctif système.
+          no-cache-filters: runtime
+          pull: true
 
   # if explicite : `build` est gated `if: always()` (à cause du
   # structural-gate qui peut être skipped sur workflow_dispatch). Sans

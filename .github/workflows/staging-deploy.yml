@@ -416,6 +416,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.ENGINE_IMAGE }}:${{ github.ref_name == 'staging' && 'staging-latest' || 'veridian-latest' }}
           cache-from: type=gha,scope=engine
           cache-to: type=gha,scope=engine,mode=max
+          # === 2026-09-02 === le stage `production` est EXCLU du cache de couches
+          # et l'image de base est re-résolue. `RUN apk upgrade --no-cache` ne se
+          # réexécute jamais tant que sa clé de cache est stable, or elle l'est :
+          # `--no-cache` est une option d'apk, pas du cache de couches (mesuré sur
+          # notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+          # Sans cette exclusion, l'image ne reçoit AUCUN correctif système.
+          no-cache-filters: production
+          pull: true
 
       - name: Build + push bridge image
         uses: docker/build-push-action@v5
@@ -428,6 +436,14 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.BRIDGE_IMAGE }}:${{ github.ref_name == 'staging' && 'staging-latest' || 'veridian-latest' }}
           cache-from: type=gha,scope=bridge
           cache-to: type=gha,scope=bridge,mode=max
+          # === 2026-09-02 === le stage `runtime` est EXCLU du cache de couches
+          # et l'image de base est re-résolue. `RUN apk upgrade --no-cache` ne se
+          # réexécute jamais tant que sa clé de cache est stable, or elle l'est :
+          # `--no-cache` est une option d'apk, pas du cache de couches (mesuré sur
+          # notifuse-veridian, run 33254429451 : `RUN apk upgrade … CACHED`).
+          # Sans cette exclusion, l'image ne reçoit AUCUN correctif système.
+          no-cache-filters: runtime
+          pull: true
 
       # Engine = upstream staminads. WARN-ONLY (continue-on-error). On suit
       # les CVE upstream sans bloquer un release Veridian — l'équipe upstream
